@@ -1,0 +1,87 @@
+# ============================================================
+# SECRETS
+# ============================================================
+
+.env
+.env.*
+!.env.example
+
+.secrets/
+*.secret
+
+# Private key / certificate material
+*.pem
+*.p12
+*.pfx
+*.jks
+id_rsa
+id_ed25519
+
+# Production credential storage
+data/pharmacy-master-admin/deployment-credentials/
+data/pharmacy-master-admin/.deployment-secrets-key
+
+# ============================================================
+# DEPENDENCIES
+# ============================================================
+
+node_modules/
+
+# ============================================================
+# BUILDS
+# ============================================================
+
+dist/
+build/
+.next/
+out/
+coverage/
+
+# ============================================================
+# RUNTIME
+# ============================================================
+
+.sessions/
+logs/
+*.log
+*.pid
+*.sock
+tmp/
+temp/
+.cache/
+
+# ============================================================
+# BACKUPS / ARCHIVES
+# ============================================================
+
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.bak*
+backup*/
+backups/
+_archive/
+_safe-backups/
+
+# ============================================================
+# PRODUCTION / GENERATED DATA
+# ============================================================
+
+output/
+data/
+assets/
+attached_assets/
+releases/
+
+# Curated recovery/test fixtures ARE intentionally tracked
+!fixtures/
+!fixtures/**
+
+# ============================================================
+# LOCAL EDITOR / OS
+# ============================================================
+
+.DS_Store
+.vscode/
+.idea/

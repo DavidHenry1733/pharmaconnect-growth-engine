@@ -1,0 +1,16 @@
+{
+  "brand": "InboxingProWeb",
+  "service": "Web Design",
+  "city": "Sheffield",
+  "areas": [
+    "Ecclesall",
+    "Fulwood",
+    "Hillsborough"
+  ],
+  "exportToWordPress": false,
+  "wordpressStatus": "draft",
+  "wordpressMode": "update-existing",
+  "images": {
+    "enabled": false
+  }
+}
