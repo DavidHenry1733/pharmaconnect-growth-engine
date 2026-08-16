@@ -7229,10 +7229,14 @@ async function loadMarketUniverseV2(){
       return '<div class="metric-card"><div class="metric-value">'+esc(safe(row[1]))+'</div><div class="metric-label">'+esc(row[0])+'</div></div>';
     }).join('');
     const groupDefs=[
+      ['MONEY_KEYWORD','Money Keywords'],
+      ['COMMERCIAL_SUPPORT','Commercial Support'],
+      ['AUTHORITY_SUPPORT','Authority / Content Support'],
+      ['PATIENT_SERVICE','Excluded Patient Searches'],
+      ['AMBIGUOUS_REVIEW','Review Required'],
       ['UNTAPPED','Untapped Commercial Opportunities'],
       ['WEAK_COVERAGE','Weak Coverage'],
       ['NEW_MARKET','New Market Opportunities'],
-      ['AUTHORITY_SUPPORT','Authority / Supporting Topics'],
     ];
     groupsEl.innerHTML=groupDefs.map(function(group){
       const rows=(data.universe||[]).filter(function(item){return item.gapType===group[0]||item.type===group[0];}).slice(0,8);
