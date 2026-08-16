@@ -3366,6 +3366,20 @@ function renderCommercialIntelligenceDashboard(dashboard){
           '<div id="muv2Groups" style="margin-top:10px"></div>'+
         '</div>'+
 
+        '<div style="margin-top:16px">'+
+          '<h4>Growth Plan Input</h4>'+
+          '<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">Read-only contract view separating eligible Growth Plan opportunities from excluded, review and market-expansion evidence.</p>'+
+          '<div id="gpiSummary" class="metric-grid" style="margin-top:10px"></div>'+
+          '<div id="gpiGaps" class="metric-grid" style="margin-top:10px"></div>'+
+        '</div>'+
+
+        '<div style="margin-top:16px">'+
+          '<h4>Growth Plan Intelligence</h4>'+
+          '<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">Strategic action plan generated from the locked intelligence contract. No content is generated here.</p>'+
+          '<div id="gpiv1Summary" class="metric-grid" style="margin-top:10px"></div>'+
+          '<div id="gpiv1Actions" style="margin-top:10px"></div>'+
+        '</div>'+
+
         '<div class="guidance-box" style="margin-top:14px">'+
           'Competitor qualification is based on commercial market fit, positive and negative keyword intent, UK ranking evidence and available own-site evidence. Industry relevance alone does not qualify a business as a direct competitor.'+
         '</div>'+
@@ -7256,9 +7270,81 @@ async function loadMarketUniverseV2(){
   }
 }
 
+async function loadGrowthPlanInputContract(){
+  const summaryEl=document.getElementById('gpiSummary');
+  const gapsEl=document.getElementById('gpiGaps');
+  if(!summaryEl||!gapsEl)return;
+  const safe=function(value){
+    if(value===null||value===undefined||value==='')return 'Not available';
+    const n=Number(value);
+    if(typeof value==='number'&&!Number.isFinite(value))return 'Not available';
+    return String(value);
+  };
+  try{
+    const slug=new URLSearchParams(location.search).get('slug')||'pharmaconnect';
+    const data=await api('/api/master-admin-platform/customers/'+encodeURIComponent(slug)+'/growth-plan-intelligence-input');
+    const s=data.summary||{};
+    const summary=[
+      ['Primary Commercial',s.primaryCommercialCount],
+      ['Supporting Commercial',s.supportingCommercialCount],
+      ['Authority Support',s.authoritySupportCount],
+      ['Market Expansion',s.marketExpansionCount],
+      ['Excluded',s.excludedCount],
+      ['Review Required',s.reviewRequiredCount],
+    ];
+    const gaps=[
+      ['Proven Untapped',s.provenUntappedCount],
+      ['Weak Coverage',s.provenWeakCoverageCount],
+      ['Defend/Improve',s.provenDefendImproveCount],
+      ['Insufficient Gap Evidence',s.insufficientGapEvidenceCount],
+    ];
+    summaryEl.innerHTML=summary.map(function(row){return '<div class="metric-card"><div class="metric-value">'+esc(safe(row[1]))+'</div><div class="metric-label">'+esc(row[0])+'</div></div>';}).join('');
+    gapsEl.innerHTML=gaps.map(function(row){return '<div class="metric-card"><div class="metric-value">'+esc(safe(row[1]))+'</div><div class="metric-label">'+esc(row[0])+'</div></div>';}).join('');
+  }catch(error){
+    summaryEl.innerHTML='<div class="guidance-box">Growth Plan Input has not been built yet.</div>';
+    gapsEl.innerHTML='';
+  }
+}
+
+async function loadGrowthPlanIntelligenceV1(){
+  const summaryEl=document.getElementById('gpiv1Summary');
+  const actionsEl=document.getElementById('gpiv1Actions');
+  if(!summaryEl||!actionsEl)return;
+  const safe=function(value){
+    if(value===null||value===undefined||value==='')return 'Not available';
+    const n=Number(value);
+    if(typeof value==='number'&&!Number.isFinite(value))return 'Not available';
+    return String(value);
+  };
+  try{
+    const slug=new URLSearchParams(location.search).get('slug')||'pharmaconnect';
+    const data=await api('/api/master-admin-platform/customers/'+encodeURIComponent(slug)+'/growth-plan-intelligence');
+    const s=data.summary||{};
+    const summary=[
+      ['Recommended Actions',s.totalActions],
+      ['High Priority',s.highPriorityActions],
+      ['Primary Demand',s.primaryCommercialDemand],
+      ['Supporting Demand',s.supportingDemand],
+      ['Proven Untapped',s.provenUntappedCount],
+      ['Needs More Evidence',s.insufficientEvidenceCount],
+    ];
+    summaryEl.innerHTML=summary.map(function(row){return '<div class="metric-card"><div class="metric-value">'+esc(safe(row[1]))+'</div><div class="metric-label">'+esc(row[0])+'</div></div>';}).join('');
+    const actions=(data.actions||[]).slice(0,8);
+    actionsEl.innerHTML=actions.length?'<table class="audit-table"><thead><tr><th>Action</th><th>Keyword</th><th>Demand</th><th>Priority</th><th>Gap</th><th>Competitor</th><th>Why</th></tr></thead><tbody>'+
+      actions.map(function(action){
+        return '<tr><td>'+esc(action.actionType||'Not available')+'</td><td>'+esc(action.primaryKeyword||'Not available')+'</td><td>'+esc(safe(action.combinedSearchDemand))+'</td><td>'+esc(action.priority||'LOW')+'</td><td>'+esc((action.gapEvidenceStatus||'')+' / '+(action.gapConfidence||''))+'</td><td>'+esc(action.bestCompetitorDomain||'Not available')+'</td><td>'+esc(action.rationale||'Not available')+'</td></tr>';
+      }).join('')+'</tbody></table>':'<div class="guidance-box">Growth Plan Intelligence has no actions yet.</div>';
+  }catch(error){
+    summaryEl.innerHTML='<div class="guidance-box">Growth Plan Intelligence has not been built yet.</div>';
+    actionsEl.innerHTML='';
+  }
+}
+
 loadVerifiedNationalCompetitorIntelligence();
 loadMarketOpportunityIntelligence();
 loadMarketUniverseV2();
+loadGrowthPlanInputContract();
+loadGrowthPlanIntelligenceV1();
 
 </script>
 </body>

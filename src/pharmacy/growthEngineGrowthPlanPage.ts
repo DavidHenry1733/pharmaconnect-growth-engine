@@ -17,6 +17,7 @@ import type {
 import { growthEngineWorkflowCss, renderGrowthEngineNavBar } from "./growthEngineWorkflowNav.ts";
 import { platformPlatformNavCss, renderPharmacyPlatformNavBar } from "./pharmacyPlatformNav.ts";
 import { customerReadinessLabel } from "./growthEngineOperationalActions.ts";
+import { readGrowthPlanIntelligenceV1 } from "./growthPlanIntelligenceV1Service.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -253,6 +254,21 @@ ${campaign ? `<form method="post" action="/api/growth-engine/${esc(slug)}/acknow
 </div>`;
 }
 
+function renderStrategicGrowthPlan(): string {
+  const strategy = readGrowthPlanIntelligenceV1();
+  if (!strategy) return "";
+  const actions = strategy.actions.slice(0, 5);
+  if (!actions.length) return "";
+  return `<div class="ge-panel">
+<h2>Market Opportunity Plan</h2>
+<p class="gp-section-note">These actions come from verified competitor and keyword evidence. They are strategy recommendations only — no pages or content are generated here.</p>
+<div class="gp-readiness">${actions.map((action) => `<div class="gp-ready-item complete">
+<strong>${esc(action.priority)} · ${esc(action.actionType.replace(/_/g, " "))}</strong>
+<span><strong>${esc(action.primaryKeyword)}</strong> — ${esc(action.rationale)} ${action.bestRankingUrl ? `Winning URL: ${esc(action.bestRankingUrl)}` : ""}</span>
+</div>`).join("")}</div>
+</div>`;
+}
+
 export function renderGrowthPlanV1Page(
   slug: string,
   options?: { prevUrl?: string; nextUrl?: string },
@@ -266,6 +282,7 @@ ${renderRecommendedCampaign(campaign)}
 ${renderWhyCampaign(campaign?.evidence || [])}
 ${renderWhatWillBeBuilt(campaign?.estimatedOutputs || null)}
 ${renderEstimatedOutcome(campaign?.expectedBenefits || [])}
+${renderStrategicGrowthPlan()}
 ${renderAlternatives(plan.alternatives)}
 ${renderReadiness(plan.readiness, plan.readyToGenerate)}
 ${renderGenerateCta(slug, campaign, plan.readyToGenerate)}`;
