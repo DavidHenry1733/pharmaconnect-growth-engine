@@ -7229,6 +7229,9 @@ async function loadMarketUniverseV2(){
       return '<div class="metric-card"><div class="metric-value">'+esc(safe(row[1]))+'</div><div class="metric-label">'+esc(row[0])+'</div></div>';
     }).join('');
     const groupDefs=[
+      ['CORE','Core Commercial Opportunities'],
+      ['ADJACENT','Adjacent/Broader Market Opportunities'],
+      ['BROAD','Broad Pharma Market Opportunities'],
       ['MONEY_KEYWORD','Money Keywords'],
       ['COMMERCIAL_SUPPORT','Commercial Support'],
       ['AUTHORITY_SUPPORT','Authority / Content Support'],
@@ -7239,7 +7242,7 @@ async function loadMarketUniverseV2(){
       ['NEW_MARKET','New Market Opportunities'],
     ];
     groupsEl.innerHTML=groupDefs.map(function(group){
-      const rows=(data.universe||[]).filter(function(item){return item.gapType===group[0]||item.type===group[0];}).slice(0,8);
+      const rows=(data.universe||[]).filter(function(item){return item.gapType===group[0]||item.type===group[0]||item.marketScope===group[0];}).slice(0,8);
       return '<div class="ci-card" style="margin-top:10px"><h5 style="margin:0 0 8px;color:#e2e8f0">'+esc(group[1])+'</h5>'+
         (rows.length?'<table class="audit-table"><thead><tr><th>Keyword</th><th>Volume</th><th>CPC</th><th>Difficulty</th><th>Intent</th><th>Gap</th><th>Score</th><th>Evidence</th></tr></thead><tbody>'+
           rows.map(function(item){

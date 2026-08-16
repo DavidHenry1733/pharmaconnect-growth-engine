@@ -11,6 +11,7 @@ export type CommercialIntentV2Type =
 export interface CommercialIntentV2Result {
   keyword: string;
   type: CommercialIntentV2Type;
+  marketScope: "CORE" | "ADJACENT" | "BROAD" | "NONE";
   commercialIntentScore: number;
   reasons: string[];
   matchedMarketSignals: string[];
@@ -54,6 +55,8 @@ const moneyServiceSignals = [
   "digital strategy",
   "branding",
   "growth",
+  "creative agency",
+  "creative agencies",
 ];
 
 const commercialSupportSignals = [
@@ -70,6 +73,13 @@ const commercialSupportSignals = [
   "grow your pharmacy",
   "promote",
   "promotion",
+  "leaflet",
+  "leaflets",
+  "letter",
+  "letters",
+  "promotional materials",
+  "patient engagement",
+  "digital transformation",
 ];
 
 const authoritySignals = [
@@ -81,6 +91,12 @@ const authoritySignals = [
   "best practice",
   "case study",
   "case studies",
+  "customer behaviour",
+  "online services",
+  "technology trends",
+  "digital trends",
+  "patient engagement",
+  "digital transformation",
 ];
 
 const patientServiceSignals = [
@@ -97,6 +113,9 @@ const patientServiceSignals = [
   "repeat prescription",
   "medicine",
   "medicines",
+  "ozempic",
+  "pharmacy4u",
+  "online pharmacies",
   "treatment",
   "symptoms",
   "cost of",
@@ -110,13 +129,30 @@ const navigationSignals = [
   "portal",
   "sign in",
   "numark login",
+  "pharma focus",
+  "pharmafocus",
+  "pharmaplace",
 ];
 
 const localSignals = [
   "near me",
   "chatham pharmacy",
+  "clock pharmacy",
+  "quays pharmacy",
+  "asda pharmacy",
+  "abbeyfield pharmacy",
+  "colchester",
   "chemist near me",
   "pharmacy near me",
+];
+
+const operationsIrrelevantSignals = [
+  "inventory management",
+  "pharmacovigilance",
+  "service provider",
+  "chain pharmacy",
+  "pharmacy seekers",
+  "media pharmacy",
 ];
 
 function includesAny(text: string, terms: string[]): string[] {
@@ -139,7 +175,15 @@ export function classifyCommercialIntentV2(rawKeyword: string): CommercialIntent
   const patient = includesAny(lower, patientServiceSignals);
   const nav = includesAny(lower, navigationSignals);
   const local = includesAny(lower, localSignals);
+  const operationsIrrelevant = includesAny(lower, operationsIrrelevantSignals);
   const wordOrderCommercial = hasForMarketPattern(lower);
+  const hasCoreMarket = /pharmac(?:y|ies|ists?)/i.test(lower);
+  const hasBroaderPharma = /\bpharma(?:ceutical)?\b/i.test(lower) && !hasCoreMarket;
+  const marketScope: CommercialIntentV2Result["marketScope"] =
+    hasCoreMarket ? "CORE" :
+    hasBroaderPharma && (commercial.length || wordOrderCommercial) ? "BROAD" :
+    hasBroaderPharma ? "ADJACENT" :
+    "NONE";
 
   const reasons: string[] = [];
   if (market.length) reasons.push(`Market signal: ${market.join(", ")}`);
@@ -150,11 +194,14 @@ export function classifyCommercialIntentV2(rawKeyword: string): CommercialIntent
   if (patient.length) reasons.push(`Patient-service negative signal: ${patient.join(", ")}`);
   if (nav.length) reasons.push(`Navigational negative signal: ${nav.join(", ")}`);
   if (local.length) reasons.push(`Local-pharmacy negative signal: ${local.join(", ")}`);
+  if (operationsIrrelevant.length) reasons.push(`Industry-irrelevant signal: ${operationsIrrelevant.join(", ")}`);
+  if (marketScope !== "NONE") reasons.push(`Market scope: ${marketScope}`);
 
   let type: CommercialIntentV2Type = "INDUSTRY_IRRELEVANT";
   if (nav.length) type = "NAVIGATIONAL";
   else if (patient.length && !wordOrderCommercial) type = "PATIENT_SERVICE";
   else if (local.length && !commercial.length) type = "LOCAL_PHARMACY";
+  else if (operationsIrrelevant.length && !wordOrderCommercial) type = "INDUSTRY_IRRELEVANT";
   else if (market.length && (commercial.length || wordOrderCommercial)) type = "MONEY_KEYWORD";
   else if (market.length && support.length) type = "COMMERCIAL_SUPPORT";
   else if (market.length && authority.length) type = "AUTHORITY_SUPPORT";
@@ -169,11 +216,15 @@ export function classifyCommercialIntentV2(rawKeyword: string): CommercialIntent
   if (patient.length) score -= 60;
   if (nav.length) score -= 70;
   if (local.length && !commercial.length) score -= 50;
+  if (operationsIrrelevant.length && !wordOrderCommercial) score -= 45;
+  if (marketScope === "BROAD") score -= 12;
+  if (marketScope === "ADJACENT") score -= 6;
   score = Math.max(0, Math.min(100, score));
 
   return {
     keyword,
     type,
+    marketScope,
     commercialIntentScore: score,
     reasons,
     matchedMarketSignals: market,
@@ -190,7 +241,7 @@ export function scoreCommercialOpportunityV2(input: {
   directCompetitorsRanking?: number;
   bestCompetitorPosition?: number | null;
   hasDomainGapEvidence?: boolean;
-}): { type: CommercialIntentV2Type; score: number; reasons: string[] } {
+}): { type: CommercialIntentV2Type; marketScope: CommercialIntentV2Result["marketScope"]; score: number; reasons: string[] } {
   const intent = classifyCommercialIntentV2(input.keyword);
   let score = intent.commercialIntentScore * 0.45;
   const volume = input.searchVolume || 0;
@@ -209,6 +260,7 @@ export function scoreCommercialOpportunityV2(input: {
   }
   return {
     type: intent.type,
+    marketScope: intent.marketScope,
     score: Math.max(0, Math.min(100, Math.round(score))),
     reasons: intent.reasons,
   };

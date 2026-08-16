@@ -5,7 +5,9 @@ import taxonomy from "../src/pharmacy/commercialIntentTaxonomyV2.ts";
 
 const { scoreCommercialOpportunityV2 } = taxonomy;
 const inputPath = "data/national-growth-engine/pharmaconnect-market-opportunity-intelligence-v2.json";
-const outputPath = "data/national-growth-engine/pharmaconnect-market-opportunity-intelligence-v2-reclassified.json";
+const outputPath = process.argv.includes("--b")
+  ? "data/national-growth-engine/pharmaconnect-market-opportunity-intelligence-v2-reclassified-b.json"
+  : "data/national-growth-engine/pharmaconnect-market-opportunity-intelligence-v2-reclassified.json";
 
 if (!fs.existsSync(inputPath)) {
   console.error(`Live/runtime V2 snapshot not found: ${inputPath}`);
@@ -36,6 +38,7 @@ const reclassified = {
     return {
       ...item,
       type,
+      marketScope: scored.marketScope,
       qualification,
       score: scored.score,
       priority: scored.score >= 80 ? "HIGH" : scored.score >= 60 ? "MEDIUM" : "LOW",
