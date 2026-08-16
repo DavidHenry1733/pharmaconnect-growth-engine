@@ -1,5 +1,6 @@
 import { readVerifiedNationalCompetitorIntelligence } from "../../../../../src/pharmacy/verifiedNationalCompetitorIntelligenceService.ts";
 import { readMarketOpportunityIntelligenceSnapshot } from "../../../../../src/pharmacy/marketOpportunityIntelligenceService.ts";
+import { readMarketUniverseV2Snapshot } from "../../../../../src/pharmacy/marketUniverseIntelligenceV2Service.ts";
 /**
  * Master Admin Platform V1 — JSON API for commercial control centre.
  */
@@ -537,6 +538,32 @@ router.get(
         readMarketOpportunityIntelligenceSnapshot();
 
       return res.json(intelligence);
+
+    } catch (error) {
+      return res.status(500).json({
+        error:
+          error instanceof Error ?
+          error.message :
+          String(error),
+      });
+    }
+  }
+);
+
+router.get(
+  "/master-admin-platform/customers/:slug/market-opportunity-intelligence-v2",
+  (req, res) => {
+    try {
+      const slug=String(req.params.slug || "");
+
+      if(slug !== "pharmaconnect"){
+        return res.status(400).json({
+          error:
+            "Market Universe Intelligence V2 is currently available for the PharmaConnect national platform."
+        });
+      }
+
+      return res.json(readMarketUniverseV2Snapshot());
 
     } catch (error) {
       return res.status(500).json({

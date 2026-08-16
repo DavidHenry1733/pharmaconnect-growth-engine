@@ -3359,6 +3359,13 @@ function renderCommercialIntelligenceDashboard(dashboard){
           '<div id="moiPages"></div>'+
         '</div>'+
 
+        '<div style="margin-top:16px">'+
+          '<h4>Market Universe V2</h4>'+
+          '<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">Expanded DataForSEO market universe groupings: untapped, weak coverage, new market, and authority/support topics.</p>'+
+          '<div id="muv2Summary" class="metric-grid" style="margin-top:10px"></div>'+
+          '<div id="muv2Groups" style="margin-top:10px"></div>'+
+        '</div>'+
+
         '<div class="guidance-box" style="margin-top:14px">'+
           'Competitor qualification is based on commercial market fit, positive and negative keyword intent, UK ranking evidence and available own-site evidence. Industry relevance alone does not qualify a business as a direct competitor.'+
         '</div>'+
@@ -7195,8 +7202,56 @@ async function loadMarketOpportunityIntelligence(){
   }
 }
 
+async function loadMarketUniverseV2(){
+  const summaryEl=document.getElementById('muv2Summary');
+  const groupsEl=document.getElementById('muv2Groups');
+  if(!summaryEl||!groupsEl)return;
+  const safe=function(value){
+    if(value===null||value===undefined||value==='')return 'Not available';
+    const n=Number(value);
+    if(typeof value==='number'&&!Number.isFinite(value))return 'Not available';
+    if(typeof value==='string'&&value.toLowerCase()==='nan')return 'Not available';
+    return String(value);
+  };
+  try{
+    const slug=new URLSearchParams(location.search).get('slug')||'pharmaconnect';
+    const data=await api('/api/master-admin-platform/customers/'+encodeURIComponent(slug)+'/market-opportunity-intelligence-v2');
+    const s=data.summary||{};
+    const metrics=[
+      ['Total Market Keyword Universe',s.unique],
+      ['Money Keywords',s.moneyKeywords],
+      ['Commercial Support',s.commercialSupport],
+      ['Untapped',s.untapped],
+      ['Weak Coverage',s.weakCoverage],
+      ['Qualified Demand',s.qualifiedCommercialSearchDemand],
+    ];
+    summaryEl.innerHTML=metrics.map(function(row){
+      return '<div class="metric-card"><div class="metric-value">'+esc(safe(row[1]))+'</div><div class="metric-label">'+esc(row[0])+'</div></div>';
+    }).join('');
+    const groupDefs=[
+      ['UNTAPPED','Untapped Commercial Opportunities'],
+      ['WEAK_COVERAGE','Weak Coverage'],
+      ['NEW_MARKET','New Market Opportunities'],
+      ['AUTHORITY_SUPPORT','Authority / Supporting Topics'],
+    ];
+    groupsEl.innerHTML=groupDefs.map(function(group){
+      const rows=(data.universe||[]).filter(function(item){return item.gapType===group[0]||item.type===group[0];}).slice(0,8);
+      return '<div class="ci-card" style="margin-top:10px"><h5 style="margin:0 0 8px;color:#e2e8f0">'+esc(group[1])+'</h5>'+
+        (rows.length?'<table class="audit-table"><thead><tr><th>Keyword</th><th>Volume</th><th>CPC</th><th>Difficulty</th><th>Intent</th><th>Gap</th><th>Score</th><th>Evidence</th></tr></thead><tbody>'+
+          rows.map(function(item){
+            return '<tr><td>'+esc(item.keyword||'Not available')+'</td><td>'+esc(safe(item.searchVolume))+'</td><td>'+esc(safe(item.cpc))+'</td><td>'+esc(safe(item.keywordDifficulty))+'</td><td>'+esc(safe(item.intent))+'</td><td>'+esc(item.gapType||'REVIEW')+'</td><td>'+esc(safe(item.score))+'</td><td>'+esc((item.reasons||[]).slice(0,2).join(' '))+'</td></tr>';
+          }).join('')+'</tbody></table>':'<div class="guidance-box">No '+esc(group[1]).toLowerCase()+' in the current snapshot.</div>')+
+      '</div>';
+    }).join('');
+  }catch(error){
+    summaryEl.innerHTML='<div class="guidance-box">Market Universe V2 unavailable.</div>';
+    groupsEl.innerHTML='<div class="guidance-box">'+esc(error instanceof Error?error.message:String(error))+'</div>';
+  }
+}
+
 loadVerifiedNationalCompetitorIntelligence();
 loadMarketOpportunityIntelligence();
+loadMarketUniverseV2();
 
 </script>
 </body>
