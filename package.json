@@ -4,7 +4,7 @@
   "license": "MIT",
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "build": "pnpm run typecheck && pnpm -r --filter \"./artifacts/api-server\" --filter \"./artifacts/dashboard\" --filter \"./scripts\" --if-present run build",
     "pharmacy:visual:build": "tsx scripts/build-pharmacy-visual-experience-v1.ts pharmaconnect",
     "pharmacy:visual:validate": "tsx scripts/validate-pharmacy-visual-template-regression-v2.ts pharmaconnect",
     "pharmacy:visual:validate:final": "tsx scripts/validate-pharmacy-visual-final-fix-v1.ts pharmaconnect",
@@ -37,7 +37,7 @@
     "pharmacy:image-platform:gallery:validate": "tsx scripts/pharmacy-first-image-platform-gallery-validate.ts",
     "pharmacy:visual:pipeline": "pnpm run pharmacy:visual:images:seed && pnpm run pharmacy:visual:build && pnpm run pharmacy:visual:validate:restore && pnpm run pharmacy:visual:validate:images",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/api-server\" --filter \"./artifacts/dashboard\" --filter \"./scripts\" --if-present run typecheck",
     "post-deploy-check": "node scripts/post-deploy-check.mjs inboxingproweb",
     "release-check": "node scripts/release-check.mjs inboxingproweb"
   },

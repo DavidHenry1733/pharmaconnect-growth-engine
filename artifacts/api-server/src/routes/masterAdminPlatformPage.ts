@@ -3333,7 +3333,30 @@ function renderCommercialIntelligenceDashboard(dashboard){
 
         '<div style="margin-top:16px">'+
           '<h4>Adjacent Competitors</h4>'+
+          '<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">Adjacent competitors show meaningful market overlap but do not meet the full verified direct-competitor threshold.</p>'+
           '<div id="vnciAdjacent"></div>'+
+        '</div>'+
+
+        '<div style="margin-top:16px">'+
+          '<h4>Commercial Keyword Evidence</h4>'+
+          '<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">Deduplicated persisted keyword evidence from verified competitors. No live DataForSEO search is executed here.</p>'+
+          '<div id="vnciKeywordEvidence"></div>'+
+        '</div>'+
+
+        '<div style="margin-top:16px">'+
+          '<h4>Market Opportunity Summary</h4>'+
+          '<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">Commercial opportunities derived from persisted DataForSEO-ranked keyword evidence, positive/negative qualification and competitor overlap.</p>'+
+          '<div id="moiSummary" class="metric-grid" style="margin-top:10px"></div>'+
+        '</div>'+
+
+        '<div style="margin-top:16px">'+
+          '<h4>Top Market Opportunities</h4>'+
+          '<div id="moiOpportunities"></div>'+
+        '</div>'+
+
+        '<div style="margin-top:16px">'+
+          '<h4>Top Competitor Pages</h4>'+
+          '<div id="moiPages"></div>'+
         '</div>'+
 
         '<div class="guidance-box" style="margin-top:14px">'+
@@ -3386,10 +3409,10 @@ function renderCommercialIntelligenceDashboard(dashboard){
       '<p style="font-size:.76rem;color:#94a3b8;line-height:1.5;margin-bottom:10px">The National Growth Platform is active for this customer.</p>'+
       '<div class="guidance-box" style="font-size:.72rem">Local Growth Engine: Not Applicable</div>'+
       '<div class="guidance-box" style="font-size:.72rem;margin-top:8px">National Competitor Intelligence: Required</div>'+
-      '<button class="cqr-approve-btn" type="button" disabled style="margin-top:12px">'+
-        esc(actionLabel)+
+      '<button class="cqr-approve-btn" type="button" id="vnciReviewBtn" disabled style="margin-top:12px">'+
+        'Review National Competitors'+
       '</button>'+
-      '<div id="cirMsg" style="font-size:.72rem;margin-top:10px;color:#94a3b8">'+
+      '<div id="vnciReviewMsg" style="font-size:.72rem;margin-top:10px;color:#94a3b8">'+
         'Workflow control is visible but intentionally disabled until the live National Competitor Discovery execution route is implemented.'+
       '</div>';
 
@@ -6895,88 +6918,167 @@ async function loadVerifiedNationalCompetitorIntelligence(){
       new URLSearchParams(location.search).get('slug') ||
       'pharmaconnect';
 
-    const response=await fetch(
+    const x=await api(
       '/api/master-admin-platform/customers/' +
       encodeURIComponent(slug) +
       '/verified-national-competitor-intelligence'
     );
-
-    const x=await response.json();
-
-    if(!response.ok){
-      throw new Error(
-        x?.error || 'Unable to load competitor intelligence'
-      );
-    }
 
     document.getElementById('vnciStatus').textContent=
       x.status === 'complete' ?
       'VERIFIED' :
       String(x.status || 'UNKNOWN').toUpperCase();
 
+    const safeMetric=function(value){
+      if(value===null||value===undefined||value==='')return 'Not available';
+      const n=Number(value);
+      if(typeof value==='number'&&!Number.isFinite(value))return 'Not available';
+      if(typeof value==='string'&&value.toLowerCase()==='nan')return 'Not available';
+      return String(value);
+    };
+
+    const pct=function(value){
+      if(value===null||value===undefined||value==='')return 'Not available';
+      const n=Number(value);
+      if(!Number.isFinite(n))return 'Not available';
+      return Math.round(n)+'%';
+    };
+
     const metrics=[
-      ['Direct',x.directCompetitorCount || 0],
-      ['Adjacent',x.adjacentCompetitorCount || 0],
-      ['Relevant Keywords',x.totalRelevantKeywords || 0],
-      ['High Intent',x.totalHighCommercialKeywords || 0],
-      ['Search Volume',x.totalRelevantSearchVolume || 0],
+      ['Verified Direct Competitors',x.directCompetitorCount],
+      ['Adjacent Competitors',x.adjacentCompetitorCount],
+      ['Commercial Keywords',x.totalRelevantKeywords],
+      ['High-Commercial Keywords',x.totalHighCommercialKeywords],
+      ['Relevant Search Volume',x.totalRelevantSearchVolume],
     ];
 
     document.getElementById('vnciMetrics').innerHTML=
       metrics.map(([label,value])=>
         '<div class="metric-card">'+
-          '<div class="metric-value">'+esc(value)+'</div>'+
+          '<div class="metric-value">'+esc(safeMetric(value))+'</div>'+
           '<div class="metric-label">'+esc(label)+'</div>'+
         '</div>'
       ).join('');
 
-    const renderCompetitor=(c)=>
-      '<div class="ci-card" style="margin-top:10px">'+
+    const keywordHtml=function(k){
+      const url=k&&k.url?String(k.url):'';
+      const keyword=esc(k&&k.keyword?k.keyword:'Not available');
+      return '<div style="font-size:.75rem;padding:5px 0;border-top:1px solid rgba(148,163,184,.12)">'+
+        '<strong>'+(url?'<a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+keyword+'</a>':keyword)+'</strong>'+
+        ' · Position '+esc(safeMetric(k&&k.position))+
+        ' · Volume '+esc(safeMetric(k&&k.searchVolume))+
+      '</div>';
+    };
+
+    const evidenceHtml=function(c){
+      const reasons=[
+        ...(Array.isArray(c.reasons)?c.reasons:[]),
+        ...(Array.isArray(c.qualificationReasons)?c.qualificationReasons:[]),
+        ...(c.evidenceBasis?['Evidence basis: '+c.evidenceBasis]:[]),
+        ...(c.websiteCommercialEvidence?['Own-site commercial evidence available']:[]),
+      ].filter(Boolean).slice(0,4);
+      return reasons.length
+        ? '<details style="margin-top:10px"><summary style="cursor:pointer;color:#cbd5e1;font-size:.76rem;font-weight:800">Evidence and rationale</summary><ul style="margin:8px 0 0 18px;color:#94a3b8;font-size:.72rem;line-height:1.45">'+
+          reasons.map(function(reason){return '<li>'+esc(reason)+'</li>';}).join('')+
+          '</ul></details>'
+        : '<div style="font-size:.72rem;color:#94a3b8;margin-top:10px">Evidence detail not available in persisted snapshot.</div>';
+    };
+
+    const renderCompetitor=function(c,classificationLabel){
+      const keywords=Array.isArray(c.strongestKeywords)?c.strongestKeywords:[];
+      return '<div class="ci-card" style="margin-top:10px">'+
         '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">'+
-          '<strong>'+esc(c.domain || '')+'</strong>'+
+          '<strong>'+esc(c.domain || 'Domain not available')+'</strong>'+
           '<span class="status-pill">'+
-            'Confidence '+esc(c.confidenceScore ?? 'n/a')+
+            'Confidence '+esc(pct(c.confidenceScore))+
           '</span>'+
         '</div>'+
         '<div style="font-size:.74rem;color:#94a3b8;margin-top:6px">'+
-          'Evidence: '+esc(c.evidenceBasis || 'own-site')+
+          esc(classificationLabel || c.classification || 'Competitor')+
+          ' · Evidence: '+esc(c.evidenceBasis || 'Not available')+
         '</div>'+
-        (
-          c.relevantKeywords != null ?
-          '<div style="font-size:.78rem;margin-top:8px">'+
-            'Relevant keywords: <strong>'+esc(c.relevantKeywords || 0)+'</strong>'+
-            ' · High intent: <strong>'+esc(c.highCommercialKeywords || 0)+'</strong>'+
-            ' · Top 10: <strong>'+esc(c.top10RelevantKeywords || 0)+'</strong>'+
-            ' · Search volume: <strong>'+esc(c.relevantSearchVolume || 0)+'</strong>'+
-          '</div>'
-          :
-          ''
-        )+
-        (
-          (c.strongestKeywords || []).length ?
+        '<div style="font-size:.78rem;margin-top:8px">'+
+          'Relevant keywords: <strong>'+esc(safeMetric(c.relevantKeywords))+'</strong>'+
+          ' · High-commercial: <strong>'+esc(safeMetric(c.highCommercialKeywords))+'</strong>'+
+          ' · Top 10: <strong>'+esc(safeMetric(c.top10RelevantKeywords))+'</strong>'+
+          ' · Search volume: <strong>'+esc(safeMetric(c.relevantSearchVolume))+'</strong>'+
+        '</div>'+
+        (keywords.length ?
           '<div style="margin-top:10px">'+
-            (c.strongestKeywords || []).slice(0,8).map(k=>
-              '<div style="font-size:.75rem;padding:5px 0;border-top:1px solid rgba(148,163,184,.12)">'+
-                '<strong>'+esc(k.keyword || '')+'</strong>'+
-                ' · Position '+esc(k.position ?? 'n/a')+
-                ' · Volume '+esc(k.searchVolume ?? 'n/a')+
-              '</div>'
-            ).join('')+
+            keywords.slice(0,5).map(keywordHtml).join('')+
           '</div>'
           :
-          ''
+          '<div style="font-size:.72rem;color:#94a3b8;margin-top:10px">No strongest keyword evidence available for this competitor.</div>'
         )+
+        evidenceHtml(c)+
       '</div>';
+    };
+
+    const directCompetitors=x.directCompetitors || [];
+    const adjacentCompetitors=x.adjacentCompetitors || [];
 
     document.getElementById('vnciDirect').innerHTML=
-      (x.directCompetitors || []).length ?
-      x.directCompetitors.map(renderCompetitor).join('') :
+      directCompetitors.length ?
+      directCompetitors.map(function(c){return renderCompetitor(c,'Direct competitor');}).join('') :
       '<div class="guidance-box">No verified direct competitors.</div>';
 
     document.getElementById('vnciAdjacent').innerHTML=
-      (x.adjacentCompetitors || []).length ?
-      x.adjacentCompetitors.map(renderCompetitor).join('') :
+      adjacentCompetitors.length ?
+      adjacentCompetitors.map(function(c){return renderCompetitor(c,'Adjacent competitor');}).join('') :
       '<div class="guidance-box">No adjacent competitors.</div>';
+
+    const bestByKeyword=new Map();
+    [...directCompetitors,...adjacentCompetitors].forEach(function(c){
+      (Array.isArray(c.strongestKeywords)?c.strongestKeywords:[]).forEach(function(k){
+        const key=String(k.keyword||'').trim().toLowerCase();
+        if(!key)return;
+        const current=bestByKeyword.get(key);
+        const currentPos=Number(current&&current.position);
+        const nextPos=Number(k.position);
+        if(!current||(
+          Number.isFinite(nextPos)&&(!Number.isFinite(currentPos)||nextPos<currentPos)
+        )){
+          bestByKeyword.set(key,{...k,competitor:c.domain||'Not available'});
+        }
+      });
+    });
+
+    const keywordRows=[...bestByKeyword.values()].sort(function(a,b){
+      const av=Number(a.searchVolume)||0;
+      const bv=Number(b.searchVolume)||0;
+      return bv-av;
+    });
+
+    document.getElementById('vnciKeywordEvidence').innerHTML=
+      keywordRows.length ?
+      '<table class="audit-table"><thead><tr><th>Keyword</th><th>Best Observed Competitor</th><th>Position</th><th>Search Volume</th><th>Commercial Signal</th></tr></thead><tbody>'+
+        keywordRows.map(function(k){
+          return '<tr>'+
+            '<td>'+esc(k.keyword||'Not available')+'</td>'+
+            '<td>'+esc(k.competitor||'Not available')+'</td>'+
+            '<td>'+esc(safeMetric(k.position))+'</td>'+
+            '<td>'+esc(safeMetric(k.searchVolume))+'</td>'+
+            '<td>'+esc(k.classification||'Not available')+'</td>'+
+          '</tr>';
+        }).join('')+
+      '</tbody></table>' :
+      '<div class="guidance-box">No persisted keyword evidence available.</div>';
+
+    const hasVerifiedEvidence=directCompetitors.length>0||adjacentCompetitors.length>0;
+    const reviewBtn=document.getElementById('vnciReviewBtn');
+    const reviewMsg=document.getElementById('vnciReviewMsg');
+    if(reviewBtn&&hasVerifiedEvidence){
+      reviewBtn.disabled=false;
+      reviewBtn.onclick=function(){
+        const panel=document.getElementById('verifiedNationalCompetitorIntelligence');
+        if(panel)panel.scrollIntoView({behavior:'smooth',block:'start'});
+      };
+    }
+    if(reviewMsg){
+      reviewMsg.textContent=hasVerifiedEvidence
+        ? 'Verified national competitor evidence is available for Product Owner review. This button focuses the current review panel; no discovery or regeneration is executed.'
+        : 'Review is disabled because no verified national competitor evidence is available.';
+    }
 
   }catch(error){
     document.getElementById('vnciStatus').textContent='ERROR';
@@ -6985,10 +7087,116 @@ async function loadVerifiedNationalCompetitorIntelligence(){
       '<div class="guidance-box">'+
       esc(error instanceof Error ? error.message : String(error))+
       '</div>';
+    const metrics=document.getElementById('vnciMetrics');
+    if(metrics)metrics.innerHTML='<div class="guidance-box">National intelligence API unavailable.</div>';
+    const adjacent=document.getElementById('vnciAdjacent');
+    if(adjacent)adjacent.innerHTML='<div class="guidance-box">Adjacent competitor evidence unavailable.</div>';
+    const keywords=document.getElementById('vnciKeywordEvidence');
+    if(keywords)keywords.innerHTML='<div class="guidance-box">Commercial keyword evidence unavailable.</div>';
+  }
+}
+
+async function loadMarketOpportunityIntelligence(){
+  const summaryEl=document.getElementById('moiSummary');
+  const oppEl=document.getElementById('moiOpportunities');
+  const pagesEl=document.getElementById('moiPages');
+  if(!summaryEl||!oppEl||!pagesEl)return;
+
+  const safeMetric=function(value){
+    if(value===null||value===undefined||value==='')return 'Not available';
+    const n=Number(value);
+    if(typeof value==='number'&&!Number.isFinite(value))return 'Not available';
+    if(typeof value==='string'&&value.toLowerCase()==='nan')return 'Not available';
+    return String(value);
+  };
+
+  try{
+    const slug=
+      new URLSearchParams(location.search).get('slug') ||
+      'pharmaconnect';
+
+    const data=await api(
+      '/api/master-admin-platform/customers/' +
+      encodeURIComponent(slug) +
+      '/market-opportunity-intelligence'
+    );
+
+    const s=data.summary||{};
+    const metrics=[
+      ['Keyword Universe',s.keywordUniverse],
+      ['Qualified Commercial Keywords',s.qualifiedCommercialKeywords],
+      ['High-Priority Opportunities',s.highPriorityOpportunities],
+      ['Untapped',s.untappedKeywords],
+      ['Weak Coverage',s.weakCoverageKeywords],
+      ['Qualified Search Demand',s.totalSearchDemand],
+    ];
+
+    summaryEl.innerHTML=metrics.map(function(row){
+      return '<div class="metric-card">'+
+        '<div class="metric-value">'+esc(safeMetric(row[1]))+'</div>'+
+        '<div class="metric-label">'+esc(row[0])+'</div>'+
+      '</div>';
+    }).join('');
+
+    const qualified=(data.keywordOpportunities||[])
+      .filter(function(item){return item.qualification==='QUALIFIED';})
+      .slice(0,10);
+
+    oppEl.innerHTML=qualified.length?
+      '<table class="audit-table"><thead><tr><th>Keyword</th><th>Volume</th><th>CPC</th><th>Competitors Ranking</th><th>Best Position</th><th>PharmaConnect Position</th><th>Gap</th><th>Score</th><th>Priority</th></tr></thead><tbody>'+
+      qualified.map(function(item){
+        return '<tr>'+
+          '<td><strong>'+esc(item.keyword||'Not available')+'</strong><br><span style="font-size:.68rem;color:#94a3b8">'+esc((item.reasons||[]).slice(0,2).join(' '))+'</span></td>'+
+          '<td>'+esc(safeMetric(item.searchVolume))+'</td>'+
+          '<td>'+esc(safeMetric(item.cpc))+'</td>'+
+          '<td>'+esc(safeMetric(item.competitorCount))+'</td>'+
+          '<td>'+esc(safeMetric(item.bestCompetitorPosition))+'</td>'+
+          '<td>'+esc(safeMetric(item.subjectPosition))+'</td>'+
+          '<td>'+esc(item.gapType||'unknown')+'</td>'+
+          '<td>'+esc(safeMetric(item.opportunityScore))+'</td>'+
+          '<td>'+esc(item.priority||'LOW')+'</td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody></table>'+
+      '<details style="margin-top:10px"><summary style="cursor:pointer;color:#cbd5e1;font-size:.76rem;font-weight:800">Opportunity evidence details</summary>'+
+        qualified.map(function(item){
+          return '<div class="ci-card" style="margin-top:10px">'+
+            '<strong>'+esc(item.keyword||'Not available')+'</strong>'+
+            '<div style="font-size:.72rem;color:#94a3b8;margin-top:6px">'+
+              'Winning URL: '+(item.bestRankingUrl?'<a href="'+esc(item.bestRankingUrl)+'" target="_blank" rel="noopener noreferrer">'+esc(item.bestRankingUrl)+'</a>':'Not available')+
+            '</div>'+
+            '<ul style="font-size:.72rem;color:#94a3b8;line-height:1.45;margin:8px 0 0 18px">'+
+              (item.reasons||[]).map(function(reason){return '<li>'+esc(reason)+'</li>';}).join('')+
+            '</ul>'+
+          '</div>';
+        }).join('')+
+      '</details>'
+      : '<div class="guidance-box">No qualified commercial opportunities available.</div>';
+
+    const pages=(data.rankingPages||[]).slice(0,10);
+    pagesEl.innerHTML=pages.length?
+      '<table class="audit-table"><thead><tr><th>Competitor</th><th>URL</th><th>Qualified Keywords</th><th>Best Position</th><th>Search Demand</th></tr></thead><tbody>'+
+      pages.map(function(page){
+        return '<tr>'+
+          '<td>'+esc(page.competitorDomain||'Not available')+'</td>'+
+          '<td>'+(page.url?'<a href="'+esc(page.url)+'" target="_blank" rel="noopener noreferrer">'+esc(page.url)+'</a>':'Not available')+'</td>'+
+          '<td>'+esc(safeMetric(page.relevantKeywordCount))+'</td>'+
+          '<td>'+esc(safeMetric(page.bestPosition))+'</td>'+
+          '<td>'+esc(safeMetric(page.searchDemand))+'</td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody></table>'
+      : '<div class="guidance-box">No competitor ranking pages available.</div>';
+
+  }catch(error){
+    summaryEl.innerHTML='<div class="guidance-box">Market Opportunity Intelligence unavailable.</div>';
+    oppEl.innerHTML='<div class="guidance-box">'+esc(error instanceof Error?error.message:String(error))+'</div>';
+    pagesEl.innerHTML='<div class="guidance-box">Competitor page evidence unavailable.</div>';
   }
 }
 
 loadVerifiedNationalCompetitorIntelligence();
+loadMarketOpportunityIntelligence();
 
 </script>
 </body>

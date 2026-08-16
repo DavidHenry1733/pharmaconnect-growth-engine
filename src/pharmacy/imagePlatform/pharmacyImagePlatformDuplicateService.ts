@@ -4,12 +4,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
-
-const requireCjs = createRequire(import.meta.url);
-const sharp = requireCjs(
-  "/home/inboxingproweb/pharmaconnect-growth-engine/artifacts/api-server/node_modules/sharp",
-) as typeof import("sharp");
+import sharp from "sharp";
 
 export function sha256Checksum(filePath: string): string {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");

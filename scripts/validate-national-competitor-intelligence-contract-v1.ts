@@ -1,24 +1,30 @@
-import {
+import competitorModel from "../src/pharmacy/nationalCompetitorIntelligenceModel.ts";
+import marketModel from "../src/pharmacy/nationalMarketIntelligenceModel.ts";
+import growthModel from "../src/pharmacy/nationalGrowthIntelligenceModel.ts";
+import nationalStorage from "../src/pharmacy/nationalIntelligenceStorageService.ts";
+import platformResolver from "../src/pharmacy/growthPlatformResolverService.ts";
+
+const {
   emptyNationalCompetitorIntelligenceSnapshot,
-} from "../src/pharmacy/nationalCompetitorIntelligenceModel.ts";
+} = competitorModel;
 
-import {
+const {
   emptyNationalMarketIntelligenceSnapshot,
-} from "../src/pharmacy/nationalMarketIntelligenceModel.ts";
+} = marketModel;
 
-import {
+const {
   emptyNationalGrowthIntelligenceSnapshot,
-} from "../src/pharmacy/nationalGrowthIntelligenceModel.ts";
+} = growthModel;
 
-import {
+const {
   nationalCompetitorSnapshotPath,
   nationalMarketSnapshotPath,
   nationalGrowthSnapshotPath,
-} from "../src/pharmacy/nationalIntelligenceStorageService.ts";
+} = nationalStorage;
 
-import {
+const {
   resolveGrowthPlatform,
-} from "../src/pharmacy/growthPlatformResolverService.ts";
+} = platformResolver;
 
 let passed = 0;
 let failed = 0;

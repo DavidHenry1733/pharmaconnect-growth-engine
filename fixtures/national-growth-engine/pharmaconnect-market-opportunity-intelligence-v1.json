@@ -1,0 +1,615 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-16T07:56:26.151Z",
+  "market": "UK Community Pharmacy Digital Growth",
+  "country": "United Kingdom",
+  "subjectDomain": "pharmaconnect.uk",
+  "sourceProvider": "persisted-dataforseo-ranked-keywords",
+  "sourceCompetitorCount": 13,
+  "totalApiCost": 0,
+  "dataForSeoUsage": {
+    "requests": 0,
+    "tasks": 0,
+    "totalCost": 0,
+    "endpoints": [
+      {
+        "endpoint": "https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live",
+        "requests": 0,
+        "tasks": 0,
+        "cost": 0,
+        "purpose": "Not called in this run; recovered persisted ranked-keyword evidence was used because credentials were unavailable."
+      }
+    ]
+  },
+  "competitors": [
+    {
+      "domain": "sitebuilderpharmacy.co.uk",
+      "classification": "direct_competitor",
+      "confidence": 85,
+      "keywordsAnalysed": 0
+    },
+    {
+      "domain": "pharmaboost.co.uk",
+      "classification": "direct_competitor",
+      "confidence": 100,
+      "keywordsAnalysed": 0
+    },
+    {
+      "domain": "pharmafocus.co.uk",
+      "classification": "direct_competitor",
+      "confidence": 69,
+      "keywordsAnalysed": 28
+    },
+    {
+      "domain": "robsonpharmacymedia.co.uk",
+      "classification": "direct_competitor",
+      "confidence": 60,
+      "keywordsAnalysed": 32
+    },
+    {
+      "domain": "pharmacydigital.co.uk",
+      "classification": "direct_competitor",
+      "confidence": 60,
+      "keywordsAnalysed": 6
+    },
+    {
+      "domain": "pharmacymaximiser.co.uk",
+      "classification": "direct_competitor",
+      "confidence": 60,
+      "keywordsAnalysed": 8
+    },
+    {
+      "domain": "healthera.co.uk",
+      "classification": "adjacent_competitor",
+      "confidence": 85,
+      "keywordsAnalysed": 0
+    },
+    {
+      "domain": "cegedimrx.co.uk",
+      "classification": "adjacent_competitor",
+      "confidence": 65,
+      "keywordsAnalysed": 0
+    },
+    {
+      "domain": "thepharmacycentre.com",
+      "classification": "adjacent_competitor",
+      "confidence": 100,
+      "keywordsAnalysed": 0
+    },
+    {
+      "domain": "medpointuk.com",
+      "classification": "adjacent_competitor",
+      "confidence": 65,
+      "keywordsAnalysed": 0
+    },
+    {
+      "domain": "pharmaescalator.co.uk",
+      "classification": "adjacent_competitor",
+      "confidence": 41,
+      "keywordsAnalysed": 7
+    },
+    {
+      "domain": "thepharmacywebsitecompany.co.uk",
+      "classification": "adjacent_competitor",
+      "confidence": 54,
+      "keywordsAnalysed": 29
+    },
+    {
+      "domain": "pharmacymedia.co.uk",
+      "classification": "adjacent_competitor",
+      "confidence": 41,
+      "keywordsAnalysed": 5
+    }
+  ],
+  "keywordOpportunities": [
+    {
+      "keyword": "pharmacy seo",
+      "searchVolume": 50,
+      "cpc": 0,
+      "competition": 0.3400000035762787,
+      "commercialIntentScore": 140,
+      "qualification": "QUALIFIED",
+      "qualificationReasons": [
+        "Market term: pharmacy",
+        "Service term: seo",
+        "High-intent term: pharmacy seo"
+      ],
+      "competitorCount": 7,
+      "directCompetitorCount": 4,
+      "adjacentCompetitorCount": 3,
+      "competitorsRanking": [
+        {
+          "domain": "pharmacymedia.co.uk",
+          "classification": "adjacent_competitor",
+          "position": 3,
+          "rankingUrl": "https://pharmacymedia.co.uk/pharmacy-search-engine-optimisation/"
+        },
+        {
+          "domain": "robsonpharmacymedia.co.uk",
+          "classification": "direct_competitor",
+          "position": 4,
+          "rankingUrl": "https://www.robsonpharmacymedia.co.uk/local-seo-tips-for-pharmacies-how-to-rank-higher-on-google/"
+        },
+        {
+          "domain": "thepharmacywebsitecompany.co.uk",
+          "classification": "adjacent_competitor",
+          "position": 7,
+          "rankingUrl": "https://www.thepharmacywebsitecompany.co.uk/can-local-seo-help-your-pharmacy-compete-with-big-chains/"
+        },
+        {
+          "domain": "pharmaescalator.co.uk",
+          "classification": "adjacent_competitor",
+          "position": 8,
+          "rankingUrl": "https://www.pharmaescalator.co.uk/seo-for-pharmacies-in-uk"
+        },
+        {
+          "domain": "pharmacymaximiser.co.uk",
+          "classification": "direct_competitor",
+          "position": 10,
+          "rankingUrl": "https://pharmacymaximiser.co.uk/digital-brand-strategy/seo-geo/"
+        },
+        {
+          "domain": "pharmafocus.co.uk",
+          "classification": "direct_competitor",
+          "position": 21,
+          "rankingUrl": "https://pharmafocus.co.uk/pharmacy-google-seo/"
+        },
+        {
+          "domain": "pharmacydigital.co.uk",
+          "classification": "direct_competitor",
+          "position": 23,
+          "rankingUrl": "https://pharmacydigital.co.uk/local-seo-for-independent-pharmacies/"
+        }
+      ],
+      "bestCompetitorPosition": 3,
+      "bestCompetitorDomain": "pharmacymedia.co.uk",
+      "bestRankingUrl": "https://pharmacymedia.co.uk/pharmacy-search-engine-optimisation/",
+      "subjectPosition": null,
+      "subjectRankingUrl": null,
+      "gapType": "unknown",
+      "opportunityScore": 85,
+      "priority": "HIGH",
+      "reasons": [
+        "Commercial intent score 140.",
+        "High-intent match: pharmacy seo.",
+        "Monthly search volume 50.",
+        "4 direct competitor(s) rank.",
+        "3 adjacent competitor(s) also rank.",
+        "Best observed competitor position 3.",
+        "PharmaConnect subject position not available in recovered evidence."
+      ]
+    },
+    {
+      "keyword": "pharmacy digital marketing",
+      "searchVolume": 40,
+      "cpc": 0,
+      "competition": 0.07999999821186066,
+      "commercialIntentScore": 140,
+      "qualification": "QUALIFIED",
+      "qualificationReasons": [
+        "Market term: pharmacy",
+        "Service term: digital marketing",
+        "High-intent term: pharmacy digital marketing"
+      ],
+      "competitorCount": 7,
+      "directCompetitorCount": 4,
+      "adjacentCompetitorCount": 3,
+      "competitorsRanking": [
+        {
+          "domain": "pharmafocus.co.uk",
+          "classification": "direct_competitor",
+          "position": 2,
+          "rankingUrl": "https://pharmafocus.co.uk/"
+        },
+        {
+          "domain": "pharmaescalator.co.uk",
+          "classification": "adjacent_competitor",
+          "position": 4,
+          "rankingUrl": "https://www.pharmaescalator.co.uk/blog/digital-marketing-guide-for-pharmacies-2026/"
+        },
+        {
+          "domain": "pharmacydigital.co.uk",
+          "classification": "direct_competitor",
+          "position": 5,
+          "rankingUrl": "https://pharmacydigital.co.uk/"
+        },
+        {
+          "domain": "robsonpharmacymedia.co.uk",
+          "classification": "direct_competitor",
+          "position": 28,
+          "rankingUrl": "https://www.robsonpharmacymedia.co.uk/services/"
+        },
+        {
+          "domain": "pharmacymaximiser.co.uk",
+          "classification": "direct_competitor",
+          "position": 33,
+          "rankingUrl": "https://pharmacymaximiser.co.uk/digital-brand-strategy/"
+        },
+        {
+          "domain": "thepharmacywebsitecompany.co.uk",
+          "classification": "adjacent_competitor",
+          "position": 35,
+          "rankingUrl": "https://www.thepharmacywebsitecompany.co.uk/pharmacy-digital-marketing/"
+        },
+        {
+          "domain": "pharmacymedia.co.uk",
+          "classification": "adjacent_competitor",
+          "position": 40,
+          "rankingUrl": "https://pharmacymedia.co.uk/"
+        }
+      ],
+      "bestCompetitorPosition": 2,
+      "bestCompetitorDomain": "pharmafocus.co.uk",
+      "bestRankingUrl": "https://pharmafocus.co.uk/",
+      "subjectPosition": null,
+      "subjectRankingUrl": null,
+      "gapType": "unknown",
+      "opportunityScore": 85,
+      "priority": "HIGH",
+      "reasons": [
+        "Commercial intent score 140.",
+        "High-intent match: pharmacy digital marketing.",
+        "Monthly search volume 40.",
+        "4 direct competitor(s) rank.",
+        "3 adjacent competitor(s) also rank.",
+        "Best observed competitor position 2.",
+        "PharmaConnect subject position not available in recovered evidence."
+      ]
+    },
+    {
+      "keyword": "pharmacy web design",
+      "searchVolume": 70,
+      "cpc": 17.940000534057617,
+      "competition": 0.23999999463558197,
+      "commercialIntentScore": 140,
+      "qualification": "QUALIFIED",
+      "qualificationReasons": [
+        "Market term: pharmacy",
+        "Service term: web design",
+        "High-intent term: pharmacy web design"
+      ],
+      "competitorCount": 5,
+      "directCompetitorCount": 3,
+      "adjacentCompetitorCount": 2,
+      "competitorsRanking": [
+        {
+          "domain": "pharmafocus.co.uk",
+          "classification": "direct_competitor",
+          "position": 6,
+          "rankingUrl": "https://pharmafocus.co.uk/pharmacy-websites/"
+        },
+        {
+          "domain": "pharmacydigital.co.uk",
+          "classification": "direct_competitor",
+          "position": 8,
+          "rankingUrl": "https://pharmacydigital.co.uk/"
+        },
+        {
+          "domain": "pharmacymedia.co.uk",
+          "classification": "adjacent_competitor",
+          "position": 15,
+          "rankingUrl": "https://pharmacymedia.co.uk/"
+        },
+        {
+          "domain": "pharmacymaximiser.co.uk",
+          "classification": "direct_competitor",
+          "position": 20,
+          "rankingUrl": "https://pharmacymaximiser.co.uk/digital-brand-strategy/website-design/"
+        },
+        {
+          "domain": "thepharmacywebsitecompany.co.uk",
+          "classification": "adjacent_competitor",
+          "position": 23,
+          "rankingUrl": "https://thepharmacywebsitecompany.co.uk/"
+        }
+      ],
+      "bestCompetitorPosition": 6,
+      "bestCompetitorDomain": "pharmafocus.co.uk",
+      "bestRankingUrl": "https://pharmafocus.co.uk/pharmacy-websites/",
+      "subjectPosition": null,
+      "subjectRankingUrl": null,
+      "gapType": "unknown",
+      "opportunityScore": 80,
+      "priority": "HIGH",
+      "reasons": [
+        "Commercial intent score 140.",
+        "High-intent match: pharmacy web design.",
+        "Monthly search volume 70.",
+        "3 direct competitor(s) rank.",
+        "2 adjacent competitor(s) also rank.",
+        "Best observed competitor position 6.",
+        "PharmaConnect subject position not available in recovered evidence."
+      ]
+    }
+  ],
+  "rankingPages": [
+    {
+      "competitorDomain": "pharmacydigital.co.uk",
+      "url": "https://pharmacydigital.co.uk/",
+      "keywordCount": 2,
+      "relevantKeywordCount": 2,
+      "searchDemand": 110,
+      "bestPosition": 5,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy web design",
+          "position": 8,
+          "searchVolume": 70
+        },
+        {
+          "keyword": "pharmacy digital marketing",
+          "position": 5,
+          "searchVolume": 40
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmacymedia.co.uk",
+      "url": "https://pharmacymedia.co.uk/",
+      "keywordCount": 2,
+      "relevantKeywordCount": 2,
+      "searchDemand": 110,
+      "bestPosition": 15,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy web design",
+          "position": 15,
+          "searchVolume": 70
+        },
+        {
+          "keyword": "pharmacy digital marketing",
+          "position": 40,
+          "searchVolume": 40
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmafocus.co.uk",
+      "url": "https://pharmafocus.co.uk/pharmacy-websites/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 70,
+      "bestPosition": 6,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy web design",
+          "position": 6,
+          "searchVolume": 70
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmacymaximiser.co.uk",
+      "url": "https://pharmacymaximiser.co.uk/digital-brand-strategy/website-design/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 70,
+      "bestPosition": 20,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy web design",
+          "position": 20,
+          "searchVolume": 70
+        }
+      ]
+    },
+    {
+      "competitorDomain": "thepharmacywebsitecompany.co.uk",
+      "url": "https://thepharmacywebsitecompany.co.uk/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 70,
+      "bestPosition": 23,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy web design",
+          "position": 23,
+          "searchVolume": 70
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmacymedia.co.uk",
+      "url": "https://pharmacymedia.co.uk/pharmacy-search-engine-optimisation/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 50,
+      "bestPosition": 3,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy seo",
+          "position": 3,
+          "searchVolume": 50
+        }
+      ]
+    },
+    {
+      "competitorDomain": "robsonpharmacymedia.co.uk",
+      "url": "https://www.robsonpharmacymedia.co.uk/local-seo-tips-for-pharmacies-how-to-rank-higher-on-google/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 50,
+      "bestPosition": 4,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy seo",
+          "position": 4,
+          "searchVolume": 50
+        }
+      ]
+    },
+    {
+      "competitorDomain": "thepharmacywebsitecompany.co.uk",
+      "url": "https://www.thepharmacywebsitecompany.co.uk/can-local-seo-help-your-pharmacy-compete-with-big-chains/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 50,
+      "bestPosition": 7,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy seo",
+          "position": 7,
+          "searchVolume": 50
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmaescalator.co.uk",
+      "url": "https://www.pharmaescalator.co.uk/seo-for-pharmacies-in-uk",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 50,
+      "bestPosition": 8,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy seo",
+          "position": 8,
+          "searchVolume": 50
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmacymaximiser.co.uk",
+      "url": "https://pharmacymaximiser.co.uk/digital-brand-strategy/seo-geo/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 50,
+      "bestPosition": 10,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy seo",
+          "position": 10,
+          "searchVolume": 50
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmafocus.co.uk",
+      "url": "https://pharmafocus.co.uk/pharmacy-google-seo/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 50,
+      "bestPosition": 21,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy seo",
+          "position": 21,
+          "searchVolume": 50
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmacydigital.co.uk",
+      "url": "https://pharmacydigital.co.uk/local-seo-for-independent-pharmacies/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 50,
+      "bestPosition": 23,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy seo",
+          "position": 23,
+          "searchVolume": 50
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmafocus.co.uk",
+      "url": "https://pharmafocus.co.uk/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 40,
+      "bestPosition": 2,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy digital marketing",
+          "position": 2,
+          "searchVolume": 40
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmaescalator.co.uk",
+      "url": "https://www.pharmaescalator.co.uk/blog/digital-marketing-guide-for-pharmacies-2026/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 40,
+      "bestPosition": 4,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy digital marketing",
+          "position": 4,
+          "searchVolume": 40
+        }
+      ]
+    },
+    {
+      "competitorDomain": "robsonpharmacymedia.co.uk",
+      "url": "https://www.robsonpharmacymedia.co.uk/services/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 40,
+      "bestPosition": 28,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy digital marketing",
+          "position": 28,
+          "searchVolume": 40
+        }
+      ]
+    },
+    {
+      "competitorDomain": "pharmacymaximiser.co.uk",
+      "url": "https://pharmacymaximiser.co.uk/digital-brand-strategy/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 40,
+      "bestPosition": 33,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy digital marketing",
+          "position": 33,
+          "searchVolume": 40
+        }
+      ]
+    },
+    {
+      "competitorDomain": "thepharmacywebsitecompany.co.uk",
+      "url": "https://www.thepharmacywebsitecompany.co.uk/pharmacy-digital-marketing/",
+      "keywordCount": 1,
+      "relevantKeywordCount": 1,
+      "searchDemand": 40,
+      "bestPosition": 35,
+      "strongestKeywords": [
+        {
+          "keyword": "pharmacy digital marketing",
+          "position": 35,
+          "searchVolume": 40
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "keywordUniverse": 3,
+    "qualifiedCommercialKeywords": 3,
+    "rejectedKeywords": 0,
+    "reviewKeywords": 0,
+    "uniqueQualifiedKeywords": 3,
+    "untappedKeywords": 0,
+    "weakCoverageKeywords": 0,
+    "defendImproveKeywords": 0,
+    "unknownGapKeywords": 3,
+    "highPriorityOpportunities": 3,
+    "mediumPriorityOpportunities": 0,
+    "lowPriorityOpportunities": 0,
+    "totalSearchDemand": 160
+  },
+  "dataQuality": {
+    "rawKeywords": 19,
+    "qualified": 3,
+    "rejected": 0,
+    "review": 0,
+    "topRejectionReasons": [],
+    "subjectCoverageStatus": "not_available"
+  }
+}

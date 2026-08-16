@@ -1,4 +1,5 @@
 import { readVerifiedNationalCompetitorIntelligence } from "../../../../../src/pharmacy/verifiedNationalCompetitorIntelligenceService.ts";
+import { readMarketOpportunityIntelligenceSnapshot } from "../../../../../src/pharmacy/marketOpportunityIntelligenceService.ts";
 /**
  * Master Admin Platform V1 — JSON API for commercial control centre.
  */
@@ -505,6 +506,35 @@ router.get(
 
       const intelligence=
         readVerifiedNationalCompetitorIntelligence();
+
+      return res.json(intelligence);
+
+    } catch (error) {
+      return res.status(500).json({
+        error:
+          error instanceof Error ?
+          error.message :
+          String(error),
+      });
+    }
+  }
+);
+
+router.get(
+  "/master-admin-platform/customers/:slug/market-opportunity-intelligence",
+  (req, res) => {
+    try {
+      const slug=String(req.params.slug || "");
+
+      if(slug !== "pharmaconnect"){
+        return res.status(400).json({
+          error:
+            "Market Opportunity Intelligence is currently available for the PharmaConnect national platform."
+        });
+      }
+
+      const intelligence=
+        readMarketOpportunityIntelligenceSnapshot();
 
       return res.json(intelligence);
 
