@@ -25,6 +25,7 @@ export type NationalIntelligenceArtifact =
   | "growth-plan-intelligence-v1"
   | "cost-ledger-v1"
   | "refresh-metadata-v1"
+  | "search-intelligence-v1"
   | "competitors"
   | "market"
   | "growth";

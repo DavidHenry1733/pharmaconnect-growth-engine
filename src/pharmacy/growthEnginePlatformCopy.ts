@@ -69,7 +69,7 @@ const NATIONAL_COPY: GrowthEnginePlatformCopy = {
   businessStepTitle: "Your Business",
   businessStepSubtitle: "National digital-growth identity and commercial services",
   marketStepTitle: "National Market",
-  marketStepSubtitle: "UK pharmacy digital-growth market — local Google Places is not applicable",
+  marketStepSubtitle: "Organic ranking keywords and search competitors — local Google Places is not applicable",
   websiteStepTitle: "Your Website Report",
   websiteStepSubtitle: "What your website contains and what is missing",
   planStepTitle: "Your Growth Plan",

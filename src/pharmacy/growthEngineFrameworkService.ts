@@ -17,6 +17,7 @@ import { WORKSPACE_ROOT } from "./pharmacyCompetitorDiscovery.ts";
 import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
 import { resolveGrowthPlan } from "./growthEngineGrowthPlanResolver.ts";
+import { readNationalSearchIntelligence } from "./nationalSearchIntelligenceV1Service.ts";
 
 export const GROWTH_ENGINE_VERSION = 1;
 
@@ -169,7 +170,9 @@ export function saveWorkflowAcknowledgement(slug: string, stepId: GrowthEngineSt
 function stepUrl(slug: string, id: GrowthEngineStepId): string {
   const map: Record<GrowthEngineStepId, string> = {
     "business-intelligence": `/api/growth-engine/business-intelligence?slug=${encodeURIComponent(slug)}`,
-    "local-market": `/api/growth-engine/local-market?slug=${encodeURIComponent(slug)}`,
+    "local-market": isNationalGrowthPlatform(slug)
+      ? `/api/growth-engine/search-intelligence?slug=${encodeURIComponent(slug)}`
+      : `/api/growth-engine/local-market?slug=${encodeURIComponent(slug)}`,
     "website-intelligence": `/api/growth-engine/website-intelligence?slug=${encodeURIComponent(slug)}`,
     "growth-intelligence": `/api/growth-engine/growth-intelligence?slug=${encodeURIComponent(slug)}`,
     "growth-plan": `/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}`,
@@ -221,6 +224,7 @@ export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework 
   const national = isNationalGrowthPlatform(slug);
   const data = loadProfile(slug);
   const workflow = loadWorkflowDoc(slug);
+  const searchIntel = national ? readNationalSearchIntelligence(slug) : null;
   const competitors = national ? null : loadCompetitorSnapshot(slug);
   const resolvedPlan = resolveGrowthPlan(slug);
   const plan =
@@ -244,7 +248,7 @@ export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework 
   const bizPct = businessIntelligencePct(data);
   const bizComplete = national ? true : isRequiredProfileComplete(data);
   const localComplete = national
-    ? true
+    ? searchIntel?.status === "collected" || searchIntel?.status === "empty"
     : competitors?.analysis?.dataSource === "google-places-live" && (competitors.competitors.length || 0) >= 5;
   const websiteSnapshot = resolveWebsiteIntelligenceSnapshot(slug);
   const websiteComplete = websiteSnapshot?.analysis?.understandingComplete === true;
@@ -292,7 +296,11 @@ export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework 
           status: localComplete ? "complete" : competitors?.competitors.length ? "in_progress" : "not_started",
           completionPct: localComplete ? 100 : Math.min(99, (competitors?.competitors.length || 0) * 10),
           summary: national
-            ? "Not applicable — national commercial market"
+            ? searchIntel?.status === "collected" || searchIntel?.status === "empty"
+              ? `Search intelligence collected · ${searchIntel?.customerKeywords.length || 0} ranking keywords`
+              : searchIntel?.status === "error"
+                ? "Search intelligence collection failed"
+                : "Collect organic ranking keywords and search competitors"
             : localComplete
               ? `${competitors?.competitors.length || 0} nearby pharmacies compared`
               : "Load your local market comparison",

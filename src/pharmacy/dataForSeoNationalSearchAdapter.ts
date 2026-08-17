@@ -18,14 +18,12 @@ import type {
 const ENDPOINT =
   "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
 
-function requireCredential(name: string): string {
-  const value = String(process.env[name] || "").trim();
-
-  if (!value) {
-    throw new Error(`${name} is not configured`);
+function firstCredential(...names: string[]): string {
+  for (const name of names) {
+    const value = String(process.env[name] || "").trim();
+    if (value) return value;
   }
-
-  return value;
+  throw new Error(`${names[0]} is not configured`);
 }
 
 function canonicalDomain(raw: unknown, url: unknown): string {
@@ -53,8 +51,8 @@ export class DataForSeoNationalSearchProvider
   async search(
     request: NationalSearchRequest,
   ): Promise<NationalSearchResponse> {
-    const login = requireCredential("DATAFORSEO_LOGIN");
-    const password = requireCredential("DATAFORSEO_PASSWORD");
+    const login = firstCredential("DATAFORSEO_LOGIN", "DATAFORSEO_API_LOGIN");
+    const password = firstCredential("DATAFORSEO_PASSWORD", "DATAFORSEO_API_PASSWORD");
 
     const query = String(request.query || "").trim();
 

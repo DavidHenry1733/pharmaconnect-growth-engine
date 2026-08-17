@@ -27,6 +27,10 @@ import { buildCycleAwareRecommendation } from "../../../../../src/pharmacy/growt
 import { resolveTenantProfileSlug } from "../../../../../src/pharmacy/pharmacyTenantSlug.ts";
 import { isNationalGrowthPlatform } from "../../../../../src/pharmacy/growthPlatformResolverService.ts";
 import {
+  collectNationalSearchIntelligence,
+  readNationalSearchIntelligence,
+} from "../../../../../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
+import {
   loadLiveIntegrationProof,
   runLiveIntegrationProof,
   type LiveProofOptions,
@@ -151,6 +155,44 @@ router.post("/growth-engine/:slug/local-market/discover", async (req, res) => {
     });
   } catch (err: unknown) {
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.get("/growth-engine/:slug/search-intelligence", (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      error: "National Search Intelligence is available for NATIONAL Growth Platform tenants only.",
+    });
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true, snapshot: readNationalSearchIntelligence(slug) });
+});
+
+router.post("/growth-engine/:slug/search-intelligence/collect", async (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      error: "National Search Intelligence is available for NATIONAL Growth Platform tenants only.",
+    });
+  }
+  try {
+    const force = req.body?.force === true || req.body?.force === "true" || req.query.force === "1";
+    const snapshot = await collectNationalSearchIntelligence(slug, { force });
+    res.json({
+      ok: snapshot.status === "collected" || snapshot.status === "empty",
+      snapshot,
+      reusedExistingSnapshot: snapshot.reusedExistingSnapshot,
+      keywordCount: snapshot.customerKeywords.length,
+      competitorCount: snapshot.organicCompetitors.length,
+      cost: snapshot.costs.totalCost,
+    });
+  } catch (err: unknown) {
+    res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 });
 

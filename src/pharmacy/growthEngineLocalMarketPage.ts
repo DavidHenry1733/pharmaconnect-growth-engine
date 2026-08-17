@@ -22,7 +22,7 @@ import {
   resolveLocalMarketYourPharmacy,
 } from "./growthEngineLocalMarketService.ts";
 import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
-import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
+import { renderNationalSearchIntelligencePage } from "./nationalSearchIntelligencePage.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -368,40 +368,7 @@ export function renderLocalMarketIntelligencePage(
   nav: { prevUrl?: string; nextUrl?: string },
 ): string {
   if (isNationalGrowthPlatform(slug)) {
-    const copy = growthEnginePlatformCopy("national");
-    const framework = buildGrowthEngineFramework(slug);
-    const body = `<div class="ge-panel">
-<h2>${esc(copy.marketStepTitle)}</h2>
-<p class="ge-lead">${esc(copy.marketStepSubtitle)}</p>
-<p>This tenant is on the NATIONAL Growth Platform. Local Google Places competitor discovery is not applicable and was not run.</p>
-<p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Open national Growth Plan →</a></p>
-</div>`;
-    return `<!doctype html>
-<html lang="en-GB">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>${esc(copy.marketStepTitle)} · Growth Engine</title>
-<style>
-body{font-family:Inter,Arial,sans-serif;margin:0;background:#f0f4f8;color:#0f172a;line-height:1.5}
-${platformPlatformNavCss()}
-${growthEngineWorkflowCss()}
-</style>
-</head>
-<body data-slug="${esc(slug)}" data-growth-platform="national">
-<header style="background:linear-gradient(135deg,#005eb8,#003087);color:#fff;padding:16px 24px">
-<h1 style="margin:0;font-size:20px">PharmaConnect Growth Engine</h1>
-${renderPharmacyPlatformNavBar({ slug, activeId: "growth-engine" })}
-</header>
-<div class="ge-shell">
-<div class="ge-header-band">
-<h1>${esc(copy.marketStepTitle)}</h1>
-<p>${esc(copy.marketStepSubtitle)}</p>
-</div>
-${renderGrowthEngineNavBar(slug, framework, "local-market", { prevUrl: nav.prevUrl, nextUrl: nav.nextUrl, nextLabel: "Continue to Growth Plan →" })}
-${body}
-</div>
-</body></html>`;
+    return renderNationalSearchIntelligencePage(slug, nav);
   }
   const framework = buildGrowthEngineFramework(slug);
   const report = buildLocalMarketReportView(snapshot);

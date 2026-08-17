@@ -17,6 +17,7 @@ import {
   renderGrowthPlanPage,
   renderGeneratePage,
   renderGrowthEngineDashboardPage,
+  renderSearchIntelligencePage,
 } from "../../../../src/pharmacy/growthEnginePageRenderers.ts";
 import { renderLiveIntegrationProofPage } from "../../../../src/pharmacy/growthEngineLiveIntegrationProofPage.ts";
 import {
@@ -60,7 +61,19 @@ router.get("/growth-engine/business-intelligence", (req, res) => {
 router.get("/growth-engine/local-market", (req, res) => {
   const slug = tenantSlugOrRespond(req, res);
   if (!slug) return;
+  res.setHeader("Cache-Control", "no-store");
   res.type("html").send(renderLocalMarketPage(slug, loadCompetitorSnapshot(slug)));
+});
+
+router.get("/growth-engine/search-intelligence", (req, res) => {
+  const slug = tenantSlugOrRespond(req, res);
+  if (!slug) return;
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    res.type("html").send(renderSearchIntelligencePage(slug));
+  } catch (err) {
+    res.status(500).type("html").send(`<pre>Search Intelligence error: ${esc(String(err))}</pre>`);
+  }
 });
 
 router.get("/growth-engine/website-intelligence", (req, res) => {

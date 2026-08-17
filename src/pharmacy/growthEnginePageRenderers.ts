@@ -80,7 +80,9 @@ function importBadgeClass(status: string): string {
   return "confirmed";
 }
 
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 import { renderLocalMarketIntelligencePage } from "./growthEngineLocalMarketPage.ts";
+import { renderNationalSearchIntelligencePage } from "./nationalSearchIntelligencePage.ts";
 import { renderGrowthIntelligenceV1Page } from "./growthEngineGrowthIntelligencePage.ts";
 import { renderWebsiteIntelligencePage as renderWebsiteIntelligenceHtml } from "./growthEngineWebsiteIntelligencePage.ts";
 import { resolveWebsiteIntelligenceSnapshot } from "./growthEngineWebsiteIntelligenceService.ts";
@@ -202,7 +204,16 @@ export function renderWebsiteIntelligencePage(slug: string): string {
 export function renderLocalMarketPage(slug: string, snapshot: GrowthEngineCompetitorSnapshot | null): string {
   const framework = buildGrowthEngineFramework(slug);
   const { prev, next } = stepNavUrls(slug, framework, 2);
+  if (isNationalGrowthPlatform(slug)) {
+    return renderNationalSearchIntelligencePage(slug, { prevUrl: prev, nextUrl: next });
+  }
   return renderLocalMarketIntelligencePage(slug, snapshot, { prevUrl: prev, nextUrl: next });
+}
+
+export function renderSearchIntelligencePage(slug: string): string {
+  const framework = buildGrowthEngineFramework(slug);
+  const { prev, next } = stepNavUrls(slug, framework, 2);
+  return renderNationalSearchIntelligencePage(slug, { prevUrl: prev, nextUrl: next });
 }
 
 export function renderGrowthIntelligencePage(slug: string, snapshot: GrowthEngineCompetitorSnapshot | null): string {
