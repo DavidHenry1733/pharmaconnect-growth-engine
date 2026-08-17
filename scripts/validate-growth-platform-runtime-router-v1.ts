@@ -1,4 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import * as growthPlatformResolverService from "../src/pharmacy/growthPlatformResolverService.ts";
+import * as pharmacyWorkspacePaths from "../src/pharmacy/pharmacyWorkspacePaths.ts";
 
 function exported<T extends object>(mod: T | { default: T }): T {
   const maybe = mod as { default?: T };
@@ -6,6 +11,9 @@ function exported<T extends object>(mod: T | { default: T }): T {
 }
 
 const { resolveGrowthPlatform, isNationalGrowthPlatform, isLocalGrowthPlatform } = exported(growthPlatformResolverService);
+const { getPharmacyProjectConfigPath } = exported(pharmacyWorkspacePaths);
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 let passed = 0;
 let failed = 0;
@@ -101,6 +109,50 @@ check(
   "legacy-national-disabled",
   legacy.contract.nationalEngineApplicable === false,
   String(legacy.contract.nationalEngineApplicable),
+);
+
+const canonicalProjectConfig = getPharmacyProjectConfigPath("pharmaconnect");
+check(
+  "canonical-project-config-found",
+  fs.existsSync(canonicalProjectConfig) && canonicalProjectConfig.includes(`${path.sep}config${path.sep}projects${path.sep}`),
+  canonicalProjectConfig,
+);
+
+const resolverSrc = fs.readFileSync(path.join(ROOT, "src/pharmacy/growthPlatformResolverService.ts"), "utf8");
+check(
+  "resolver-uses-canonical-workspace-path",
+  resolverSrc.includes("getPharmacyProjectConfigPath") && !resolverSrc.includes("process.cwd()"),
+  "getPharmacyProjectConfigPath",
+);
+
+const nestedCwd = path.join(ROOT, "artifacts", "api-server");
+const originalCwd = process.cwd();
+let nestedNationalPlatform = "";
+let nestedNationalSource = "";
+let nestedUnknownPlatform = "";
+let nestedUnknownSource = "";
+try {
+  process.chdir(nestedCwd);
+  const nestedNational = resolveGrowthPlatform("pharmaconnect");
+  const nestedUnknown = resolveGrowthPlatform("__validation_legacy_local__");
+  nestedNationalPlatform = nestedNational.platform;
+  nestedNationalSource = nestedNational.source;
+  nestedUnknownPlatform = nestedUnknown.platform;
+  nestedUnknownSource = nestedUnknown.source;
+} finally {
+  process.chdir(originalCwd);
+}
+
+check(
+  "cwd-not-repo-root-still-national",
+  nestedNationalPlatform === "national" && nestedNationalSource === "project-config-explicit",
+  `${nestedNationalPlatform}/${nestedNationalSource} cwd=${nestedCwd}`,
+);
+
+check(
+  "cwd-not-repo-root-unknown-still-local",
+  nestedUnknownPlatform === "local" && nestedUnknownSource === "backwards-compatible-local-default",
+  `${nestedUnknownPlatform}/${nestedUnknownSource}`,
 );
 
 console.log(`\n${failed ? "FAIL" : "PASS"} — ${passed}/${passed + failed} checks\n`);
