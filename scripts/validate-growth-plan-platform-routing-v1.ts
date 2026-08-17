@@ -234,6 +234,36 @@ function main() {
     "local eligibility still patient catalogue",
   );
 
+  const jsonRouteFile = fs.readFileSync(path.join(ROOT, "artifacts/api-server/src/routes/api/growthEngine.ts"), "utf8");
+  const jsonRouteHandler = jsonRouteFile.match(/router\.get\("\/growth-engine\/:slug\/growth-plan",[\s\S]*?\n\}\);/)?.[0] || "";
+  record(
+    "json-route-uses-platform-resolver",
+    jsonRouteHandler.includes("resolveGrowthPlan(") && jsonRouteFile.includes('from "../../../../../src/pharmacy/growthEngineGrowthPlanResolver.ts"'),
+    "slug JSON route uses resolveGrowthPlan",
+  );
+  record(
+    "json-route-does-not-bypass",
+    Boolean(jsonRouteHandler) &&
+      !jsonRouteHandler.includes("buildGrowthPlanIntelligence") &&
+      !jsonRouteFile.includes("buildGrowthPlanIntelligence"),
+    "JSON route does not call local engine directly",
+  );
+
+  const jsonNational = resolveGrowthPlan("pharmaconnect");
+  const jsonLocal = resolveGrowthPlan("leeds-pharmacy");
+  const jsonUnknown = resolveGrowthPlan("__gp01c_unknown_tenant__");
+  record("json-route-national", jsonNational.platform === "national", jsonNational.platform);
+  record("json-route-local", jsonLocal.platform === "local", jsonLocal.platform);
+  record("json-route-unknown-local", jsonUnknown.platform === "local", jsonUnknown.platform);
+  record(
+    "html-json-platform-agreement",
+    nationalHtml.includes(`data-growth-platform="${jsonNational.platform}"`) &&
+      localHtml.includes(`data-growth-platform="${jsonLocal.platform}"`) &&
+      jsonNational.platform === "national" &&
+      jsonLocal.platform === "local",
+    `html/json national=${jsonNational.platform} local=${jsonLocal.platform}`,
+  );
+
   const passed = checks.filter((c) => c.pass).length;
   const total = checks.length;
   console.log(`\n${passed === total ? "✅" : "❌"} ${passed}/${total} checks passed\n`);

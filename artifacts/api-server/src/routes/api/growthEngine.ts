@@ -85,10 +85,7 @@ router.get("/growth-engine/:slug/growth-plan", (req, res) => {
   const slug = resolveSlug(req.params.slug);
   if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
   const resolved = resolveGrowthPlan(slug);
-  if (resolved.platform === "national") {
-    return res.json({ ok: true, platform: "national", plan: resolved.plan });
-  }
-  res.json({ ok: true, platform: "local", plan: resolved.plan });
+  return res.json({ ok: true, platform: resolved.platform, plan: resolved.plan });
 });
 
 router.get("/growth-engine/:slug/cycles", (req, res) => {
