@@ -75,7 +75,7 @@ function main() {
     `${BENCHMARK_MASTER_SERVICE_IDS.length} benchmark services`,
   );
 
-  for (const slug of ["dhmdigital", "pharmaconnect"]) {
+  for (const slug of ["dhmdigital", "leeds-pharmacy"]) {
     const snapshot = loadCompetitorSnapshot(slug);
     const intel = buildGrowthPlanIntelligence(slug, snapshot);
     const profile = loadSlug(slug);
@@ -141,14 +141,20 @@ function main() {
     );
 
     const html = renderGrowthPlanPage(slug, legacy);
-    record(`${slug}:page-executive-summary`, html.includes("Executive Summary"), "section 1");
-    record(`${slug}:page-recommended-campaign`, html.includes("Recommended Campaign"), "section 2");
+    record(`${slug}:page-where-you-stand`, html.includes("Where you stand"), "executive summary");
+    record(
+      `${slug}:page-recommended-campaign`,
+      html.includes("Recommended Campaign") || html.includes("Your recommended campaign") || html.includes("No evidence-backed campaign"),
+      "campaign section",
+    );
     record(`${slug}:page-why-campaign`, html.includes("Why This Campaign"), "section 3");
     record(`${slug}:page-what-built`, html.includes("What Will Be Built"), "section 4");
     record(`${slug}:page-estimated-outcome`, html.includes("Estimated Outcome"), "section 5");
     record(`${slug}:page-alternatives`, html.includes("Alternative Campaigns"), "section 6");
     record(`${slug}:page-readiness`, html.includes("Campaign Readiness"), "section 7");
-    record(`${slug}:page-generate-cta`, html.includes("Generate This Campaign"), "section 8");
+    record(`${slug}:page-generate-cta`, html.includes("Open Campaign Builder"), "campaign builder CTA");
+    record(`${slug}:page-local-copy`, html.includes("Your Pharmacy") || html.includes("Your Local Market") || html.includes("Complete Your Pharmacy"), "local pharmacy terminology retained");
+    record(`${slug}:page-not-national-panel`, !html.includes("Market Opportunity Plan") && !html.includes("pharmacy seo"), "no national fixture injection");
     record(`${slug}:page-css`, growthPlanPageCss().includes(".gp-hero"), "page styles");
   }
 

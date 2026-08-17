@@ -19,6 +19,8 @@ import { getPharmacyLivePublishStatus } from "./pharmacyLivePublishService.ts";
 import { isServicePageGeneratedForIdentity } from "./masterAdminCoreProductRecoveryService.ts";
 import { readPharmacyCampaignStore } from "./pharmacyCampaignService.ts";
 import { safeAdminSlug } from "./pharmacyMasterAdminService.ts";
+import { resolveGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { resolveTenantServiceCatalogue } from "./growthEngineTenantServiceCatalogue.ts";
 
 export type OpsCapabilityStatus = "PASS" | "WARNING" | "BLOCKED";
 export type OpsHealthStatus = "Healthy" | "Warning" | "Error";
@@ -150,7 +152,7 @@ function campaignBucket(summary: {
   return "Draft";
 }
 
-export function buildPlatformOperationsDashboard() {
+export function buildPlatformOperationsDashboard(viewSlug?: string) {
   ensureMasterAdminHealthCache();
   const systemHealth = getCachedMasterAdminSystemHealth();
   const registrations = listLockedCommercialServiceRegistrations();
@@ -444,10 +446,31 @@ export function buildPlatformOperationsDashboard() {
         ? "Warning"
         : "Healthy";
 
+  const viewingSlug = viewSlug ? safeAdminSlug(viewSlug) : "";
+  const viewingPlatform = viewingSlug ? resolveGrowthPlatform(viewingSlug).platform : "local";
+  const tenantCatalogue = viewingSlug ? resolveTenantServiceCatalogue(viewingSlug) : null;
+  const tenantCommercialServices =
+    viewingPlatform === "national" && tenantCatalogue
+      ? tenantCatalogue.services.map((s) => ({
+          serviceId: s.serviceId,
+          serviceName: s.serviceName,
+          href: s.href || "",
+          source: tenantCatalogue.source,
+        }))
+      : [];
+
   return {
     version: "RC1",
     generatedAt: new Date().toISOString(),
     primarySlug,
+    viewingSlug: viewingSlug || null,
+    viewingPlatform,
+    tenantCommercialServices,
+    pharmacyCustomerGenerationCapability: {
+      label: "PHARMACY CUSTOMER GENERATION CAPABILITY",
+      note: "Locked patient-service catalogue used to generate content for local pharmacy customers. This is not a national digital-growth provider's own service list.",
+      services: serviceRows,
+    },
     platformStatus: {
       platformVersion: "RC1",
       architectureStatus: "LOCKED",

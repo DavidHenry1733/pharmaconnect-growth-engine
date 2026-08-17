@@ -46,6 +46,7 @@ import {
   readServicePageFrameworkLock,
 } from "../../../../../src/pharmacy/masterAdminCoreProductRecoveryService.ts";
 import { isLockedCommercialSupportedService } from "../../../../../src/pharmacy/masterAdminLockedCommercialServiceCatalog.ts";
+import { isNationalGrowthPlatform } from "../../../../../src/pharmacy/growthPlatformResolverService.ts";
 import {
   isServiceGenerationReady,
   listLockedCommercialServicesWithGenerationReadiness,
@@ -221,9 +222,10 @@ router.get("/master-admin-platform/dashboard", (_req, res) => {
   }
 });
 
-router.get("/master-admin-platform/platform-operations", (_req, res) => {
+router.get("/master-admin-platform/platform-operations", (req, res) => {
   try {
-    res.json({ ok: true, dashboard: buildPlatformOperationsDashboard() });
+    const slug = String(req.query.slug || "").trim();
+    res.json({ ok: true, dashboard: buildPlatformOperationsDashboard(slug || undefined) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ ok: false, error: message });
@@ -1660,6 +1662,13 @@ router.post("/master-admin-platform/customers/:slug/campaigns/create", (req, res
       ok: false,
       error: "dashboard_only_required",
       message: "Campaign creation must be initiated from the Product Owner Master Dashboard",
+    });
+  }
+  if (isNationalGrowthPlatform(slug)) {
+    return res.status(409).json({
+      ok: false,
+      error: "national_patient_generator_not_applicable",
+      message: "National commercial content generation is not implemented. Patient-service campaign creation is not used for NATIONAL tenants.",
     });
   }
   if (!isLockedCommercialSupportedService(serviceId)) {

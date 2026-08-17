@@ -44,6 +44,8 @@ import {
 } from "./growthEngineCampaignExplorerRender.ts";
 import { buildCampaignExplorerCatalog } from "./growthEngineCampaignExplorerService.ts";
 import { campaignBuilderWizardUrl } from "./growthEngineCampaignBuilderRoutingService.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -899,6 +901,34 @@ function stepHero(active: CampaignBuilderStep): { title: string; subtitle: strin
 }
 
 export function renderCampaignBuilderPage(slug: string, step: CampaignBuilderStep): string {
+  if (isNationalGrowthPlatform(slug)) {
+    const copy = growthEnginePlatformCopy("national");
+    return `<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>National campaign strategy · Growth Engine</title>
+<style>
+body{font-family:Inter,Arial,sans-serif;margin:0;background:#f0f4f8;color:#0f172a;line-height:1.5}
+.cb-shell{max-width:920px;margin:0 auto;padding:32px 20px 80px}
+.cb-panel{background:#fff;border:1px solid #e8edf3;border-radius:24px;padding:28px;box-shadow:0 12px 40px rgba(15,23,42,.05)}
+.cb-panel h1{margin:0 0 10px;font-size:24px}
+.ge-btn{display:inline-flex;align-items:center;padding:10px 16px;border-radius:9px;font-weight:800;font-size:13px;text-decoration:none;border:1px solid #cbd5e1;color:#1e293b;background:#fff}
+.ge-btn-primary{background:#005eb8;border-color:#005eb8;color:#fff}
+</style>
+</head>
+<body data-slug="${esc(slug)}" data-growth-platform="national">
+<div class="cb-shell">
+<div class="cb-panel">
+<h1>National campaign strategy</h1>
+<p>${esc(copy.generateStepSubtitle)}</p>
+<p>A national recommendation such as pharmacy SEO must not open the NHS / Pharmacy First campaign explorer. National commercial content generation is not yet implemented.</p>
+<p style="margin-top:18px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Return to national Growth Plan →</a></p>
+</div>
+</div>
+</body></html>`;
+  }
   const session = loadCampaignBuilderSession(slug);
   const activeStep = step || session.step || "choose";
   const serviceId = session.selectedServiceId;

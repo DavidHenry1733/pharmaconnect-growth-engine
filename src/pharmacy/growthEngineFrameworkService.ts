@@ -11,12 +11,12 @@ import { loadCompetitorSnapshot } from "./growthEngineLocalMarketService.ts";
 import { resolveWebsiteIntelligenceSnapshot } from "./growthEngineWebsiteIntelligenceService.ts";
 import { contentPackageGenerated } from "./pharmacyContentPackageService.ts";
 import { buildGrowthOpportunityReport } from "./growthEngineOpportunityEngine.ts";
-import {
-  buildGrowthPlanIntelligence,
-  toGrowthEnginePlanRecommendation,
-} from "./growthEngineCampaignRecommendationEngine.ts";
+import { toGrowthEnginePlanRecommendation } from "./growthEngineCampaignRecommendationEngine.ts";
 import { PRIMARY_PLATFORM_SERVICE_ID } from "./pharmacyPlatformDashboardService.ts";
 import { WORKSPACE_ROOT } from "./pharmacyCompetitorDiscovery.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
+import { resolveGrowthPlan } from "./growthEngineGrowthPlanResolver.ts";
 
 export const GROWTH_ENGINE_VERSION = 1;
 
@@ -217,48 +217,85 @@ function businessIntelligencePct(data: ReturnType<typeof normalizeProfileData>):
 }
 
 export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework {
+  const copy = growthEnginePlatformCopy(slug);
+  const national = isNationalGrowthPlatform(slug);
   const data = loadProfile(slug);
   const workflow = loadWorkflowDoc(slug);
-  const competitors = loadCompetitorSnapshot(slug);
-  const planIntel = buildGrowthPlanIntelligence(slug, competitors);
-  const plan = toGrowthEnginePlanRecommendation(planIntel, data);
-  const generated = contentPackageGenerated(slug, plan.primaryServiceId);
+  const competitors = national ? null : loadCompetitorSnapshot(slug);
+  const resolvedPlan = resolveGrowthPlan(slug);
+  const plan =
+    resolvedPlan.platform === "national"
+      ? {
+          suggestedCampaign: resolvedPlan.plan.primary?.primaryKeyword || "National commercial strategy",
+          suggestedEcosystem: resolvedPlan.plan.market,
+          estimatedPages: 0,
+          estimatedPublishingDays: "Strategy only",
+          expectedIndexingTimeline: "Not applicable until national generation exists",
+          expectedReviewPeriod: "Strategy review",
+          primaryServiceId: resolvedPlan.plan.primary?.actionId || "",
+          primaryServiceName: resolvedPlan.plan.primary?.primaryKeyword || "National commercial action",
+          areaCount: 0,
+        }
+      : toGrowthEnginePlanRecommendation(resolvedPlan.plan, data);
+  const generated = national ? false : contentPackageGenerated(slug, plan.primaryServiceId);
   const importFields = buildWizardImportFields(data);
   const importSummary = countImportSummary(importFields);
 
   const bizPct = businessIntelligencePct(data);
-  const bizComplete = isRequiredProfileComplete(data);
-  const localComplete =
-    competitors?.analysis?.dataSource === "google-places-live" && (competitors.competitors.length || 0) >= 5;
+  const bizComplete = national ? true : isRequiredProfileComplete(data);
+  const localComplete = national
+    ? true
+    : competitors?.analysis?.dataSource === "google-places-live" && (competitors.competitors.length || 0) >= 5;
   const websiteSnapshot = resolveWebsiteIntelligenceSnapshot(slug);
   const websiteComplete = websiteSnapshot?.analysis?.understandingComplete === true;
-  const opportunityReport = buildGrowthOpportunityReport(slug, competitors);
+  const opportunityReport = national ? null : buildGrowthOpportunityReport(slug, competitors);
   const growthIntelAck = Boolean(workflow.acknowledgedSteps["growth-intelligence"]);
-  const hasOpportunities = opportunityReport.overview.total > 0;
+  const hasOpportunities = Boolean(opportunityReport && opportunityReport.overview.total > 0);
+  const nationalStrategyReady = resolvedPlan.platform === "national" && resolvedPlan.plan.strategyReady;
   const planAck = Boolean(workflow.acknowledgedSteps["growth-plan"]);
   const generateComplete = generated;
   const dashboardAck = Boolean(workflow.acknowledgedSteps.dashboard);
 
+  const titles: Record<string, { title: string; subtitle: string }> = {
+    "business-intelligence": { title: copy.businessStepTitle, subtitle: copy.businessStepSubtitle },
+    "local-market": { title: copy.marketStepTitle, subtitle: copy.marketStepSubtitle },
+    "website-intelligence": { title: copy.websiteStepTitle, subtitle: copy.websiteStepSubtitle },
+    "growth-plan": { title: copy.planStepTitle, subtitle: copy.planStepSubtitle },
+    generate: { title: copy.generateStepTitle, subtitle: copy.generateStepSubtitle },
+    dashboard: { title: copy.dashboardStepTitle, subtitle: "Track progress and next actions" },
+  };
+
   const states: GrowthEngineStepState[] = GROWTH_ENGINE_STEPS.map((meta) => {
-    const base = { id: meta.id, step: meta.step, title: meta.title, subtitle: meta.subtitle, url: stepUrl(slug, meta.id) };
+    const labelled = titles[meta.id];
+    const base = {
+      id: meta.id,
+      step: meta.step,
+      title: labelled?.title || meta.title,
+      subtitle: labelled?.subtitle || meta.subtitle,
+      url: stepUrl(slug, meta.id),
+    };
     switch (meta.id) {
       case "business-intelligence":
         return {
           ...base,
           status: bizComplete ? "complete" : bizPct > 0 ? "in_progress" : "not_started",
           completionPct: bizComplete ? 100 : bizPct,
-          summary: bizComplete
-            ? "Profile ready — required fields confirmed"
-            : `${importSummary.imported} imported · ${importSummary.missing} need review`,
+          summary: national
+            ? "National digital-growth identity"
+            : bizComplete
+              ? "Profile ready — required fields confirmed"
+              : `${importSummary.imported} imported · ${importSummary.missing} need review`,
         };
       case "local-market":
         return {
           ...base,
           status: localComplete ? "complete" : competitors?.competitors.length ? "in_progress" : "not_started",
           completionPct: localComplete ? 100 : Math.min(99, (competitors?.competitors.length || 0) * 10),
-          summary: localComplete
-            ? `${competitors?.competitors.length || 0} nearby pharmacies compared`
-            : "Load your local market comparison",
+          summary: national
+            ? "Not applicable — national commercial market"
+            : localComplete
+              ? `${competitors?.competitors.length || 0} nearby pharmacies compared`
+              : "Load your local market comparison",
         };
       case "website-intelligence":
         return {
@@ -272,34 +309,44 @@ export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework 
       case "growth-intelligence":
         return {
           ...base,
-          status: growthIntelAck ? "complete" : hasOpportunities || websiteComplete ? "in_progress" : "not_started",
-          completionPct: growthIntelAck ? 100 : hasOpportunities ? 70 : websiteComplete ? 40 : 0,
-          summary: growthIntelAck
-            ? `${opportunityReport.overview.total} opportunities reviewed`
-            : hasOpportunities
-              ? `${opportunityReport.overview.total} evidence-backed opportunities`
-              : "Evidence feeds your Growth Plan automatically",
+          status: national
+            ? nationalStrategyReady || growthIntelAck
+              ? "complete"
+              : "in_progress"
+            : growthIntelAck
+              ? "complete"
+              : hasOpportunities || websiteComplete
+                ? "in_progress"
+                : "not_started",
+          completionPct: national ? (nationalStrategyReady ? 100 : 60) : growthIntelAck ? 100 : hasOpportunities ? 70 : websiteComplete ? 40 : 0,
+          summary: national
+            ? "National commercial intelligence feeds the Growth Plan"
+            : growthIntelAck
+              ? `${opportunityReport?.overview.total || 0} opportunities reviewed`
+              : hasOpportunities
+                ? `${opportunityReport?.overview.total || 0} evidence-backed opportunities`
+                : "Evidence feeds your Growth Plan automatically",
         };
       case "growth-plan":
         return {
           ...base,
-          status: planAck ? "complete" : websiteComplete || growthIntelAck ? "in_progress" : "not_started",
-          completionPct: planAck ? 100 : websiteComplete ? 50 : 0,
+          status: planAck ? "complete" : nationalStrategyReady || websiteComplete || growthIntelAck ? "in_progress" : "not_started",
+          completionPct: planAck ? 100 : nationalStrategyReady || websiteComplete ? 50 : 0,
           summary: planAck ? `Recommended: ${plan.suggestedCampaign}` : `Suggested: ${plan.suggestedCampaign}`,
         };
       case "generate":
         return {
           ...base,
-          status: generateComplete ? "complete" : planAck ? "in_progress" : "not_started",
-          completionPct: generateComplete ? 100 : planAck ? 30 : 0,
-          summary: generateComplete ? "Content package created" : `~${plan.estimatedPages} pages estimated`,
+          status: generateComplete ? "complete" : national ? "not_started" : planAck ? "in_progress" : "not_started",
+          completionPct: generateComplete ? 100 : national ? 0 : planAck ? 30 : 0,
+          summary: national ? "National content generation not yet implemented" : generateComplete ? "Content package created" : `~${plan.estimatedPages} pages estimated`,
         };
       case "dashboard":
         return {
           ...base,
           status: dashboardAck || generateComplete ? "complete" : "not_started",
           completionPct: dashboardAck || generateComplete ? 100 : 0,
-          summary: "Monitor your campaign progress",
+          summary: national ? "Monitor national strategy" : "Monitor your campaign progress",
         };
       default:
         return { ...base, status: "not_started" as const, completionPct: 0, summary: "" };

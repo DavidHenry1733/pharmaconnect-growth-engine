@@ -8,11 +8,14 @@ import {
   type GrowthPlanActionType,
   type GrowthPlanIntelligenceSnapshot,
 } from "./growthPlanIntelligenceV1Model.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { WORKSPACE_ROOT, safePharmacySlug } from "./pharmacyWorkspacePaths.ts";
 
-const DATA_DIR = path.join(process.cwd(), "data/national-growth-engine");
+const DATA_DIR = path.join(WORKSPACE_ROOT, "data/national-growth-engine");
+const FIXTURE_DIR = path.join(WORKSPACE_ROOT, "fixtures/national-growth-engine");
 const INPUT_FILE = path.join(DATA_DIR, "pharmaconnect-growth-plan-intelligence-input-v1.json");
 const OUTPUT_FILE = path.join(DATA_DIR, "pharmaconnect-growth-plan-intelligence-v1.json");
-const FIXTURE_FILE = path.join(process.cwd(), "fixtures/national-growth-engine/pharmaconnect-growth-plan-intelligence-v1.json");
+const FIXTURE_FILE = path.join(FIXTURE_DIR, "pharmaconnect-growth-plan-intelligence-v1.json");
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "action";
@@ -157,8 +160,18 @@ export function buildGrowthPlanIntelligenceV1(input: GrowthPlanIntelligenceInput
   };
 }
 
-export function readGrowthPlanIntelligenceV1(): GrowthPlanIntelligenceSnapshot | null {
-  const file = fs.existsSync(OUTPUT_FILE) ? OUTPUT_FILE : fs.existsSync(FIXTURE_FILE) ? FIXTURE_FILE : "";
+/**
+ * Read persisted GP-01 snapshot for a NATIONAL tenant only.
+ * LOCAL tenants must never receive another tenant's national fixture.
+ */
+export function readGrowthPlanIntelligenceV1(slug: string): GrowthPlanIntelligenceSnapshot | null {
+  if (!slug || !isNationalGrowthPlatform(slug)) return null;
+  const safe = safePharmacySlug(slug);
+  const candidates = [
+    path.join(DATA_DIR, `${safe}-growth-plan-intelligence-v1.json`),
+    path.join(FIXTURE_DIR, `${safe}-growth-plan-intelligence-v1.json`),
+  ];
+  const file = candidates.find((p) => fs.existsSync(p));
   if (!file) return null;
   return JSON.parse(fs.readFileSync(file, "utf8")) as GrowthPlanIntelligenceSnapshot;
 }

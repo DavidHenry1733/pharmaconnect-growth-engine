@@ -31,6 +31,7 @@ import {
 import { renderGrowthPlanV1Page } from "./growthEngineGrowthPlanPage.ts";
 import { renderPremiumCustomerDashboardPage } from "./growthEnginePremiumCustomerDashboardPage.ts";
 import { renderLiveIntegrationProofPage } from "./growthEngineLiveIntegrationProofPage.ts";
+import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -92,6 +93,7 @@ function stepNavUrls(slug: string, framework: GrowthEngineFramework, step: numbe
 }
 
 export function renderGrowthEngineHubPage(slug: string): string {
+  const copy = growthEnginePlatformCopy(slug);
   const framework = buildGrowthEngineFramework(slug);
   const steps = framework.steps
     .filter((s) => isCustomerVisibleInStepper(s.id))
@@ -106,15 +108,16 @@ export function renderGrowthEngineHubPage(slug: string): string {
     .join("");
   const nextUrl = framework.nextStep?.url || framework.steps[0].url;
   const body = `<div class="ge-panel">
-<h2>Your pharmacy growth programme</h2>
-<p class="ge-lead">Four commercial reports tell you where you stand, how you compare, what is missing, and what to do next — then create and publish your campaign.</p>
+<h2>${esc(copy.hubTitle)}</h2>
+<p class="ge-lead">${esc(copy.hubLead)}</p>
 <div class="ge-grid-3">${steps}</div>
 <p style="margin-top:20px"><a class="ge-btn ge-btn-primary" href="${esc(nextUrl)}">Continue where you left off →</a></p>
 </div>`;
-  return pageShell(slug, "Your Pharmacy Programme", "Four reports · one clear path to growth", framework.currentStep, body);
+  return pageShell(slug, copy.hubTitle, copy.hubLead, framework.currentStep, body);
 }
 
 export function renderBusinessIntelligencePage(slug: string, data: PharmacyProfileData): string {
+  const copy = growthEnginePlatformCopy(slug);
   const framework = buildGrowthEngineFramework(slug);
   const quality = computeWizardQualityScore(data);
   const ready = isRequiredProfileComplete(data);
@@ -155,7 +158,9 @@ ${brand.logoUrl ? `<img src="${esc(brand.logoUrl)}" alt="" style="max-height:52p
 <div><strong style="font-size:18px">${esc(data.pharmacyName || slug)}</strong>
 <p style="margin:4px 0 0;font-size:13px;color:#64748b">${brand.servicesDetected ? `${brand.servicesDetected} services detected · ` : ""}${brand.navLinks ? `${brand.navLinks} nav links · ` : ""}${brand.socialCount ? `${brand.socialCount} social profiles` : "Run website import to auto-fill your profile"}</p></div></div>`
     : `<div style="margin-bottom:16px;padding:14px;border:1px dashed #cbd5e1;border-radius:12px;font-size:13px;color:#64748b">Import your website to auto-fill business name, contact, brand and services — minimal typing required.</div>`;
-  const localRows = [
+  const localRows = copy.platform === "national"
+    ? ""
+    : [
     ["Google listing", local.googlePlaceFound ? local.googlePlaceLabel : "Not linked"],
     ["Competitors", local.competitorCount ? String(local.competitorCount) : "Load in wizard"],
     ["GP surgeries", local.gpCount ? String(local.gpCount) : "—"],
@@ -174,14 +179,14 @@ ${hero}
 ${ready ? `<p style="color:#059669;font-weight:700">✓ Required profile fields complete</p>` : `<p style="color:#b45309;font-weight:700">${quality.missingRequired.length} required item(s) still needed — mostly confirm imported values</p>`}
 <h3 style="font-size:15px;margin:20px 0 10px">Imported business information</h3>
 <div style="margin:8px 0">${rows}</div>
-<h3 style="font-size:15px;margin:20px 0 10px">Local market preview</h3>
-<div style="margin:8px 0">${localRows}</div>
+${copy.platform === "national" ? `<h3 style="font-size:15px;margin:20px 0 10px">National market</h3><p class="ge-lead">Commercial market is national / UK. Local Google Places comparison is not a prerequisite.</p>` : `<h3 style="font-size:15px;margin:20px 0 10px">Local market preview</h3>
+<div style="margin:8px 0">${localRows}</div>`}
 <p style="margin-top:20px"><a class="ge-btn ge-btn-primary" href="${esc(growthEngineWizardUrl(slug))}">Review &amp; confirm in wizard →</a>
 <a class="ge-btn ge-btn-ghost" href="${esc(growthEngineWizardUrl(slug))}" style="margin-left:8px">Import website</a></p>
 </div>`;
-  return pageShell(slug, "Your Pharmacy", "Import from your website and Google — confirm what we found", "business-intelligence", body, {
+  return pageShell(slug, copy.businessStepTitle, copy.businessStepSubtitle, "business-intelligence", body, {
     nextUrl: next,
-    nextLabel: "Continue to Your Local Market →",
+    nextLabel: `Continue to ${copy.marketStepTitle} →`,
   });
 }
 
@@ -214,8 +219,21 @@ export function renderGrowthPlanPage(slug: string, _plan: GrowthEnginePlanRecomm
 }
 
 export function renderGeneratePage(slug: string, plan: GrowthEnginePlanRecommendation): string {
+  const copy = growthEnginePlatformCopy(slug);
   const framework = buildGrowthEngineFramework(slug);
   const { prev, next } = stepNavUrls(slug, framework, 6);
+  if (copy.platform === "national") {
+    const body = `<div class="ge-panel">
+<h2>Campaign strategy</h2>
+<p class="ge-lead">This national tenant uses persisted commercial intelligence. Patient-service Campaign Builder is not the next step. National commercial content generation is not yet implemented.</p>
+<p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Return to Growth Plan →</a></p>
+</div>`;
+    return pageShell(slug, copy.generateStepTitle, copy.generateStepSubtitle, "generate", body, {
+      prevUrl: prev,
+      nextUrl: next,
+      nextLabel: "Continue to Dashboard →",
+    });
+  }
   const generated = contentPackageGenerated(slug, plan.primaryServiceId);
   const reviewed = contentPackageReviewed(slug, plan.primaryServiceId);
   const approved = contentPackageApproved(slug, plan.primaryServiceId);

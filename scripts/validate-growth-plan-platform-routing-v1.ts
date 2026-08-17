@@ -1,0 +1,169 @@
+#!/usr/bin/env npx tsx
+/**
+ * GP-01C — national/local Growth Plan routing validation.
+ * Does not call DataForSEO, Google Places, or GSC.
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { resolveGrowthPlatform } from "../src/pharmacy/growthPlatformResolverService.ts";
+import { resolveGrowthPlan } from "../src/pharmacy/growthEngineGrowthPlanResolver.ts";
+import { readGrowthPlanIntelligenceV1 } from "../src/pharmacy/growthPlanIntelligenceV1Service.ts";
+import { resolveTenantServiceCatalogue } from "../src/pharmacy/growthEngineTenantServiceCatalogue.ts";
+import { renderGrowthPlanPage } from "../src/pharmacy/growthEnginePageRenderers.ts";
+import { renderCampaignBuilderPage } from "../src/pharmacy/growthEngineCampaignBuilderPage.ts";
+import { buildGrowthEngineFramework, buildGrowthPlanRecommendation } from "../src/pharmacy/growthEngineFrameworkService.ts";
+import { listLockedCommercialSupportedServices } from "../src/pharmacy/masterAdminLockedCommercialServiceCatalog.ts";
+import { buildPlatformOperationsDashboard } from "../src/pharmacy/masterAdminPlatformOperationsDashboardService.ts";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, "..");
+
+interface Check {
+  id: string;
+  pass: boolean;
+  detail: string;
+}
+
+const checks: Check[] = [];
+
+function record(id: string, pass: boolean, detail: string) {
+  checks.push({ id, pass, detail });
+  console.log(`${pass ? "PASS" : "FAIL"}  ${id} — ${detail}`);
+}
+
+function containsAny(hay: string, needles: string[]): string[] {
+  return needles.filter((n) => hay.includes(n));
+}
+
+function main() {
+  console.log("\n=== GP-01C Growth Plan platform routing ===\n");
+
+  const unknown = resolveGrowthPlatform("__gp01c_unknown_tenant__");
+  record("DEFAULT_UNKNOWN_TENANT_MODE=LOCAL", unknown.platform === "local", unknown.platform);
+
+  const pcPlatform = resolveGrowthPlatform("pharmaconnect");
+  record("pharmaconnect-platform-national", pcPlatform.platform === "national", pcPlatform.platform);
+  record("no-slug-hardcode-in-resolver", !fs.readFileSync(path.join(ROOT, "src/pharmacy/growthPlatformResolverService.ts"), "utf8").includes('slug === "pharmaconnect"'), "resolver uses growthPlatform config");
+
+  const localPlatform = resolveGrowthPlatform("leeds-pharmacy");
+  record("leeds-pharmacy-platform-local", localPlatform.platform === "local", localPlatform.platform);
+
+  const nationalPlan = resolveGrowthPlan("pharmaconnect");
+  record("national-resolver-mode", nationalPlan.platform === "national", nationalPlan.platform);
+  if (nationalPlan.platform !== "national") {
+    console.log("\nSTOP — national resolver did not return national mode\n");
+    process.exit(1);
+  }
+
+  const snapshot = readGrowthPlanIntelligenceV1("pharmaconnect");
+  record("national-snapshot-loaded", Boolean(snapshot), snapshot ? `${snapshot.actions.length} actions` : "missing");
+  record("local-never-reads-national-snapshot", readGrowthPlanIntelligenceV1("leeds-pharmacy") === null, "local slug gated");
+  record("unknown-never-reads-national-snapshot", readGrowthPlanIntelligenceV1("__gp01c_unknown_tenant__") === null, "unknown slug gated");
+
+  const primary = nationalPlan.plan.primary;
+  record("national-primary-present", Boolean(primary), primary?.primaryKeyword || "none");
+  record("national-primary-keyword", primary?.primaryKeyword === "pharmacy seo", primary?.primaryKeyword || "none");
+  record(
+    "gap-evidence-truthful",
+    primary?.gapEvidenceStatus === "NEW_MARKET_EVIDENCE" && primary?.gapConfidence === "LOW",
+    `${primary?.gapEvidenceStatus}/${primary?.gapConfidence}`,
+  );
+  record(
+    "gap-not-upgraded",
+    primary?.gapEvidenceStatus !== "PROVEN_UNTAPPED" && primary?.gapConfidence !== "HIGH",
+    "NEW_MARKET_EVIDENCE/LOW retained",
+  );
+  record("national-market-identity", /United Kingdom|UK Community Pharmacy Digital Growth|national/i.test(`${nationalPlan.plan.primaryMarket} ${nationalPlan.plan.market}`), `${nationalPlan.plan.primaryMarket} / ${nationalPlan.plan.market}`);
+  record("national-market-not-rotherham", !/rotherham/i.test(`${nationalPlan.plan.primaryMarket} ${nationalPlan.plan.market} ${nationalPlan.plan.executiveSummary.currentPosition}`), nationalPlan.plan.primaryMarket);
+
+  const nationalServices = resolveTenantServiceCatalogue("pharmaconnect");
+  const localServices = resolveTenantServiceCatalogue("leeds-pharmacy");
+  const locked = listLockedCommercialSupportedServices();
+  const patientNames = ["Pharmacy First", "Blood Pressure Checks", "Travel Vaccinations", "Flu Vaccinations", "Prescription Dispensing"];
+  record("national-catalogue-source", nationalServices.source === "project-commercial", nationalServices.source);
+  record("local-catalogue-source", localServices.source === "pharmacy-patient-catalogue", localServices.source);
+  record(
+    "national-has-digital-services",
+    nationalServices.services.some((s) => /website design|seo|email|hosting|audit/i.test(s.serviceName)),
+    nationalServices.services.map((s) => s.serviceName).join(", "),
+  );
+  record(
+    "national-not-patient-catalogue",
+    !nationalServices.services.some((s) => patientNames.includes(s.serviceName)),
+    nationalServices.services.map((s) => s.serviceName).join(", "),
+  );
+  record(
+    "patient-catalogue-preserved",
+    patientNames.every((name) => locked.some((s) => s.serviceName === name) || localServices.services.some((s) => s.serviceName === name)),
+    `${locked.length} locked services`,
+  );
+
+  const nationalHtml = renderGrowthPlanPage("pharmaconnect", buildGrowthPlanRecommendation("pharmaconnect"));
+  const localHtml = renderGrowthPlanPage("leeds-pharmacy", buildGrowthPlanRecommendation("leeds-pharmacy"));
+
+  record("national-html-digital-provider", /digital-growth provider serving UK community pharmacies/i.test(nationalHtml), "identity copy");
+  record("national-html-not-a-pharmacy", !/is a pharmacy\b|your pharmacy programme|serves Rotherham/i.test(nationalHtml), "not described as a pharmacy");
+  record("national-html-not-rotherham-market", !/commercial market: rotherham/i.test(nationalHtml) && !/serves Rotherham/i.test(nationalHtml), "Rotherham not commercial market");
+  record("national-html-primary-keyword", nationalHtml.includes("pharmacy seo"), "primary keyword visible");
+  record("national-html-no-priority-empty", !nationalHtml.includes("No priority campaign yet"), "empty campaign copy absent");
+  record("national-html-no-patient-service-cards", containsAny(nationalHtml, patientNames).length === 0, containsAny(nationalHtml, patientNames).join(", ") || "none");
+  record("national-html-digital-service-shown", /Pharmacy Website Design|Pharmacy Local SEO|Pharmacy Email Marketing/i.test(nationalHtml), "configured digital services");
+  record("national-html-no-places-prereq", /Google Places \/ Your Local Market is not a prerequisite/i.test(nationalHtml), "national readiness");
+  record("national-html-no-side-panel", !nationalHtml.includes("Market Opportunity Plan"), "GP-01 side panel removed");
+  record("national-html-workflow", nationalHtml.includes("Your Business") && nationalHtml.includes("National Market") && !/<div class="ge-step-title">Your Pharmacy</div>/.test(nationalHtml), "national stepper");
+  record("national-html-bounded-cta", /National strategy is ready|content generation is not yet implemented/i.test(nationalHtml), "bounded generation state");
+  record("national-html-platform-attr", nationalHtml.includes('data-growth-platform="national"'), "platform attribute");
+
+  record("local-html-renders", localHtml.includes("Where you stand") && localHtml.includes("Campaign Readiness"), "local plan renders");
+  record("local-html-your-pharmacy", localHtml.includes("Your Pharmacy"), "Your Pharmacy retained");
+  record("local-html-local-market", localHtml.includes("Your Local Market"), "Your Local Market retained");
+  record("local-html-no-national-keywords", !localHtml.includes("pharmacy seo") && !localHtml.includes("UK Community Pharmacy Digital Growth"), "no national fixture");
+  record("local-html-campaign-engine", localHtml.includes("Open Campaign Builder") || localHtml.includes("No evidence-backed campaign"), "local engine path");
+  record("local-html-platform-attr", localHtml.includes('data-growth-platform="local"'), "platform attribute");
+
+  const nationalBuilder = renderCampaignBuilderPage("pharmaconnect", "choose");
+  const localBuilder = renderCampaignBuilderPage("leeds-pharmacy", "choose");
+  record("national-builder-bounded", /National campaign strategy/i.test(nationalBuilder) && /not yet implemented/i.test(nationalBuilder), "no NHS explorer");
+  record("national-builder-explicit-non-routing", /must not open the NHS \/ Pharmacy First/i.test(nationalBuilder), "explicit non-routing copy");
+  record("local-builder-explorer", /campaign-builder|Choose|Pharmacy First|Select a service/i.test(localBuilder) || localBuilder.includes("data-growth-platform") === false, "local builder retained");
+
+  const nationalFw = buildGrowthEngineFramework("pharmaconnect");
+  const localFw = buildGrowthEngineFramework("leeds-pharmacy");
+  record("national-framework-business-title", nationalFw.steps.find((s) => s.id === "business-intelligence")?.title === "Your Business", nationalFw.steps.find((s) => s.id === "business-intelligence")?.title || "");
+  record("national-framework-market-title", nationalFw.steps.find((s) => s.id === "local-market")?.title === "National Market", nationalFw.steps.find((s) => s.id === "local-market")?.title || "");
+  record("local-framework-business-title", localFw.steps.find((s) => s.id === "business-intelligence")?.title === "Your Pharmacy", localFw.steps.find((s) => s.id === "business-intelligence")?.title || "");
+  record("local-framework-market-title", localFw.steps.find((s) => s.id === "local-market")?.title === "Your Local Market", localFw.steps.find((s) => s.id === "local-market")?.title || "");
+
+  const opsNational = buildPlatformOperationsDashboard("pharmaconnect");
+  record("ops-national-viewing-platform", opsNational.viewingPlatform === "national", opsNational.viewingPlatform);
+  record(
+    "ops-national-tenant-digital-services",
+    opsNational.tenantCommercialServices.some((s) => /website design|seo|email|hosting|audit/i.test(s.serviceName)),
+    opsNational.tenantCommercialServices.map((s) => s.serviceName).join(", "),
+  );
+  record(
+    "ops-generation-capability-preserved",
+    Boolean(opsNational.pharmacyCustomerGenerationCapability?.label?.includes("PHARMACY CUSTOMER GENERATION CAPABILITY")) &&
+      opsNational.services.some((s: { serviceName?: string }) => s.serviceName === "Pharmacy First"),
+    opsNational.pharmacyCustomerGenerationCapability?.label || "missing",
+  );
+
+  const catalogueFile = fs.readFileSync(path.join(ROOT, "config/pharmacy/locked-commercial-service-catalogue.json"), "utf8");
+  record("PATIENT_SERVICE_CATALOGUE_CHANGED=NO", catalogueFile.includes("pharmacy-first") && catalogueFile.includes("blood-pressure-checks"), "locked catalogue intact");
+
+  const engineSrc = fs.readFileSync(path.join(ROOT, "src/pharmacy/growthEngineCampaignRecommendationEngine.ts"), "utf8");
+  record(
+    "LOCAL_CAMPAIGN_ENGINE_UNCHANGED_CORE",
+    engineSrc.includes("BENCHMARK_MASTER_SERVICE_IDS") && engineSrc.includes("eligibleCampaignServices"),
+    "local eligibility still patient catalogue",
+  );
+
+  const passed = checks.filter((c) => c.pass).length;
+  const total = checks.length;
+  console.log(`\n${passed === total ? "✅" : "❌"} ${passed}/${total} checks passed\n`);
+  if (passed !== total) process.exit(1);
+}
+
+main();

@@ -7,6 +7,7 @@ import {
   GROWTH_ENGINE_STEPS,
   isCustomerVisibleInStepper,
 } from "./growthEngineFrameworkService.ts";
+import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -77,7 +78,7 @@ export function renderGrowthEngineStepper(framework: GrowthEngineFramework, acti
       state?.status === "complete" ? "Complete" : state?.status === "in_progress" ? "In progress" : "Not started";
     return `<a class="${cls}" href="${esc(state?.url || "#")}">
 <span class="ge-step-num">${esc(stepLabel)}</span>
-<div class="ge-step-title">${esc(meta.title)}</div>
+<div class="ge-step-title">${esc(state?.title || meta.title)}</div>
 <div class="ge-step-status">${esc(statusLabel)}</div>
 <div class="ge-step-pct">${state?.completionPct ?? 0}%</div>
 </a>`;
@@ -85,21 +86,23 @@ export function renderGrowthEngineStepper(framework: GrowthEngineFramework, acti
 }
 
 function customerProgressLabel(framework: GrowthEngineFramework, activeId: GrowthEngineStepId): string {
+  const copy = growthEnginePlatformCopy(framework.slug);
   const reportIdx = CUSTOMER_REPORT_STEP_IDS.indexOf(activeId as (typeof CUSTOMER_REPORT_STEP_IDS)[number]);
   if (reportIdx >= 0) return `Report ${reportIdx + 1} of ${CUSTOMER_REPORT_STEP_IDS.length}`;
-  if (activeId === "generate") return "Create your campaign content";
+  if (activeId === "generate") return copy.generateStepSubtitle;
   if (activeId === "dashboard") return "Track and publish";
   const current = framework.steps.find((s) => s.id === framework.currentStep);
-  return current?.title || "Your pharmacy growth programme";
+  return current?.title || copy.programmeLabel;
 }
 
 export function renderGrowthEngineProgress(framework: GrowthEngineFramework, activeId?: GrowthEngineStepId): string {
+  const copy = growthEnginePlatformCopy(framework.slug);
   const reportSteps = framework.steps.filter((s) => (CUSTOMER_REPORT_STEP_IDS as readonly string[]).includes(s.id));
   const reportPct = Math.round(reportSteps.reduce((sum, s) => sum + s.completionPct, 0) / reportSteps.length);
   const progressLabel = activeId ? customerProgressLabel(framework, activeId) : `${reportPct}% of reports complete`;
   return `<div class="ge-progress">
 <div class="ge-progress-bar"><div class="ge-progress-fill" style="width:${framework.overallCompletionPct}%"></div></div>
-<div class="ge-progress-meta"><span>Your pharmacy programme · ${framework.overallCompletionPct}% complete</span><span>${esc(progressLabel)}</span></div>
+<div class="ge-progress-meta"><span>${esc(copy.programmeLabel)} · ${framework.overallCompletionPct}% complete</span><span>${esc(progressLabel)}</span></div>
 </div>`;
 }
 
@@ -109,11 +112,12 @@ export function renderGrowthEngineNavBar(
   activeId: GrowthEngineStepId,
   options?: { prevUrl?: string; nextUrl?: string; nextLabel?: string },
 ): string {
+  const copy = growthEnginePlatformCopy(slug);
   const prev = options?.prevUrl ? `<a class="ge-btn ge-btn-ghost" href="${esc(options.prevUrl)}">← Previous</a>` : "<span></span>";
   const next = options?.nextUrl
     ? `<a class="ge-btn ge-btn-primary" href="${esc(options.nextUrl)}">${esc(options.nextLabel || "Continue →")}</a>`
     : "";
   return `${renderGrowthEngineProgress(framework, activeId)}
-<nav class="ge-stepper" aria-label="Pharmacy growth reports">${renderGrowthEngineStepper(framework, activeId)}</nav>
+<nav class="ge-stepper" aria-label="${esc(copy.stepperAriaLabel)}">${renderGrowthEngineStepper(framework, activeId)}</nav>
 <div class="ge-nav-bar">${prev}${next}</div>`;
 }

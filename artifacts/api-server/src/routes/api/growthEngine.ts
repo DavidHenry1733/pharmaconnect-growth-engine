@@ -16,7 +16,7 @@ import {
   buildGrowthOpportunityReport,
   saveGrowthOpportunityReport,
 } from "../../../../../src/pharmacy/growthEngineOpportunityEngine.ts";
-import { buildGrowthPlanIntelligence } from "../../../../../src/pharmacy/growthEngineCampaignRecommendationEngine.ts";
+import { resolveGrowthPlan } from "../../../../../src/pharmacy/growthEngineGrowthPlanResolver.ts";
 import {
   buildGrowthJourneyView,
   syncGrowthCycles,
@@ -25,6 +25,7 @@ import { loadGrowthMemory, recordRecommendationDecision } from "../../../../../s
 import { checkLaunchPlanEligibility, buildAdaptiveLaunchRecommendation } from "../../../../../src/pharmacy/growthEngineLaunchManagerService.ts";
 import { buildCycleAwareRecommendation } from "../../../../../src/pharmacy/growthEngineCycleLearningEngine.ts";
 import { resolveTenantProfileSlug } from "../../../../../src/pharmacy/pharmacyTenantSlug.ts";
+import { isNationalGrowthPlatform } from "../../../../../src/pharmacy/growthPlatformResolverService.ts";
 import {
   loadLiveIntegrationProof,
   runLiveIntegrationProof,
@@ -83,7 +84,11 @@ router.get("/growth-engine/:slug/opportunities", (req, res) => {
 router.get("/growth-engine/:slug/growth-plan", (req, res) => {
   const slug = resolveSlug(req.params.slug);
   if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
-  res.json({ ok: true, plan: buildGrowthPlanIntelligence(slug) });
+  const resolved = resolveGrowthPlan(slug);
+  if (resolved.platform === "national") {
+    return res.json({ ok: true, platform: "national", plan: resolved.plan });
+  }
+  res.json({ ok: true, platform: "local", plan: resolved.plan });
 });
 
 router.get("/growth-engine/:slug/cycles", (req, res) => {
@@ -129,6 +134,13 @@ router.get("/growth-engine/:slug/launch-plan/:serviceId", (req, res) => {
 router.post("/growth-engine/:slug/local-market/discover", async (req, res) => {
   const slug = resolveSlug(req.params.slug);
   if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      live: false,
+      error: "Local Google Places discovery is not applicable to the NATIONAL Growth Platform.",
+    });
+  }
   try {
     const snapshot = await discoverLocalMarketCompetitors(slug);
     const live = snapshot.source === "google-places-live" && snapshot.competitors.length >= 5;
@@ -216,7 +228,9 @@ for (const stepId of ACK_STEPS) {
     saveWorkflowAcknowledgement(slug, stepId);
     const next: Record<GrowthEngineStepId, string> = {
       "growth-intelligence": `/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}`,
-      "growth-plan": `/api/growth-engine/campaign-builder?slug=${encodeURIComponent(slug)}`,
+      "growth-plan": isNationalGrowthPlatform(slug)
+        ? `/api/growth-engine/generate?slug=${encodeURIComponent(slug)}`
+        : `/api/growth-engine/campaign-builder?slug=${encodeURIComponent(slug)}`,
       dashboard: `/api/growth-engine?slug=${encodeURIComponent(slug)}`,
       "business-intelligence": `/api/growth-engine/business-intelligence?slug=${encodeURIComponent(slug)}`,
       "local-market": `/api/growth-engine/local-market?slug=${encodeURIComponent(slug)}`,

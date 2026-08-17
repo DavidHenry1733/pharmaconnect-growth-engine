@@ -558,6 +558,7 @@ th{background:#0f172a;color:#94a3b8;font-size:.68rem;text-transform:uppercase;le
           <summary>Service Campaigns</summary>
           <div class="detail-collapse-body">
             <p class="local-coverage-subtitle">Independent service campaigns. Create a campaign, then complete Service Evidence for that service. Generation stays Product Owner controlled.</p>
+            <div id="detailTenantCommercialServices" style="display:none;margin-bottom:14px;padding:12px;border:1px solid #334155;border-radius:10px;background:#0f172a"></div>
             <div id="detailCreateCampaignPanel" style="margin-bottom:14px;padding:12px;border:1px solid #334155;border-radius:10px;background:#0f172a">
               <div id="po-create-campaign" style="font-weight:800;font-size:.88rem;margin-bottom:8px">Create Campaign</div>
               <label style="display:block;font-size:.72rem;color:#94a3b8;margin-bottom:8px">Select Service
@@ -1245,6 +1246,7 @@ function rejectLocalCoverageArea(i){
   if(activeCustomer)renderLocalCoverageSummary(activeCustomer);
 }
 function isNationalMarketCustomer(c){
+  if(c&&c.growthPlatform==='national')return true;
   const scope=(c&&c.marketScope&&c.marketScope.marketScope)||(c&&c.sections&&c.sections.businessProfile&&c.sections.businessProfile.marketScope)||'';
   return String(scope).toLowerCase()==='national';
 }
@@ -2043,16 +2045,31 @@ function renderPlatformOperations(dashboard){
 
   html+='<div class="po-ops-section" id="poOpsCapabilityMatrix"><h3>2 · Platform Capability Matrix</h3><table class="po-ops-table"><thead><tr><th>Capability</th><th>Status</th><th>Live state</th><th></th></tr></thead><tbody>'+
     caps.map(function(c){
-      return '<tr class="clickable" data-capability="'+esc(c.id)+'" tabindex="0" role="link" aria-label="Open '+esc(c.id)+'"><td>'+esc(c.id)+'</td><td>'+poOpsPill(c.status)+'</td><td>'+esc(c.detail||'')+'</td><td><button class="btn secondary" type="button" style="font-size:.68rem">Open</button></td></tr>';
+      const capLabel=c.id==='Service Registration'?'Pharmacy Customer Generation Capability':c.id;
+      return '<tr class="clickable" data-capability="'+esc(c.id)+'" tabindex="0" role="link" aria-label="Open '+esc(capLabel)+'"><td>'+esc(capLabel)+'</td><td>'+poOpsPill(c.status)+'</td><td>'+esc(c.detail||'')+'</td><td><button class="btn secondary" type="button" style="font-size:.68rem">Open</button></td></tr>';
     }).join('')+
     '</tbody></table></div>';
 
-  html+='<div class="po-ops-section" id="poOpsServiceRegistration"><h3>3 · Service Registration</h3><table class="po-ops-table"><thead><tr><th>Service</th><th>Registration</th><th>Published</th><th>Indexed</th><th>Campaigns</th><th>Action</th></tr></thead><tbody>'+
+  const tenantServices=dashboard.tenantCommercialServices||[];
+  if(dashboard.viewingPlatform==='national'){
+    html+='<div class="po-ops-section" id="poOpsTenantCommercialServices"><h3>3a · This customer\\'s commercial services</h3>'+
+      '<p style="font-size:.74rem;color:#94a3b8;margin:0 0 10px">Digital-growth services from this NATIONAL customer\\'s project configuration. The locked patient-service catalogue is not this customer\\'s own services.</p>'+
+      (tenantServices.length
+        ? '<table class="po-ops-table"><thead><tr><th>Service</th><th>ID</th></tr></thead><tbody>'+
+          tenantServices.map(function(s){return '<tr><td>'+esc(s.serviceName)+'</td><td>'+esc(s.serviceId)+'</td></tr>';}).join('')+
+          '</tbody></table>'
+        : '<div class="empty">No project commercial services configured for this customer.</div>')+
+      '</div>';
+  }
+
+  html+='<div class="po-ops-section" id="poOpsServiceRegistration"><h3>3 · Pharmacy Customer Generation Capability</h3>'+
+    '<p style="font-size:.74rem;color:#94a3b8;margin:0 0 10px">'+esc((dashboard.pharmacyCustomerGenerationCapability&&dashboard.pharmacyCustomerGenerationCapability.note)||'Locked patient-service catalogue for local pharmacy customers.')+'</p>'+
+    '<table class="po-ops-table"><thead><tr><th>Service</th><th>Registration</th><th>Published</th><th>Indexed</th><th>Campaigns</th><th>Action</th></tr></thead><tbody>'+
     services.map(function(s){
       const action=s.generationReady
         ? '<button class="btn" type="button" style="font-size:.68rem" onclick="openPlatformOpsCreateCampaign(\\''+esc(dashboard.primarySlug||'')+'\\')">Create Campaign</button>'
         : '<span style="color:#94a3b8">Setup Required</span>';
-      return '<tr><td>'+esc(s.serviceName)+'</td><td>'+poOpsPill(s.registrationStatus)+(s.missingRegistrations&&s.missingRegistrations.length?'<div style="margin-top:4px;color:#94a3b8">'+esc(s.missingRegistrations.join('; '))+'</div>':'')+'</td><td>'+esc(s.published?'Yes':'No')+'</td><td>'+esc(s.indexed?'Yes':'No')+'</td><td>'+esc(String(s.campaigns||0))+'</td><td>'+action+'</td></tr>';
+      return '<tr><td>'+esc(s.serviceName)+'</td><td>'+poOpsPill(s.registrationStatus)+(s.missingRegistrations&&s.missingRegistrations.length?'<div style="margin-top:4px;color:#94a3b8">'+esc(s.missingRegistrations.join('; '))+'</div>':'')+'</td><td>'+esc(s.published?'Yes':'No')+'</td><td>'+esc(s.indexed?'Yes':'No')+'</td><td>'+esc(String(s.campaigns||0))+'</td><td>'+(dashboard.viewingPlatform==='national'?'<span style="color:#94a3b8">Platform capability — not this customer\\'s services</span>':action)+'</td></tr>';
     }).join('')+
     '</tbody></table></div>';
 
@@ -2120,7 +2137,8 @@ async function loadPlatformOperations(){
   const el=document.getElementById('platformOpsBody');
   if(!el)return;
   try{
-    const data=await api('/api/master-admin-platform/platform-operations',{timeoutMs:45000});
+    const slug=activeCustomer&&activeCustomer.slug?encodeURIComponent(activeCustomer.slug):'';
+    const data=await api('/api/master-admin-platform/platform-operations'+(slug?('?slug='+slug):''),{timeoutMs:45000});
     renderPlatformOperations(data.dashboard);
   }catch(e){
     el.innerHTML='<div class="empty">Platform operations unavailable — '+esc(e&&e.message?e.message:String(e))+'</div>';
@@ -2492,6 +2510,7 @@ async function openCustomer(slug,options){
     }
     setCustomerCampaignUrl(slug,activeCustomer.selectedCampaignId||null);
     renderCustomerDetail(activeCustomer);
+    void loadPlatformOperations();
     document.getElementById('detailLoading').style.display='none';
     document.getElementById('detailContent').style.display='block';
     if(options.openSelectedCampaignPanel&&activeCustomer.selectedServiceCampaign){
@@ -2654,9 +2673,51 @@ function renderServiceCampaignsPanel(c){
   const campaigns=c.serviceCampaigns||[];
   if(collapse)collapse.open=true;
   const createPanel=document.getElementById('detailCreateCampaignPanel');
+  const tenantBox=document.getElementById('detailTenantCommercialServices');
+  const national=c.growthPlatform==='national'||isNationalMarketCustomer(c);
+  const catalogue=(c.tenantServiceCatalogue&&c.tenantServiceCatalogue.services)||[];
+  if(tenantBox){
+    if(national){
+      tenantBox.style.display='block';
+      tenantBox.innerHTML='<div style="font-weight:800;font-size:.88rem;margin-bottom:8px">This customer\\'s commercial services</div>'+
+        '<p style="font-size:.72rem;color:#94a3b8;margin:0 0 8px">Digital-growth services from project configuration. The locked pharmacy patient-service catalogue is a platform generation capability, not this customer\\'s own services.</p>'+
+        (catalogue.length
+          ? catalogue.map(function(s){return '<div style="font-size:.78rem;margin:4px 0"><strong>'+esc(s.serviceName)+'</strong> <span style="color:#94a3b8">'+esc(s.serviceId)+'</span></div>';}).join('')
+          : '<div class="empty">No project commercial services configured.</div>');
+    }else{
+      tenantBox.style.display='none';
+      tenantBox.innerHTML='';
+    }
+  }
+  const select=document.getElementById('createCampaignServiceSelect');
+  const createBtn=document.getElementById('createCampaignBtn');
+  const createMsg=document.getElementById('createCampaignMsg');
   if(createPanel)createPanel.style.display='block';
+  if(select){
+    if(!select.dataset.lockedOptions)select.dataset.lockedOptions=select.innerHTML;
+    if(national){
+      select.innerHTML='<option value="">Select a service…</option>'+(catalogue.map(function(s){
+        return '<option value="'+esc(s.serviceId)+'">'+esc(s.serviceName)+'</option>';
+      }).join(''));
+      select.disabled=true;
+      select.dataset.platform='national';
+    }else{
+      if(select.dataset.platform==='national')select.innerHTML=select.dataset.lockedOptions;
+      select.disabled=false;
+      select.dataset.platform='local';
+    }
+  }
+  if(national){
+    if(createBtn){createBtn.disabled=true;createBtn.textContent='Generation not implemented';}
+    if(createMsg){createMsg.style.color='#94a3b8';createMsg.textContent='National commercial content generation is not implemented. Patient-service Campaign Builder is not used for this customer.';}
+  }else{
+    if(createBtn){createBtn.disabled=false;createBtn.textContent='Create';}
+    if(createMsg&&createMsg.textContent&&/National commercial/.test(createMsg.textContent))createMsg.textContent='';
+  }
   if(!campaigns.length){
-    list.innerHTML='<div class="empty">No service campaigns yet. Use Create Campaign above to start Service Evidence for a locked commercial service.</div>';
+    list.innerHTML=national
+      ? '<div class="empty">No patient-service campaigns for this national customer — that is expected. Strategy lives on the Growth Plan.</div>'
+      : '<div class="empty">No service campaigns yet. Use Create Campaign above to start Service Evidence for a locked commercial service.</div>';
     if(selectedPanel)selectedPanel.style.display='none';
     return;
   }
@@ -2853,7 +2914,8 @@ function renderCustomerDetail(c){
     '<div><span class="label">Latest Evidence</span><div>'+esc(op.latestEvidence||'—')+'</div></div>'+
     '<div><span class="label">Next Action</span><div>'+esc(campaignScoped?(selectedCampaign.nextAction):(orch.stageActionLabel||c.nextAction||'Continue Workflow'))+'</div></div>'+
     '<div><span class="label">Market Scope</span><div>'+esc((c.marketScope&&c.marketScope.marketScopeLabel)||'—')+'</div></div>'+
-    '<div><span class="label">Primary Market</span><div>'+esc((c.marketScope&&c.marketScope.primaryMarket)||c.sections?.businessProfile?.primaryMarket||'—')+'</div></div>';
+    '<div><span class="label">Primary Market</span><div>'+esc((c.marketScope&&c.marketScope.primaryMarket)||c.sections?.businessProfile?.primaryMarket||'—')+'</div></div>'+
+    '<div><span class="label">Growth Platform</span><div>'+esc((c.growthPlatform||'local').toUpperCase())+'</div></div>';
   renderServiceCampaignsPanel(c);
   const mod=document.getElementById('detailPlatformModules');
   if(mod){
