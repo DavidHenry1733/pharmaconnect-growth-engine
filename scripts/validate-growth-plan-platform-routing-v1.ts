@@ -7,18 +7,23 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveGrowthPlatform } from "../src/pharmacy/growthPlatformResolverService.ts";
-import { resolveGrowthPlan } from "../src/pharmacy/growthEngineGrowthPlanResolver.ts";
-import { readGrowthPlanIntelligenceV1 } from "../src/pharmacy/growthPlanIntelligenceV1Service.ts";
-import { resolveTenantServiceCatalogue } from "../src/pharmacy/growthEngineTenantServiceCatalogue.ts";
-import { renderGrowthPlanPage } from "../src/pharmacy/growthEnginePageRenderers.ts";
-import { renderCampaignBuilderPage } from "../src/pharmacy/growthEngineCampaignBuilderPage.ts";
-import { buildGrowthEngineFramework, buildGrowthPlanRecommendation } from "../src/pharmacy/growthEngineFrameworkService.ts";
-import { listLockedCommercialSupportedServices } from "../src/pharmacy/masterAdminLockedCommercialServiceCatalog.ts";
-import { buildPlatformOperationsDashboard } from "../src/pharmacy/masterAdminPlatformOperationsDashboardService.ts";
+import * as growthPlatformResolverService from "../src/pharmacy/growthPlatformResolverService.ts";
+import * as growthEngineGrowthPlanResolver from "../src/pharmacy/growthEngineGrowthPlanResolver.ts";
+import * as growthPlanIntelligenceV1Service from "../src/pharmacy/growthPlanIntelligenceV1Service.ts";
+import * as growthEngineTenantServiceCatalogue from "../src/pharmacy/growthEngineTenantServiceCatalogue.ts";
+import * as growthEnginePageRenderers from "../src/pharmacy/growthEnginePageRenderers.ts";
+import * as growthEngineCampaignBuilderPage from "../src/pharmacy/growthEngineCampaignBuilderPage.ts";
+import * as growthEngineFrameworkService from "../src/pharmacy/growthEngineFrameworkService.ts";
+import * as masterAdminLockedCommercialServiceCatalog from "../src/pharmacy/masterAdminLockedCommercialServiceCatalog.ts";
+import * as masterAdminPlatformOperationsDashboardService from "../src/pharmacy/masterAdminPlatformOperationsDashboardService.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+
+function exported<T extends object>(mod: T | { default: T }): T {
+  const maybe = mod as { default?: T };
+  return maybe.default ?? (mod as T);
+}
 
 interface Check {
   id: string;
@@ -38,6 +43,16 @@ function containsAny(hay: string, needles: string[]): string[] {
 }
 
 function main() {
+  const { resolveGrowthPlatform } = exported(growthPlatformResolverService);
+  const { resolveGrowthPlan } = exported(growthEngineGrowthPlanResolver);
+  const { readGrowthPlanIntelligenceV1 } = exported(growthPlanIntelligenceV1Service);
+  const { resolveTenantServiceCatalogue } = exported(growthEngineTenantServiceCatalogue);
+  const { renderGrowthPlanPage } = exported(growthEnginePageRenderers);
+  const { renderCampaignBuilderPage } = exported(growthEngineCampaignBuilderPage);
+  const { buildGrowthEngineFramework, buildGrowthPlanRecommendation } = exported(growthEngineFrameworkService);
+  const { listLockedCommercialSupportedServices } = exported(masterAdminLockedCommercialServiceCatalog);
+  const { buildPlatformOperationsDashboard } = exported(masterAdminPlatformOperationsDashboardService);
+
   console.log("\n=== GP-01C Growth Plan platform routing ===\n");
 
   const unknown = resolveGrowthPlatform("__gp01c_unknown_tenant__");

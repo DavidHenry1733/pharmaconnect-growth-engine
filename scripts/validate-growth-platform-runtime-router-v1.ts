@@ -1,8 +1,11 @@
-import {
-  resolveGrowthPlatform,
-  isNationalGrowthPlatform,
-  isLocalGrowthPlatform,
-} from "../src/pharmacy/growthPlatformResolverService.ts";
+import * as growthPlatformResolverService from "../src/pharmacy/growthPlatformResolverService.ts";
+
+function exported<T extends object>(mod: T | { default: T }): T {
+  const maybe = mod as { default?: T };
+  return maybe.default ?? (mod as T);
+}
+
+const { resolveGrowthPlatform, isNationalGrowthPlatform, isLocalGrowthPlatform } = exported(growthPlatformResolverService);
 
 let passed = 0;
 let failed = 0;

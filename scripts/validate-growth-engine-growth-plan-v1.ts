@@ -5,24 +5,22 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  BENCHMARK_ECOSYSTEM_OUTPUT_DEFAULTS,
-  GROWTH_PLAN_INTELLIGENCE_VERSION,
-} from "../src/pharmacy/growthEngineCampaignModel.ts";
-import {
-  buildGrowthPlanIntelligence,
-  estimateCampaignOutputs,
-  toGrowthEnginePlanRecommendation,
-} from "../src/pharmacy/growthEngineCampaignRecommendationEngine.ts";
-import { buildGrowthPlanRecommendation } from "../src/pharmacy/growthEngineFrameworkService.ts";
-import { loadCompetitorSnapshot } from "../src/pharmacy/growthEngineLocalMarketService.ts";
-import { renderGrowthPlanPage } from "../src/pharmacy/growthEnginePageRenderers.ts";
-import { growthPlanPageCss } from "../src/pharmacy/growthEngineGrowthPlanPage.ts";
-import { BENCHMARK_MASTER_SERVICE_IDS } from "../src/pharmacy/pharmacyMasterPublishConfig.ts";
-import { normalizeProfileData } from "../src/pharmacy/pharmacyProfileSchema.ts";
+import * as growthEngineCampaignModel from "../src/pharmacy/growthEngineCampaignModel.ts";
+import * as growthEngineCampaignRecommendationEngine from "../src/pharmacy/growthEngineCampaignRecommendationEngine.ts";
+import * as growthEngineFrameworkService from "../src/pharmacy/growthEngineFrameworkService.ts";
+import * as growthEngineLocalMarketService from "../src/pharmacy/growthEngineLocalMarketService.ts";
+import * as growthEnginePageRenderers from "../src/pharmacy/growthEnginePageRenderers.ts";
+import * as growthEngineGrowthPlanPage from "../src/pharmacy/growthEngineGrowthPlanPage.ts";
+import * as pharmacyMasterPublishConfig from "../src/pharmacy/pharmacyMasterPublishConfig.ts";
+import * as pharmacyProfileSchema from "../src/pharmacy/pharmacyProfileSchema.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+
+function exported<T extends object>(mod: T | { default: T }): T {
+  const maybe = mod as { default?: T };
+  return maybe.default ?? (mod as T);
+}
 
 interface Check {
   id: string;
@@ -39,12 +37,23 @@ function record(id: string, pass: boolean, detail: string) {
 
 function loadSlug(slug: string) {
   const file = path.join(ROOT, "data/pharmacy-profiles", `${slug}.json`);
+  const { normalizeProfileData } = exported(pharmacyProfileSchema);
   if (!fs.existsSync(file)) return normalizeProfileData({});
   const doc = JSON.parse(fs.readFileSync(file, "utf8"));
   return normalizeProfileData(doc.data || {});
 }
 
 function main() {
+  const { BENCHMARK_ECOSYSTEM_OUTPUT_DEFAULTS, GROWTH_PLAN_INTELLIGENCE_VERSION } = exported(growthEngineCampaignModel);
+  const { buildGrowthPlanIntelligence, estimateCampaignOutputs, toGrowthEnginePlanRecommendation } =
+    exported(growthEngineCampaignRecommendationEngine);
+  const { buildGrowthPlanRecommendation } = exported(growthEngineFrameworkService);
+  const { loadCompetitorSnapshot } = exported(growthEngineLocalMarketService);
+  const { renderGrowthPlanPage } = exported(growthEnginePageRenderers);
+  const { growthPlanPageCss } = exported(growthEngineGrowthPlanPage);
+  const { BENCHMARK_MASTER_SERVICE_IDS } = exported(pharmacyMasterPublishConfig);
+  const { normalizeProfileData } = exported(pharmacyProfileSchema);
+
   console.log("\n=== Growth Engine Growth Plan Intelligence V1 ===\n");
 
   record("model-version", GROWTH_PLAN_INTELLIGENCE_VERSION === 1, `v${GROWTH_PLAN_INTELLIGENCE_VERSION}`);
