@@ -78,17 +78,66 @@ function main() {
   record("unknown-never-reads-national-snapshot", readGrowthPlanIntelligenceV1("__gp01c_unknown_tenant__") === null, "unknown slug gated");
 
   const primary = nationalPlan.plan.primary;
+  const snapshotActions = snapshot?.actions || [];
+  const corePrimaryActions = snapshotActions.filter(
+    (a) => a.growthPlanRole === "PRIMARY_COMMERCIAL" && a.marketScope === "CORE",
+  );
+  const sourceAction =
+    snapshotActions.find((a) => primary && a.id === primary.actionId) ||
+    snapshotActions.find((a) => primary && a.primaryKeyword === primary.primaryKeyword);
+  const knownGapStatuses = new Set([
+    "PROVEN_UNTAPPED",
+    "PROVEN_WEAK_COVERAGE",
+    "PROVEN_DEFEND_IMPROVE",
+    "NEW_MARKET_EVIDENCE",
+    "INSUFFICIENT_EVIDENCE",
+    "NOT_APPLICABLE",
+  ]);
+  const knownGapConfidence = new Set(["HIGH", "MEDIUM", "LOW", "NONE"]);
+  const provenUntappedHighInSnapshot = corePrimaryActions.some(
+    (a) => a.gapEvidenceStatus === "PROVEN_UNTAPPED" && a.gapConfidence === "HIGH",
+  );
+  const selectedMatchesSource =
+    Boolean(primary && sourceAction) &&
+    primary!.gapEvidenceStatus === sourceAction!.gapEvidenceStatus &&
+    primary!.gapConfidence === sourceAction!.gapConfidence;
+  const selectedProvenUntappedHigh =
+    primary?.gapEvidenceStatus === "PROVEN_UNTAPPED" && primary?.gapConfidence === "HIGH";
+  const selectedNewMarketLow =
+    primary?.gapEvidenceStatus === "NEW_MARKET_EVIDENCE" && primary?.gapConfidence === "LOW";
+
   record("national-primary-present", Boolean(primary), primary?.primaryKeyword || "none");
-  record("national-primary-keyword", primary?.primaryKeyword === "pharmacy seo", primary?.primaryKeyword || "none");
+  record(
+    "national-primary-keyword",
+    Boolean(
+      primary &&
+        primary.growthPlanRole === "PRIMARY_COMMERCIAL" &&
+        primary.marketScope === "CORE" &&
+        corePrimaryActions.some((a) => a.primaryKeyword === primary.primaryKeyword),
+    ),
+    primary ? `${primary.primaryKeyword} · ${primary.growthPlanRole}/${primary.marketScope}` : "none",
+  );
   record(
     "gap-evidence-truthful",
-    primary?.gapEvidenceStatus === "NEW_MARKET_EVIDENCE" && primary?.gapConfidence === "LOW",
-    `${primary?.gapEvidenceStatus}/${primary?.gapConfidence}`,
+    selectedMatchesSource,
+    primary && sourceAction
+      ? `selected ${primary.gapEvidenceStatus}/${primary.gapConfidence} = source ${sourceAction.gapEvidenceStatus}/${sourceAction.gapConfidence}`
+      : `${primary?.gapEvidenceStatus}/${primary?.gapConfidence}`,
   );
   record(
     "gap-not-upgraded",
-    primary?.gapEvidenceStatus !== "PROVEN_UNTAPPED" && primary?.gapConfidence !== "HIGH",
-    "NEW_MARKET_EVIDENCE/LOW retained",
+    Boolean(
+      selectedMatchesSource &&
+        knownGapStatuses.has(primary!.gapEvidenceStatus) &&
+        knownGapConfidence.has(primary!.gapConfidence) &&
+        (!selectedProvenUntappedHigh || provenUntappedHighInSnapshot) &&
+        (selectedProvenUntappedHigh || selectedNewMarketLow || selectedMatchesSource),
+    ),
+    selectedProvenUntappedHigh
+      ? "PROVEN_UNTAPPED/HIGH retained from snapshot"
+      : selectedNewMarketLow
+        ? "NEW_MARKET_EVIDENCE/LOW retained from snapshot"
+        : `${primary?.gapEvidenceStatus}/${primary?.gapConfidence} retained from snapshot`,
   );
   record("national-market-identity", /United Kingdom|UK Community Pharmacy Digital Growth|national/i.test(`${nationalPlan.plan.primaryMarket} ${nationalPlan.plan.market}`), `${nationalPlan.plan.primaryMarket} / ${nationalPlan.plan.market}`);
   record("national-market-not-rotherham", !/rotherham/i.test(`${nationalPlan.plan.primaryMarket} ${nationalPlan.plan.market} ${nationalPlan.plan.executiveSummary.currentPosition}`), nationalPlan.plan.primaryMarket);
@@ -121,7 +170,11 @@ function main() {
   record("national-html-digital-provider", /digital-growth provider serving UK community pharmacies/i.test(nationalHtml), "identity copy");
   record("national-html-not-a-pharmacy", !/is a pharmacy\b|your pharmacy programme|serves Rotherham/i.test(nationalHtml), "not described as a pharmacy");
   record("national-html-not-rotherham-market", !/commercial market: rotherham/i.test(nationalHtml) && !/serves Rotherham/i.test(nationalHtml), "Rotherham not commercial market");
-  record("national-html-primary-keyword", nationalHtml.includes("pharmacy seo"), "primary keyword visible");
+  record(
+    "national-html-primary-keyword",
+    Boolean(primary?.primaryKeyword) && nationalHtml.includes(primary!.primaryKeyword),
+    "primary keyword visible",
+  );
   record("national-html-no-priority-empty", !nationalHtml.includes("No priority campaign yet"), "empty campaign copy absent");
   record("national-html-no-patient-service-cards", containsAny(nationalHtml, patientNames).length === 0, containsAny(nationalHtml, patientNames).join(", ") || "none");
   record("national-html-digital-service-shown", /Pharmacy Website Design|Pharmacy Local SEO|Pharmacy Email Marketing/i.test(nationalHtml), "configured digital services");
@@ -134,7 +187,13 @@ function main() {
   record("local-html-renders", localHtml.includes("Where you stand") && localHtml.includes("Campaign Readiness"), "local plan renders");
   record("local-html-your-pharmacy", localHtml.includes("Your Pharmacy"), "Your Pharmacy retained");
   record("local-html-local-market", localHtml.includes("Your Local Market"), "Your Local Market retained");
-  record("local-html-no-national-keywords", !localHtml.includes("pharmacy seo") && !localHtml.includes("UK Community Pharmacy Digital Growth"), "no national fixture");
+  record(
+    "local-html-no-national-keywords",
+    Boolean(primary?.primaryKeyword) &&
+      !localHtml.includes(primary!.primaryKeyword) &&
+      !localHtml.includes("UK Community Pharmacy Digital Growth"),
+    "no national primary keyword leak",
+  );
   record("local-html-campaign-engine", localHtml.includes("Open Campaign Builder") || localHtml.includes("No evidence-backed campaign"), "local engine path");
   record("local-html-platform-attr", localHtml.includes('data-growth-platform="local"'), "platform attribute");
 
