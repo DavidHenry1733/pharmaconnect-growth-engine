@@ -112,7 +112,7 @@ function main() {
   record("national-html-digital-service-shown", /Pharmacy Website Design|Pharmacy Local SEO|Pharmacy Email Marketing/i.test(nationalHtml), "configured digital services");
   record("national-html-no-places-prereq", /Google Places \/ Your Local Market is not a prerequisite/i.test(nationalHtml), "national readiness");
   record("national-html-no-side-panel", !nationalHtml.includes("Market Opportunity Plan"), "GP-01 side panel removed");
-  record("national-html-workflow", nationalHtml.includes("Your Business") && nationalHtml.includes("National Market") && !/<div class="ge-step-title">Your Pharmacy</div>/.test(nationalHtml), "national stepper");
+  record("national-html-workflow", nationalHtml.includes("Your Business") && nationalHtml.includes("National Market") && !nationalHtml.includes('<div class="ge-step-title">Your Pharmacy</div>'), "national stepper");
   record("national-html-bounded-cta", /National strategy is ready|content generation is not yet implemented/i.test(nationalHtml), "bounded generation state");
   record("national-html-platform-attr", nationalHtml.includes('data-growth-platform="national"'), "platform attribute");
 
