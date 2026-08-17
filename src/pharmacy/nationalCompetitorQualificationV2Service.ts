@@ -21,6 +21,7 @@ export type NationalCompetitorQualificationV2Input = {
   websiteText?: string | null;
   servicesDetected?: string[];
   matchedQueries?: string[];
+  ownDomains?: string[];
 };
 
 export type NationalCompetitorQualificationV2Result = {
@@ -252,8 +253,16 @@ export function qualifyNationalCompetitorV2(
   const reasons: string[] = [];
   const exclusionReasons: string[] = [];
 
-  if (domain === "pharmaconnect.uk" || domain.endsWith(".pharmaconnect.uk")) {
-    exclusionReasons.push("Platform owner's own domain.");
+  const ownDomains = (input.ownDomains || []).map((value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split("/")[0],
+  ).filter(Boolean);
+  if (ownDomains.some((own) => domain === own || domain.endsWith(`.${own}`))) {
+    exclusionReasons.push("Subject's own domain.");
   }
 
   if (

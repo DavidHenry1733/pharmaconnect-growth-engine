@@ -1,10 +1,13 @@
-import {
-  buildNationalGrowthPlatformDashboard,
-} from "../src/pharmacy/nationalGrowthPlatformDashboardService.ts";
+import * as dashboardMod from "../src/pharmacy/nationalGrowthPlatformDashboardService.ts";
+import * as growthPlatform from "../src/pharmacy/growthPlatformResolverService.ts";
 
-import {
-  resolveGrowthPlatform,
-} from "../src/pharmacy/growthPlatformResolverService.ts";
+function exported<T extends object>(mod: T | { default: T }): T {
+  const maybe = mod as { default?: T };
+  return maybe.default ?? (mod as T);
+}
+
+const { buildNationalGrowthPlatformDashboard } = exported(dashboardMod);
+const { resolveGrowthPlatform } = exported(growthPlatform);
 
 let passed = 0;
 let failed = 0;

@@ -57,6 +57,7 @@ export interface GrowthPlanIntelligenceInput {
     source: string;
     sourceGeneratedAt: string | null;
     subjectDomain: string;
+    inheritedUpstreamCost?: number | null;
   };
   primaryCommercialOpportunities: GrowthPlanKeywordInput[];
   supportingCommercialOpportunities: GrowthPlanKeywordInput[];
@@ -198,7 +199,12 @@ export function buildGrowthPlanIntelligenceInput(snapshot: any): GrowthPlanIntel
       generatedAt: new Date().toISOString(),
       source: "market-universe-v2-reclassified-b",
       sourceGeneratedAt: snapshot.generatedAt || null,
-      subjectDomain: snapshot.subjectDomain || "pharmaconnect.uk",
+      subjectDomain: snapshot.subjectDomain || "",
+      inheritedUpstreamCost: typeof snapshot.costLedger?.totalCost === "number"
+        ? snapshot.costLedger.totalCost
+        : typeof snapshot.costs?.totalCost === "number"
+          ? snapshot.costs.totalCost
+          : 0,
     },
     primaryCommercialOpportunities: primary,
     supportingCommercialOpportunities: support,

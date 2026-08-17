@@ -3,7 +3,7 @@ import {
 } from "../src/pharmacy/verifiedNationalCompetitorIntelligenceService.ts";
 
 const x=
-  buildVerifiedNationalCompetitorIntelligence();
+  buildVerifiedNationalCompetitorIntelligence("pharmaconnect");
 
 console.log("");
 console.log("=== VERIFIED NATIONAL COMPETITOR INTELLIGENCE ===");

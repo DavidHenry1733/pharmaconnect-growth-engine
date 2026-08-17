@@ -1,8 +1,19 @@
 import fs from "node:fs";
-import path from "node:path";
 import { buildPharmaConnectCommercialKeywordTaxonomy } from "./pharmaConnectCommercialKeywordTaxonomy.ts";
 import { scoreRankedKeyword } from "./commercialKeywordScoringService.ts";
-import type { DataForSeoRankedKeyword } from "./dataForSeoRankedKeywordIntelligenceService.ts";
+import {
+  DATAFORSEO_LABS_ENDPOINTS,
+  getDomainRankedKeywordsWithCost,
+  type DataForSeoRankedKeyword,
+} from "./dataForSeoRankedKeywordIntelligenceService.ts";
+import { resolveNationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
+import {
+  nationalIntelligenceDataDir,
+  nationalIntelligenceDataPath,
+  nationalIntelligenceFixtureDir,
+  nationalIntelligenceFixturePath,
+  resolveNationalIntelligenceArtifactPath,
+} from "./nationalIntelligenceStorageService.ts";
 import {
   MARKET_OPPORTUNITY_INTELLIGENCE_VERSION,
   type MarketKeywordOpportunity,
@@ -13,12 +24,9 @@ import {
   type MarketOpportunityRankingPage,
 } from "./marketOpportunityIntelligenceModel.ts";
 
-const DATA_DIR = path.join(process.cwd(), "data/national-growth-engine");
-const FIXTURE_DIR = path.join(process.cwd(), "fixtures/national-growth-engine");
-const VERIFIED_FILE = "pharmaconnect-verified-national-competitors.json";
-const SNAPSHOT_FILE = "pharmaconnect-market-opportunity-intelligence-v1.json";
-export const DATAFORSEO_RANKED_KEYWORDS_ENDPOINT =
-  "https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live";
+const DATA_DIR = nationalIntelligenceDataDir();
+const FIXTURE_DIR = nationalIntelligenceFixtureDir();
+export const DATAFORSEO_RANKED_KEYWORDS_ENDPOINT = DATAFORSEO_LABS_ENDPOINTS.rankedKeywords;
 export const MARKET_OPPORTUNITY_LIVE_LIMITS = {
   directCompetitors: 6,
   directKeywordLimit: 100,
@@ -41,6 +49,7 @@ interface KeywordAccumulator {
 }
 
 export interface MarketOpportunityBuildInput {
+  slug?: string;
   verified?: any;
   subjectKeywords?: DataForSeoRankedKeyword[];
   sourceProvider?: string;
@@ -59,25 +68,24 @@ function readJson<T>(file: string): T {
   return JSON.parse(fs.readFileSync(file, "utf8")) as T;
 }
 
-function firstExisting(paths: string[]): string | null {
-  return paths.find((file) => fs.existsSync(file)) || null;
+function resolveOpportunitySlug(input: MarketOpportunityBuildInput): string {
+  const slug = String(input.slug || input.verified?.tenant || "").trim();
+  if (!slug) throw new Error("Market opportunity intelligence requires a tenant slug");
+  return slug;
 }
 
-function verifiedPath(): string {
-  const file = firstExisting([
-    path.join(DATA_DIR, VERIFIED_FILE),
-    path.join(FIXTURE_DIR, VERIFIED_FILE),
-  ]);
-  if (!file) throw new Error(`Verified national competitor snapshot not found: ${VERIFIED_FILE}`);
+function verifiedPath(slug: string): string {
+  const file = resolveNationalIntelligenceArtifactPath(slug, "verified-national-competitors");
+  if (!file) throw new Error(`Verified national competitor snapshot not found for ${slug}`);
   return file;
 }
 
-function snapshotDataPath(): string {
-  return path.join(DATA_DIR, SNAPSHOT_FILE);
+function snapshotDataPath(slug: string): string {
+  return nationalIntelligenceDataPath(slug, "market-opportunity-intelligence-v1");
 }
 
-function snapshotFixturePath(): string {
-  return path.join(FIXTURE_DIR, SNAPSHOT_FILE);
+function snapshotFixturePath(slug: string): string {
+  return nationalIntelligenceFixturePath(slug, "market-opportunity-intelligence-v1");
 }
 
 function num(value: unknown): number | null {
@@ -178,7 +186,9 @@ function topRejectionReasons(items: MarketKeywordOpportunity[]): string[] {
 }
 
 export function buildMarketOpportunityIntelligenceSnapshot(input: MarketOpportunityBuildInput = {}): MarketOpportunityIntelligenceSnapshot {
-  const verified = input.verified || readJson<any>(verifiedPath());
+  const slug = resolveOpportunitySlug(input);
+  const subject = resolveNationalIntelligenceSubject(slug);
+  const verified = input.verified || readJson<any>(verifiedPath(slug));
   const subjectMap = new Map(
     (input.subjectKeywords || []).map((item) => [keywordKey(item.keyword), item]),
   );
@@ -355,9 +365,9 @@ export function buildMarketOpportunityIntelligenceSnapshot(input: MarketOpportun
   return {
     version: MARKET_OPPORTUNITY_INTELLIGENCE_VERSION,
     generatedAt: new Date().toISOString(),
-    market: verified.market || "UK Community Pharmacy Digital Growth",
-    country: "United Kingdom",
-    subjectDomain: "pharmaconnect.uk",
+    market: verified.market || subject.primaryMarket || "UK Community Pharmacy Digital Growth",
+    country: subject.country || "United Kingdom",
+    subjectDomain: subject.subjectDomain,
     sourceProvider: input.sourceProvider || "persisted-dataforseo-ranked-keywords",
     sourceCompetitorCount: competitors.length,
     totalApiCost: usage.totalCost,
@@ -396,80 +406,25 @@ export function buildMarketOpportunityIntelligenceSnapshot(input: MarketOpportun
   };
 }
 
-export function writeMarketOpportunityIntelligenceSnapshot(): MarketOpportunityIntelligenceSnapshot {
-  const snapshot = buildMarketOpportunityIntelligenceSnapshot();
+export function writeMarketOpportunityIntelligenceSnapshot(slug: string): MarketOpportunityIntelligenceSnapshot {
+  const snapshot = buildMarketOpportunityIntelligenceSnapshot({ slug });
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.mkdirSync(FIXTURE_DIR, { recursive: true });
-  fs.writeFileSync(snapshotDataPath(), JSON.stringify(snapshot, null, 2) + "\n");
-  fs.writeFileSync(snapshotFixturePath(), JSON.stringify(snapshot, null, 2) + "\n");
+  fs.writeFileSync(snapshotDataPath(slug), JSON.stringify(snapshot, null, 2) + "\n");
+  fs.writeFileSync(snapshotFixturePath(slug), JSON.stringify(snapshot, null, 2) + "\n");
   return snapshot;
 }
 
-function dataForSeoCredentials(): { login: string; password: string } {
-  const login = process.env.DATAFORSEO_LOGIN || process.env.DATAFORSEO_API_LOGIN;
-  const password = process.env.DATAFORSEO_PASSWORD || process.env.DATAFORSEO_API_PASSWORD;
-  if (!login || !password) throw new Error("DataForSEO credentials unavailable");
-  return { login, password };
-}
-
-async function fetchRankedKeywordsWithCost(domain: string, limit: number): Promise<{
-  keywords: DataForSeoRankedKeyword[];
-  cost: number;
-  tasks: number;
-}> {
-  const { login, password } = dataForSeoCredentials();
-  const body = [{
-    target: domain.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0],
-    location_name: "United Kingdom",
-    language_code: "en",
-    limit: Math.max(1, Math.min(limit, 1000)),
-    order_by: ["keyword_data.keyword_info.search_volume,desc"],
-  }];
-
-  const response = await fetch(DATAFORSEO_RANKED_KEYWORDS_ENDPOINT, {
-    method: "POST",
-    headers: {
-      authorization: "Basic " + Buffer.from(`${login}:${password}`).toString("base64"),
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  const payload: any = await response.json();
-  if (!response.ok || payload?.status_code !== 20000) {
-    throw new Error(`DataForSEO ranked keywords failed: HTTP ${response.status} / ${payload?.status_code || "unknown"}`);
+export async function writeLiveMarketOpportunityIntelligenceSnapshot(
+  slug: string,
+  options: Partial<MarketOpportunityLiveRunOptions> = {},
+): Promise<MarketOpportunityIntelligenceSnapshot> {
+  const subject = resolveNationalIntelligenceSubject(slug);
+  if (!subject.eligibleForNationalIntelligence || !subject.subjectDomain) {
+    throw new Error(`National opportunity live execution is not eligible for ${slug}`);
   }
-
-  const task = payload?.tasks?.[0];
-  if (!task || task.status_code !== 20000) {
-    throw new Error(`DataForSEO ranked keyword task failed: ${task?.status_code || "unknown"}`);
-  }
-
-  const items = task?.result?.[0]?.items || [];
-  const keywords = items.map((item: any) => {
-    const keywordData = item?.keyword_data || {};
-    const keywordInfo = keywordData?.keyword_info || {};
-    const ranked = item?.ranked_serp_element?.serp_item || {};
-    return {
-      keyword: String(keywordData?.keyword || item?.keyword || "").trim(),
-      position: num(ranked?.rank_absolute ?? ranked?.rank_group ?? item?.rank_absolute),
-      searchVolume: num(keywordInfo?.search_volume),
-      cpc: num(keywordInfo?.cpc),
-      competition: num(keywordInfo?.competition),
-      url: ranked?.url || item?.url || null,
-    } satisfies DataForSeoRankedKeyword;
-  }).filter((item: DataForSeoRankedKeyword) => item.keyword);
-
-  return {
-    keywords,
-    cost: typeof task.cost === "number" ? task.cost : 0,
-    tasks: 1,
-  };
-}
-
-export async function writeLiveMarketOpportunityIntelligenceSnapshot(options: Partial<MarketOpportunityLiveRunOptions> = {}): Promise<MarketOpportunityIntelligenceSnapshot> {
   const limits = { ...MARKET_OPPORTUNITY_LIVE_LIMITS, ...options };
-  const verified = readJson<any>(verifiedPath());
+  const verified = readJson<any>(verifiedPath(slug));
   const direct = (verified.directCompetitors || []).slice(0, limits.directCompetitors);
   const adjacent = (verified.adjacentCompetitors || []).slice(0, limits.adjacentCompetitors);
   const usage = {
@@ -482,13 +437,18 @@ export async function writeLiveMarketOpportunityIntelligenceSnapshot(options: Pa
         requests: 0,
         tasks: 0,
         cost: 0,
-        purpose: "Bounded live ranked-keyword expansion for verified direct competitors and pharmaconnect.uk subject coverage.",
+        purpose: "Bounded live ranked-keyword expansion for verified direct competitors and configured subject-domain coverage.",
       },
     ],
   };
 
   async function enrichCompetitor(competitor: any, keywordLimit: number) {
-    const result = await fetchRankedKeywordsWithCost(competitor.domain, keywordLimit);
+    const result = await getDomainRankedKeywordsWithCost({
+      domain: competitor.domain,
+      limit: keywordLimit,
+      locationName: subject.primaryMarket || "United Kingdom",
+      languageCode: subject.languageCode,
+    });
     usage.requests += 1;
     usage.tasks += result.tasks;
     usage.totalCost += result.cost;
@@ -497,8 +457,8 @@ export async function writeLiveMarketOpportunityIntelligenceSnapshot(options: Pa
     usage.endpoints[0].cost += result.cost;
     return {
       ...competitor,
-      rankedKeywordsAnalysed: result.keywords.length,
-      strongestKeywords: result.keywords,
+      rankedKeywordsAnalysed: result.rows.length,
+      strongestKeywords: result.rows,
     };
   }
 
@@ -512,32 +472,38 @@ export async function writeLiveMarketOpportunityIntelligenceSnapshot(options: Pa
     liveAdjacent.push(await enrichCompetitor(competitor, limits.adjacentKeywordLimit));
   }
 
-  const subject = await fetchRankedKeywordsWithCost("pharmaconnect.uk", limits.subjectKeywordLimit);
+  const subjectKeywords = await getDomainRankedKeywordsWithCost({
+    domain: subject.subjectDomain,
+    limit: limits.subjectKeywordLimit,
+    locationName: subject.primaryMarket || "United Kingdom",
+    languageCode: subject.languageCode,
+  });
   usage.requests += 1;
-  usage.tasks += subject.tasks;
-  usage.totalCost += subject.cost;
+  usage.tasks += subjectKeywords.tasks;
+  usage.totalCost += subjectKeywords.cost;
   usage.endpoints[0].requests += 1;
-  usage.endpoints[0].tasks += subject.tasks;
-  usage.endpoints[0].cost += subject.cost;
+  usage.endpoints[0].tasks += subjectKeywords.tasks;
+  usage.endpoints[0].cost += subjectKeywords.cost;
 
   const snapshot = buildMarketOpportunityIntelligenceSnapshot({
+    slug,
     verified: {
       ...verified,
       directCompetitors: liveDirect,
       adjacentCompetitors: liveAdjacent,
     },
-    subjectKeywords: subject.keywords,
+    subjectKeywords: subjectKeywords.rows,
     sourceProvider: "dataforseo-ranked-keywords-live",
     dataForSeoUsage: usage,
   });
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(snapshotDataPath(), JSON.stringify(snapshot, null, 2) + "\n");
+  fs.writeFileSync(snapshotDataPath(slug), JSON.stringify(snapshot, null, 2) + "\n");
   return snapshot;
 }
 
-export function readMarketOpportunityIntelligenceSnapshot(): MarketOpportunityIntelligenceSnapshot {
-  const file = firstExisting([snapshotDataPath(), snapshotFixturePath()]);
-  if (!file) return writeMarketOpportunityIntelligenceSnapshot();
-  return readJson<MarketOpportunityIntelligenceSnapshot>(file);
+export function readMarketOpportunityIntelligenceSnapshot(slug: string): MarketOpportunityIntelligenceSnapshot {
+  const file = resolveNationalIntelligenceArtifactPath(slug, "market-opportunity-intelligence-v1");
+  if (file) return readJson<MarketOpportunityIntelligenceSnapshot>(file);
+  return buildMarketOpportunityIntelligenceSnapshot({ slug });
 }

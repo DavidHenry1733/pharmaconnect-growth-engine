@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import type { GrowthPlanIntelligenceInput, GrowthPlanKeywordInput } from "./growthPlanIntelligenceContract.ts";
 import {
   GROWTH_PLAN_STRATEGY_VERSION,
@@ -10,13 +9,14 @@ import {
   type GrowthPlanIntelligenceSnapshot,
 } from "./growthPlanIntelligenceV1Model.ts";
 import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
-import { WORKSPACE_ROOT, safePharmacySlug } from "./pharmacyWorkspacePaths.ts";
-
-const DATA_DIR = path.join(WORKSPACE_ROOT, "data/national-growth-engine");
-const FIXTURE_DIR = path.join(WORKSPACE_ROOT, "fixtures/national-growth-engine");
-const INPUT_FILE = path.join(DATA_DIR, "pharmaconnect-growth-plan-intelligence-input-v1.json");
-const OUTPUT_FILE = path.join(DATA_DIR, "pharmaconnect-growth-plan-intelligence-v1.json");
-const FIXTURE_FILE = path.join(FIXTURE_DIR, "pharmaconnect-growth-plan-intelligence-v1.json");
+import { inheritPersistedDataForSeoCost } from "./nationalIntelligenceCostLedger.ts";
+import {
+  resolveNationalIntelligenceArtifactPath,
+  nationalIntelligenceDataPath,
+  nationalIntelligenceFixturePath,
+  ensureNationalIntelligenceDataDir,
+  ensureNationalIntelligenceFixtureDir,
+} from "./nationalIntelligenceStorageService.ts";
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "action";
@@ -159,7 +159,9 @@ export function buildGrowthPlanIntelligenceV1(input: GrowthPlanIntelligenceInput
     subjectDomain: input.metadata.subjectDomain,
     market: "UK Community Pharmacy Digital Growth",
     intelligenceSourceVersion: input.metadata.source,
-    inheritedDataForSeoCost: 0.21792,
+    inheritedDataForSeoCost: inheritPersistedDataForSeoCost({
+      totalCost: input.metadata.inheritedUpstreamCost,
+    }).cost,
     summary: {
       totalActions: actions.length,
       highPriorityActions: actions.filter((action) => action.priority === "HIGH").length,
@@ -181,23 +183,21 @@ export function buildGrowthPlanIntelligenceV1(input: GrowthPlanIntelligenceInput
  */
 export function readGrowthPlanIntelligenceV1(slug: string): GrowthPlanIntelligenceSnapshot | null {
   if (!slug || !isNationalGrowthPlatform(slug)) return null;
-  const safe = safePharmacySlug(slug);
-  const candidates = [
-    path.join(DATA_DIR, `${safe}-growth-plan-intelligence-v1.json`),
-    path.join(FIXTURE_DIR, `${safe}-growth-plan-intelligence-v1.json`),
-  ];
-  const file = candidates.find((p) => fs.existsSync(p));
+  const file = resolveNationalIntelligenceArtifactPath(slug, "growth-plan-intelligence-v1");
   if (!file) return null;
   return JSON.parse(fs.readFileSync(file, "utf8")) as GrowthPlanIntelligenceSnapshot;
 }
 
-export function writeGrowthPlanIntelligenceV1(): GrowthPlanIntelligenceSnapshot {
-  if (!fs.existsSync(INPUT_FILE)) throw new Error(`Growth Plan Intelligence input not found: ${INPUT_FILE}`);
-  const input = JSON.parse(fs.readFileSync(INPUT_FILE, "utf8")) as GrowthPlanIntelligenceInput;
+export function writeGrowthPlanIntelligenceV1(slug: string): GrowthPlanIntelligenceSnapshot {
+  const inputFile =
+    resolveNationalIntelligenceArtifactPath(slug, "growth-plan-intelligence-input-v1")
+    || nationalIntelligenceDataPath(slug, "growth-plan-intelligence-input-v1");
+  if (!fs.existsSync(inputFile)) throw new Error(`Growth Plan Intelligence input not found: ${inputFile}`);
+  const input = JSON.parse(fs.readFileSync(inputFile, "utf8")) as GrowthPlanIntelligenceInput;
   const snapshot = buildGrowthPlanIntelligenceV1(input);
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.mkdirSync(path.dirname(FIXTURE_FILE), { recursive: true });
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(snapshot, null, 2) + "\n");
-  fs.writeFileSync(FIXTURE_FILE, JSON.stringify(snapshot, null, 2) + "\n");
+  ensureNationalIntelligenceDataDir();
+  ensureNationalIntelligenceFixtureDir();
+  fs.writeFileSync(nationalIntelligenceDataPath(slug, "growth-plan-intelligence-v1"), JSON.stringify(snapshot, null, 2) + "\n");
+  fs.writeFileSync(nationalIntelligenceFixturePath(slug, "growth-plan-intelligence-v1"), JSON.stringify(snapshot, null, 2) + "\n");
   return snapshot;
 }

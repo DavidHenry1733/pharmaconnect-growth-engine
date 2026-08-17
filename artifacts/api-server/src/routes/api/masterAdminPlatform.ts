@@ -1,6 +1,8 @@
 import { readVerifiedNationalCompetitorIntelligence } from "../../../../../src/pharmacy/verifiedNationalCompetitorIntelligenceService.ts";
 import { readMarketOpportunityIntelligenceSnapshot } from "../../../../../src/pharmacy/marketOpportunityIntelligenceService.ts";
 import { readMarketUniverseV2Snapshot } from "../../../../../src/pharmacy/marketUniverseIntelligenceV2Service.ts";
+import { readGrowthPlanIntelligenceV1 } from "../../../../../src/pharmacy/growthPlanIntelligenceV1Service.ts";
+import { resolveNationalIntelligenceArtifactPath } from "../../../../../src/pharmacy/nationalIntelligenceStorageService.ts";
 import fs from "node:fs";
 import path from "node:path";
 /**
@@ -502,15 +504,18 @@ router.get(
     try {
       const slug=String(req.params.slug || "");
 
-      if(slug !== "pharmaconnect"){
+      if(!isNationalGrowthPlatform(slug)){
         return res.status(400).json({
           error:
-            "Verified National Competitor Intelligence is currently available for the PharmaConnect national platform."
+            "Verified National Competitor Intelligence is available for NATIONAL Growth Platform tenants only."
         });
       }
 
       const intelligence=
-        readVerifiedNationalCompetitorIntelligence();
+        readVerifiedNationalCompetitorIntelligence(slug);
+      if(!intelligence){
+        return res.status(404).json({ error:"verified_national_competitor_intelligence_not_found" });
+      }
 
       return res.json(intelligence);
 
@@ -531,15 +536,15 @@ router.get(
     try {
       const slug=String(req.params.slug || "");
 
-      if(slug !== "pharmaconnect"){
+      if(!isNationalGrowthPlatform(slug)){
         return res.status(400).json({
           error:
-            "Market Opportunity Intelligence is currently available for the PharmaConnect national platform."
+            "Market Opportunity Intelligence is available for NATIONAL Growth Platform tenants only."
         });
       }
 
       const intelligence=
-        readMarketOpportunityIntelligenceSnapshot();
+        readMarketOpportunityIntelligenceSnapshot(slug);
 
       return res.json(intelligence);
 
@@ -560,14 +565,14 @@ router.get(
     try {
       const slug=String(req.params.slug || "");
 
-      if(slug !== "pharmaconnect"){
+      if(!isNationalGrowthPlatform(slug)){
         return res.status(400).json({
           error:
-            "Market Universe Intelligence V2 is currently available for the PharmaConnect national platform."
+            "Market Universe Intelligence V2 is available for NATIONAL Growth Platform tenants only."
         });
       }
 
-      return res.json(readMarketUniverseV2Snapshot());
+      return res.json(readMarketUniverseV2Snapshot(slug));
 
     } catch (error) {
       return res.status(500).json({
@@ -585,11 +590,11 @@ router.get(
   (req, res) => {
     try {
       const slug=String(req.params.slug || "");
-      if(slug !== "pharmaconnect"){
-        return res.status(400).json({ error:"Growth Plan Intelligence Input is currently available for the PharmaConnect national platform." });
+      if(!isNationalGrowthPlatform(slug)){
+        return res.status(400).json({ error:"Growth Plan Intelligence Input is available for NATIONAL Growth Platform tenants only." });
       }
-      const file=path.join(process.cwd(),"data/national-growth-engine/pharmaconnect-growth-plan-intelligence-input-v1.json");
-      if(!fs.existsSync(file)){
+      const file=resolveNationalIntelligenceArtifactPath(slug, "growth-plan-intelligence-input-v1");
+      if(!file){
         return res.status(404).json({ error:"growth_plan_intelligence_input_not_found" });
       }
       return res.json(JSON.parse(fs.readFileSync(file,"utf8")));
@@ -604,14 +609,14 @@ router.get(
   (req, res) => {
     try {
       const slug=String(req.params.slug || "");
-      if(slug !== "pharmaconnect"){
-        return res.status(400).json({ error:"Growth Plan Intelligence is currently available for the PharmaConnect national platform." });
+      if(!isNationalGrowthPlatform(slug)){
+        return res.status(400).json({ error:"Growth Plan Intelligence is available for NATIONAL Growth Platform tenants only." });
       }
-      const file=path.join(process.cwd(),"data/national-growth-engine/pharmaconnect-growth-plan-intelligence-v1.json");
-      if(!fs.existsSync(file)){
+      const intelligence=readGrowthPlanIntelligenceV1(slug);
+      if(!intelligence){
         return res.status(404).json({ error:"growth_plan_intelligence_not_found" });
       }
-      return res.json(JSON.parse(fs.readFileSync(file,"utf8")));
+      return res.json(intelligence);
     } catch (error) {
       return res.status(500).json({ error:error instanceof Error ? error.message : String(error) });
     }

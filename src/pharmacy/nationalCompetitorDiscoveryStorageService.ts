@@ -3,33 +3,17 @@
  */
 
 import fs from "node:fs";
-import path from "node:path";
 
 import type {
   NationalCompetitorDiscoveryResult,
 } from "./nationalCompetitorDiscoveryModel.ts";
-
-const ROOT = path.resolve(
-  process.cwd(),
-  "data",
-  "national-growth-engine",
-);
-
-function safeSlug(slug: string): string {
-  const safe = String(slug || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]/g, "");
-
-  if (!safe) throw new Error("Invalid national growth platform slug");
-
-  return safe;
-}
+import {
+  ensureNationalIntelligenceDataDir,
+  nationalIntelligenceDataPath,
+} from "./nationalIntelligenceStorageService.ts";
 
 export function nationalCompetitorDiscoveryPath(slug: string): string {
-  return path.join(
-    ROOT,
-    `${safeSlug(slug)}-competitor-discovery.json`,
-  );
+  return nationalIntelligenceDataPath(slug, "competitor-discovery");
 }
 
 export function readNationalCompetitorDiscovery(
@@ -47,7 +31,7 @@ export function readNationalCompetitorDiscovery(
 export function writeNationalCompetitorDiscovery(
   result: NationalCompetitorDiscoveryResult,
 ): string {
-  fs.mkdirSync(ROOT, { recursive: true });
+  ensureNationalIntelligenceDataDir();
 
   const file = nationalCompetitorDiscoveryPath(result.slug);
 

@@ -3,8 +3,9 @@ import fs from "node:fs";
 import marketOpportunityService from "../src/pharmacy/marketOpportunityIntelligenceService.ts";
 
 const { buildMarketOpportunityIntelligenceSnapshot } = marketOpportunityService;
-const snapshot = buildMarketOpportunityIntelligenceSnapshot();
+const snapshot = buildMarketOpportunityIntelligenceSnapshot({ slug: "pharmaconnect" });
 const serviceSource = fs.readFileSync("src/pharmacy/marketOpportunityIntelligenceService.ts", "utf8");
+const labsSource = fs.readFileSync("src/pharmacy/dataForSeoRankedKeywordIntelligenceService.ts", "utf8");
 const apiSource = fs.readFileSync("artifacts/api-server/src/routes/api/masterAdminPlatform.ts", "utf8");
 let pass = 0;
 let fail = 0;
@@ -41,12 +42,12 @@ record("score-bounds", snapshot.keywordOpportunities.every((k) => k.opportunityS
 record("priority-bands", snapshot.keywordOpportunities.every((k) => ["HIGH", "MEDIUM", "LOW"].includes(k.priority)), "valid priorities");
 record("reasons-exist", snapshot.keywordOpportunities.every((k) => k.reasons.length > 0), "opportunity reasons");
 record("cost-recorded", typeof snapshot.dataForSeoUsage.totalCost === "number" && snapshot.totalApiCost === snapshot.dataForSeoUsage.totalCost, String(snapshot.totalApiCost));
-record("provider-endpoint-wired", serviceSource.includes("/v3/dataforseo_labs/google/ranked_keywords/live"), "ranked keywords endpoint");
-record("credentials-env-based", serviceSource.includes("process.env.DATAFORSEO_LOGIN") && serviceSource.includes("process.env.DATAFORSEO_PASSWORD"), "env credentials only");
-record("no-credential-literals", !/DATAFORSEO_(LOGIN|PASSWORD)\\s*=/.test(serviceSource), "no literal secret assignment");
+record("provider-endpoint-wired", labsSource.includes("/v3/dataforseo_labs/google/ranked_keywords/live") && serviceSource.includes("getDomainRankedKeywordsWithCost"), "ranked keywords endpoint via canonical Labs client");
+record("credentials-env-based", labsSource.includes("process.env.DATAFORSEO_LOGIN") && labsSource.includes("process.env.DATAFORSEO_PASSWORD"), "env credentials only");
+record("no-credential-literals", !/DATAFORSEO_(LOGIN|PASSWORD)\\s*=/.test(serviceSource + labsSource), "no literal secret assignment");
 record("direct-input-bounded", serviceSource.includes("directCompetitors: 6") && serviceSource.includes("directKeywordLimit: 100"), "6 direct / 100 rows");
-record("subject-coverage-supported", serviceSource.includes("pharmaconnect.uk") && serviceSource.includes("subjectKeywords"), "subject ranked keywords");
-record("live-cost-tracking", serviceSource.includes("task.cost") && serviceSource.includes("totalCost"), "task cost captured");
+record("subject-coverage-supported", serviceSource.includes("subjectKeywords") && serviceSource.includes("getDomainRankedKeywordsWithCost") && serviceSource.includes("resolveNationalIntelligenceSubject"), "subject ranked keywords");
+record("live-cost-tracking", labsSource.includes("task.cost") && serviceSource.includes("totalCost"), "task cost captured");
 record("gap-classification-supported", serviceSource.includes('"untapped"') && serviceSource.includes("weak_coverage"), "gap types");
 record("no-google-places", !JSON.stringify(snapshot).toLowerCase().includes("googleplaces"), "no Google Places execution");
 record("no-local-growth-dependency", !JSON.stringify(snapshot).includes("distanceKm") && !JSON.stringify(snapshot).includes("placeId"), "no local competitor fields");

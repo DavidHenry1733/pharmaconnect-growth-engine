@@ -18,14 +18,14 @@ function argNumber(name: string, fallback: number): number {
 const live = process.argv.includes("--live");
 
 const snapshot = live
-  ? await writeLiveMarketOpportunityIntelligenceSnapshot({
+  ? await writeLiveMarketOpportunityIntelligenceSnapshot("pharmaconnect", {
       directCompetitors: argNumber("direct-limit", MARKET_OPPORTUNITY_LIVE_LIMITS.directCompetitors),
       directKeywordLimit: argNumber("direct-keyword-limit", MARKET_OPPORTUNITY_LIVE_LIMITS.directKeywordLimit),
       adjacentCompetitors: argNumber("adjacent-limit", MARKET_OPPORTUNITY_LIVE_LIMITS.adjacentCompetitors),
       adjacentKeywordLimit: argNumber("adjacent-keyword-limit", MARKET_OPPORTUNITY_LIVE_LIMITS.adjacentKeywordLimit),
       subjectKeywordLimit: argNumber("subject-keyword-limit", MARKET_OPPORTUNITY_LIVE_LIMITS.subjectKeywordLimit),
     })
-  : writeMarketOpportunityIntelligenceSnapshot();
+  : writeMarketOpportunityIntelligenceSnapshot("pharmaconnect");
 
 console.log("\n=== MARKET OPPORTUNITY INTELLIGENCE V1 ===\n");
 console.log(`Generated: ${snapshot.generatedAt}`);
