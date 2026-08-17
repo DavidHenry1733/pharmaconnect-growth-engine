@@ -194,6 +194,13 @@ check(
   fetchCalls === fetchBeforeRead && unread.status === "not_collected",
   `fetchCalls=${fetchCalls - fetchBeforeRead} status=${unread.status}`,
 );
+check(
+  "uncollected-not-labelled-persisted-or-live",
+  unread.liveExecution === false
+    && unread.provenance.evidenceSource === "FALLBACK"
+    && unread.authority === "INSUFFICIENT_EVIDENCE",
+  `${unread.authority}/${unread.provenance.evidenceSource}`,
+);
 
 check(
   "keyword-model-fields",
@@ -483,6 +490,12 @@ check(
 
 const nationalFw = framework.buildGrowthEngineFramework("pharmaconnect");
 const localFw = framework.buildGrowthEngineFramework("brook-pharmacy");
+check(
+  "html-tenant-resolution-accepts-project-config",
+  read("src/pharmacy/pharmacyTenantSlug.ts").includes("getPharmacyProjectConfigPath")
+    && subjectResolver.resolveNationalIntelligenceSubject("pharmaconnect").subjectDomain === "pharmaconnect.uk",
+  "HTML tenant resolution accepts config-backed NATIONAL tenants",
+);
 check(
   "framework-national-search-url",
   nationalFw.steps.find((s) => s.id === "local-market")?.url.includes("/api/growth-engine/search-intelligence") === true,

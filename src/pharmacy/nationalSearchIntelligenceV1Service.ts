@@ -104,12 +104,17 @@ function snapshotShell(input: {
 }): NationalSearchIntelligenceSnapshot {
   const subject = resolveNationalIntelligenceSubject(input.slug);
   const capturedAt = input.capturedAt || new Date().toISOString();
-  const evidenceSource = evidenceSourceFromSnapshot({
-    liveExecution: input.liveExecution,
-    fixture: input.fixture,
-    recovered: input.recovered,
-  });
-  const sourceSnapshot = nationalSearchIntelligencePath(subject.slug);
+  const uncollected =
+    input.status === "not_collected"
+    || (input.status === "error" && !input.liveExecution && !input.fixture && !input.recovered);
+  const evidenceSource = uncollected
+    ? "FALLBACK"
+    : evidenceSourceFromSnapshot({
+      liveExecution: input.liveExecution,
+      fixture: input.fixture,
+      recovered: input.recovered,
+    });
+  const sourceSnapshot = uncollected ? null : nationalSearchIntelligencePath(subject.slug);
   const costLedger = buildCostLedgerFromEndpoints({
     tenantSlug: subject.slug,
     snapshotId: `search-intelligence-v1:${subject.slug}`,
@@ -120,6 +125,10 @@ function snapshotShell(input: {
     endpoints: input.endpoints,
     sourceSnapshot,
   });
+  if (uncollected) {
+    costLedger.evidenceSource = "FALLBACK";
+    costLedger.entries = costLedger.entries.map((entry) => ({ ...entry, evidenceSource: "FALLBACK" }));
+  }
   const provenance = buildProvenance({
     tenantSlug: subject.slug,
     subjectDomain: subject.subjectDomain,
@@ -133,7 +142,9 @@ function snapshotShell(input: {
       ? "explicit-dataforseo-collection"
       : input.fixture
         ? "fixture-snapshot"
-        : "persisted-snapshot",
+        : uncollected
+          ? "not-collected"
+          : "persisted-snapshot",
     costContribution: costLedger.totalCost,
   });
   return {
@@ -158,12 +169,14 @@ function snapshotShell(input: {
     },
     costLedger,
     provenance,
-    authority: authorityFromProvenance({
-      liveExecution: input.liveExecution,
-      fixture: input.fixture,
-      recovered: input.recovered,
-      hasAuthoritativeGapEvidence: false,
-    }),
+    authority: uncollected
+      ? "INSUFFICIENT_EVIDENCE"
+      : authorityFromProvenance({
+        liveExecution: input.liveExecution,
+        fixture: input.fixture,
+        recovered: input.recovered,
+        hasAuthoritativeGapEvidence: false,
+      }),
     customerKeywords: input.keywords,
     organicCompetitors: input.competitors,
     summary: summarise(input.keywords, input.competitors),
