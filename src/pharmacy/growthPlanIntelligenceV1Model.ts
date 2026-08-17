@@ -67,3 +67,51 @@ export interface GrowthPlanIntelligenceSnapshot {
     later: GrowthPlanAction[];
   };
 }
+
+/** Lower is better. Evidence quality is an explicit ranking dimension — status is never upgraded. */
+export function gapEvidenceStatusRank(status: string): number {
+  switch (status) {
+    case "PROVEN_UNTAPPED":
+      return 1;
+    case "PROVEN_WEAK_COVERAGE":
+      return 2;
+    case "PROVEN_DEFEND_IMPROVE":
+      return 3;
+    case "NEW_MARKET_EVIDENCE":
+      return 4;
+    case "INSUFFICIENT_EVIDENCE":
+      return 5;
+    case "NOT_APPLICABLE":
+      return 6;
+    default:
+      return 7;
+  }
+}
+
+/** Higher is better. HIGH is required for the strongest PROVEN_UNTAPPED rank. */
+export function gapConfidenceRank(confidence: string): number {
+  switch (confidence) {
+    case "HIGH":
+      return 3;
+    case "MEDIUM":
+      return 2;
+    case "LOW":
+      return 1;
+    case "NONE":
+      return 0;
+    default:
+      return 0;
+  }
+}
+
+export interface GapEvidenceFields {
+  gapEvidenceStatus: string;
+  gapConfidence: string;
+}
+
+/** Negative when `a` has stronger truthful evidence than `b`. Does not fabricate or upgrade status. */
+export function compareGapEvidenceQuality(a: GapEvidenceFields, b: GapEvidenceFields): number {
+  const statusDelta = gapEvidenceStatusRank(a.gapEvidenceStatus) - gapEvidenceStatusRank(b.gapEvidenceStatus);
+  if (statusDelta) return statusDelta;
+  return gapConfidenceRank(b.gapConfidence) - gapConfidenceRank(a.gapConfidence);
+}

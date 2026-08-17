@@ -8,7 +8,7 @@ import { resolvePrimaryMarket } from "./masterAdminMarketScopeService.ts";
 import { getPharmacyProjectConfigPath, safePharmacySlug } from "./pharmacyWorkspacePaths.ts";
 import { resolveTenantServiceCatalogue, type TenantServiceCatalogueEntry } from "./growthEngineTenantServiceCatalogue.ts";
 import { readGrowthPlanIntelligenceV1 } from "./growthPlanIntelligenceV1Service.ts";
-import type { GrowthPlanAction, GrowthPlanIntelligenceSnapshot } from "./growthPlanIntelligenceV1Model.ts";
+import { compareGapEvidenceQuality, type GrowthPlanAction, type GrowthPlanIntelligenceSnapshot } from "./growthPlanIntelligenceV1Model.ts";
 import type { CampaignReadinessItem } from "./growthEngineCampaignModel.ts";
 import fs from "node:fs";
 
@@ -116,13 +116,21 @@ function selectEligible(snapshot: GrowthPlanIntelligenceSnapshot | null): Growth
 const PRIORITY_RANK: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 
 function selectPrimary(eligible: GrowthPlanAction[]): GrowthPlanAction | null {
+  const corePrimary = eligible.filter((a) => a.growthPlanRole === "PRIMARY_COMMERCIAL" && a.marketScope === "CORE");
   const primaryCommercial = eligible.filter((a) => a.growthPlanRole === "PRIMARY_COMMERCIAL");
-  const pool = primaryCommercial.length ? primaryCommercial : eligible;
+  const pool = corePrimary.length ? corePrimary : primaryCommercial.length ? primaryCommercial : eligible;
   const sorted = [...pool].sort((a, b) => {
-    if (b.actionScore !== a.actionScore) return b.actionScore - a.actionScore;
+    const evidence = compareGapEvidenceQuality(a, b);
+    if (evidence) return evidence;
     const priorityDelta = (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0);
     if (priorityDelta) return priorityDelta;
-    return b.combinedSearchDemand - a.combinedSearchDemand;
+    if (b.actionScore !== a.actionScore) return b.actionScore - a.actionScore;
+    if (b.combinedSearchDemand !== a.combinedSearchDemand) return b.combinedSearchDemand - a.combinedSearchDemand;
+    if (b.competitorCount !== a.competitorCount) return b.competitorCount - a.competitorCount;
+    const posA = a.bestCompetitorPosition ?? 999;
+    const posB = b.bestCompetitorPosition ?? 999;
+    if (posA !== posB) return posA - posB;
+    return a.primaryKeyword.localeCompare(b.primaryKeyword);
   });
   return sorted[0] || null;
 }

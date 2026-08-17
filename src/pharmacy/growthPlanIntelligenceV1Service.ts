@@ -3,6 +3,7 @@ import path from "node:path";
 import type { GrowthPlanIntelligenceInput, GrowthPlanKeywordInput } from "./growthPlanIntelligenceContract.ts";
 import {
   GROWTH_PLAN_STRATEGY_VERSION,
+  compareGapEvidenceQuality,
   type GrowthPlanAction,
   type GrowthPlanActionPriority,
   type GrowthPlanActionType,
@@ -68,8 +69,18 @@ function confidence(items: GrowthPlanKeywordInput[]): GrowthPlanAction["confiden
   return "LOW";
 }
 
+function compareClusterMembers(a: GrowthPlanKeywordInput, b: GrowthPlanKeywordInput): number {
+  const evidence = compareGapEvidenceQuality(a, b);
+  if (evidence) return evidence;
+  const volumeDelta = (b.searchVolume || 0) - (a.searchVolume || 0);
+  if (volumeDelta) return volumeDelta;
+  if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
+  return a.keyword.localeCompare(b.keyword);
+}
+
 function actionFromCluster(family: string, items: GrowthPlanKeywordInput[]): GrowthPlanAction {
-  const sorted = [...items].sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0) || b.opportunityScore - a.opportunityScore);
+  const volumeLeader = [...items].sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0) || b.opportunityScore - a.opportunityScore || a.keyword.localeCompare(b.keyword))[0];
+  const sorted = [...items].sort(compareClusterMembers);
   const primary = sorted[0];
   const actionType = actionTypeFor(sorted);
   const actionScore = scoreAction(sorted, actionType);
@@ -77,9 +88,13 @@ function actionFromCluster(family: string, items: GrowthPlanKeywordInput[]): Gro
   const best = [...sorted].sort((a, b) => (a.bestCompetitorPosition || 999) - (b.bestCompetitorPosition || 999))[0];
   const supporting = sorted.slice(1).map((item) => item.keyword);
   const pageType = actionType.replace(/_/g, " ");
+  const representativeDiffers = Boolean(volumeLeader && volumeLeader.keyword !== primary.keyword);
   const evidenceReasons = [
     `${sorted.length} validated keyword(s) in ${family}.`,
     `Combined search demand ${combinedDemand}.`,
+    ...(representativeDiffers
+      ? ["Cluster representative is the strongest-evidence keyword in the family; higher-volume supporting terms keep their own evidence and are not copied onto the primary."]
+      : []),
     primary.gapEvidenceStatus === "PROVEN_UNTAPPED"
       ? "At least one keyword has proven untapped gap evidence."
       : `Gap evidence status: ${primary.gapEvidenceStatus}.`,
