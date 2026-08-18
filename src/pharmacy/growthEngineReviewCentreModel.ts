@@ -87,6 +87,13 @@ export interface ReviewCentreAsset {
   gapId?: string | null;
   recommendationId?: string | null;
   provenance?: string | null;
+  evidence?: string[];
+  customerIntent?: string | null;
+  targetAudience?: string | null;
+  contentAction?: string | null;
+  existingPageUrl?: string | null;
+  reasonForCreation?: string | null;
+  confidence?: string | null;
 }
 
 export interface ReviewCentreGroup {

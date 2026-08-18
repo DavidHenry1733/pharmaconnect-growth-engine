@@ -57,26 +57,47 @@ function statusClass(status: ReviewCentreAsset["status"]): string {
 
 function renderAssetCard(slug: string, campaignId: string, asset: ReviewCentreAsset): string {
   const countSuffix = asset.count > 1 ? ` (${asset.count})` : "";
-  const extra = [
+  const whatCreated = [
     asset.commercialService ? `<div><strong>Commercial service:</strong> ${esc(asset.commercialService)}</div>` : "",
-    asset.whyRecommended ? `<div><strong>Why it was recommended:</strong> ${esc(asset.whyRecommended)}</div>` : "",
-    asset.evidenceSource ? `<div><strong>Evidence source:</strong> ${esc(asset.evidenceSource)}</div>` : "",
-    asset.priority ? `<div><strong>Priority:</strong> ${esc(asset.priority)}</div>` : "",
-    asset.generationStatus ? `<div><strong>Generation status:</strong> ${esc(asset.generationStatus)}</div>` : "",
+    asset.targetAudience ? `<div><strong>Target audience:</strong> ${esc(asset.targetAudience)}</div>` : "",
+    asset.customerIntent ? `<div><strong>Customer intent:</strong> ${esc(asset.customerIntent)}</div>` : "",
+    asset.contentAction ? `<div><strong>Content action:</strong> ${esc(asset.contentAction)}</div>` : "",
+    asset.existingPageUrl ? `<div><strong>Existing page:</strong> ${esc(asset.existingPageUrl)}</div>` : "",
+    `<div><strong>Generation status:</strong> ${esc(asset.generationStatus || "generated")}</div>`,
     `<div><strong>Review status:</strong> ${esc(asset.reviewStatus || asset.statusLabel)}</div>`,
     `<div><strong>Published:</strong> ${asset.published ? "true" : "false"}</div>`,
     `<div><strong>Indexed:</strong> ${asset.indexed ? "true" : "false"}</div>`,
+  ].filter(Boolean).join("");
+  const whyRecommended = [
+    asset.reasonForCreation || asset.whyRecommended
+      ? `<div><strong>Growth Plan recommendation:</strong> ${esc(asset.reasonForCreation || asset.whyRecommended)}</div>`
+      : "",
     asset.gapId ? `<div><strong>Gap:</strong> ${esc(asset.gapId)}</div>` : "",
+    (asset.evidence || []).length
+      ? `<div><strong>Search / plan evidence:</strong> ${esc((asset.evidence || []).join(" "))}</div>`
+      : "",
+    asset.priority ? `<div><strong>Priority:</strong> ${esc(asset.priority)}</div>` : "",
+    asset.confidence ? `<div><strong>Confidence:</strong> ${esc(asset.confidence)}</div>` : "",
+    asset.evidenceSource || asset.provenance
+      ? `<div><strong>Evidence source:</strong> ${esc(asset.evidenceSource || asset.provenance)}</div>`
+      : "",
     asset.recommendationId ? `<div><strong>Recommendation:</strong> ${esc(asset.recommendationId)}</div>` : "",
   ].filter(Boolean).join("");
-  return `<article class="rc-card ${statusClass(asset.status)}" data-asset-key="${esc(asset.key)}" data-recommendation="${esc(asset.recommendationId || "")}" data-gap="${esc(asset.gapId || "")}" data-published="${asset.published ? "true" : "false"}" data-indexed="${asset.indexed ? "true" : "false"}" data-ready-for-review="true">
+  return `<article class="rc-card ${statusClass(asset.status)}" data-asset-key="${esc(asset.key)}" data-recommendation="${esc(asset.recommendationId || "")}" data-gap="${esc(asset.gapId || "")}" data-published="${asset.published ? "true" : "false"}" data-indexed="${asset.indexed ? "true" : "false"}" data-ready-for-review="true" data-commercial-service="${esc(asset.commercialService || "")}" data-customer-intent="${esc(asset.customerIntent || "")}">
 <h3 class="rc-card-title">${esc(asset.title)}${countSuffix}</h3>
 <p class="rc-card-summary">${esc(asset.summary)}</p>
 <div class="rc-card-meta">
 <span class="rc-type">${esc(asset.typeLabel)}</span>
 <span class="rc-status ${statusClass(asset.status)}">${esc(asset.statusLabel)}</span>
 </div>
-${extra ? `<div class="rc-card-summary">${extra}</div>` : ""}
+<section class="rc-card-summary" data-rc-section="what-created">
+<h4>What we created</h4>
+${whatCreated}
+</section>
+<section class="rc-card-summary" data-rc-section="why-recommended">
+<h4>Why this was recommended</h4>
+${whyRecommended}
+</section>
 ${asset.improveMessage ? `<p class="rc-improve-msg">${esc(asset.improveMessage)}</p>` : ""}
 <div class="rc-actions">
 ${asset.previewUrl ? `<a class="rc-btn rc-btn-ghost" href="${esc(asset.previewUrl)}" target="_blank" rel="noopener">Preview</a>` : ""}

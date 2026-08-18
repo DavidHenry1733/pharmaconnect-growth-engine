@@ -102,21 +102,40 @@ async function main() {
     check("generate-unblocked-after-approval", /data-pc-gen-blocked="no"/.test(genBlocked.html) && /Generate approved content/i.test(genBlocked.text), "generate form");
 
     const result = generateApprovedGrowthPlanContent(SLUG);
-    check("generate-1-to-3-items", Boolean(result.ok && result.manifest && result.manifest.assets.length >= 1 && result.manifest.assets.length <= 3), String(result.manifest?.assets.length || 0));
+    const count = result.manifest?.assets.length || 0;
+    check("generate-0-to-3-items", Boolean(result.ok && result.manifest && count <= 3), String(count));
     check(
       "items-linked-to-evidence",
       (result.manifest?.assets || []).every((asset) => Boolean(asset.recommendationId && asset.gapId && asset.whyRecommended && (asset.evidence || []).length)),
       "recommendation/gap evidence",
     );
+    check(
+      "configured-service-and-intent",
+      (result.manifest?.assets || []).every((asset) => Boolean(asset.commercialService && asset.customerIntent)),
+      (result.manifest?.assets || []).map((asset) => asset.commercialService).join(",") || "zero",
+    );
+    const customerHtml = (result.manifest?.outputPaths || []).map((file) => fs.readFileSync(file, "utf8")).join("\n");
+    check(
+      "internal-language-absent-from-customer-content",
+      count === 0 || (!/Growth Plan candidate/i.test(customerHtml) && !/customer ranking keywords=/i.test(customerHtml) && !/do not generate content until approved/i.test(customerHtml) && !/PROVEN_UNTAPPED/.test(customerHtml)),
+      count === 0 ? "zero items" : "customer HTML clean",
+    );
 
     const genAfter = await visiblePage(renderGeneratePage(SLUG, buildGrowthPlanRecommendation(SLUG)));
-    check("generated-visible-on-generate-page", /READY FOR REVIEW/.test(genAfter.text) && /data-pc-gen-item=/.test(genAfter.html), "generated items");
+    check("generated-visible-on-generate-page", /READY FOR REVIEW/.test(genAfter.text) && (count === 0 || /data-pc-gen-item=/.test(genAfter.html)), "generated items");
+    check("generate-separates-why", count === 0 || (/data-pc-gen-section="why-recommended"/.test(genAfter.html) && /data-pc-gen-section="what-created"/.test(genAfter.html)), "brief vs evidence");
 
     const review = await visiblePage(renderReviewCentrePage(SLUG, APPROVED_GROWTH_PLAN_CAMPAIGN_ID));
     check("review-centre-http-200", /Review Centre/i.test(review.text) && /data-ready-for-review="yes"/.test(review.html), "review 200");
-    check("generated-content-visible", /data-asset-key=/.test(review.html) && /Why it was recommended/i.test(review.text), "items visible");
+    check(
+      "generated-content-visible",
+      count === 0
+        ? /Ready for review|READY FOR REVIEW/i.test(review.text)
+        : /data-asset-key=/.test(review.html) && /Why this was recommended|Why it was recommended/i.test(review.text) && /Customer intent/i.test(review.text) && /Commercial service/i.test(review.text),
+      "items visible",
+    );
     check("status-ready-for-review", /Ready for Review|READY FOR REVIEW|Ready for review/i.test(review.text), "ready for review");
-    check("published-false", /data-published="false"/.test(review.html) && /Published:<\/strong> false/.test(review.html), "published=false");
+    check("published-false", /data-published="false"/.test(review.html), "published=false");
     check("indexed-false", /data-indexed="false"/.test(review.html), "indexed=false");
   } finally {
     restore(backupPath(workflow), workflow);

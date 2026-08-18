@@ -283,43 +283,65 @@ export function renderGeneratePage(slug: string, plan: GrowthEnginePlanRecommend
         const rec = item as Record<string, unknown>;
         const recId = String(rec.recommendationId || rec.key || "");
         const gapId = String(rec.gapId || "");
-        const title = String(rec.title || rec.recommendedAction || recId);
-        const pageType = String(rec.targetPageType || rec.type || "");
+        const title = String(rec.title || rec.workingTitle || rec.recommendedAction || recId);
+        const pageType = String(rec.contentAction || rec.targetPageType || rec.type || "");
         const service = rec.commercialService == null ? null : String(rec.commercialService);
-        const why = String(rec.whyRecommended || "");
+        const why = String(rec.reasonForCreation || rec.whyRecommended || "");
+        const intent = String(rec.customerIntent || "");
         const evidence = Array.isArray(rec.evidence) ? rec.evidence.map(String).join(" ") : "";
         const provenance = String(rec.provenance || rec.evidenceSource || "");
         const priority = String(rec.priority || "");
-        return `<article class="ge-panel" data-pc-gen-item="${esc(recId)}" data-pc-gen-gap="${esc(gapId)}" data-published="false" data-indexed="false">
+        return `<article class="ge-panel" data-pc-gen-item="${esc(recId)}" data-pc-gen-gap="${esc(gapId)}" data-published="false" data-indexed="false" data-commercial-service="${esc(service || "")}" data-customer-intent="${esc(intent)}">
+<section data-pc-gen-section="what-created">
 <h3>${esc(title)}</h3>
 <ul style="font-size:14px;color:#475569">
+<li><strong>Customer-facing title:</strong> ${esc(title)}</li>
 <li><strong>Content / page type:</strong> ${esc(pageType)}</li>
-<li><strong>Commercial service:</strong> ${esc(service || "National digital-growth visibility")}</li>
-<li><strong>Why it was recommended:</strong> ${esc(why)}</li>
-<li><strong>Evidence:</strong> ${esc(evidence)}</li>
-<li><strong>Evidence source:</strong> ${esc(provenance)}</li>
-<li><strong>Priority:</strong> ${esc(priority)}</li>
+<li><strong>Commercial service:</strong> ${esc(service || "Not mapped")}</li>
+<li><strong>Customer intent:</strong> ${esc(intent || "Not generated")}</li>
 <li><strong>Generation status:</strong> ${generated ? "CONTENT GENERATED" : blockedReason ? "BLOCKED BEFORE APPROVAL" : "READY TO GENERATE"}</li>
 <li><strong>Review status:</strong> ${generated ? "READY FOR REVIEW" : "NOT GENERATED"}</li>
 <li><strong>Published:</strong> false</li>
 <li><strong>Indexed:</strong> false</li>
 </ul>
+</section>
+<section data-pc-gen-section="why-recommended">
+<h4>Why this was recommended</h4>
+<ul style="font-size:14px;color:#475569">
+<li><strong>Growth Plan recommendation:</strong> ${esc(why)}</li>
+<li><strong>Evidence:</strong> ${esc(evidence)}</li>
+<li><strong>Evidence source:</strong> ${esc(provenance)}</li>
+<li><strong>Priority:</strong> ${esc(priority)}</li>
+</ul>
+</section>
 </article>`;
       })
       .join("");
+    const skippedCards = generated
+      ? ((pkg as { skippedItems?: Array<{ recommendationId: string; gapId: string; reason: string; detail: string }> } | null)?.skippedItems || [])
+          .map(
+            (row) => `<article class="ge-panel" data-pc-gen-skipped="${esc(row.recommendationId)}" data-pc-gen-skip-reason="${esc(row.reason)}">
+<h3>NOT_GENERATED</h3>
+<p>${esc(row.detail)}</p>
+<p style="font-size:13px;color:#64748b">Recommendation ${esc(row.recommendationId)} · gap ${esc(row.gapId)}</p>
+</article>`,
+          )
+          .join("")
+      : "";
     const body = `<div class="ge-panel" data-pc-generate-page="national" data-content-package="approved-growth-plan" data-pc-gen-blocked="${blockedReason ? "yes" : "no"}" data-pc-gen-generated="${generated ? "yes" : "no"}">
 <h2>Create your content</h2>
-<p class="ge-lead">This is what the Growth Plan recommended, why it recommended it, and what ${esc(slug)} can create from approved items. Patient-service Campaign Builder is not used.</p>
+<p class="ge-lead">Approved Growth Plan items become a commercial content brief, then the existing generator creates drafts. Patient-service Campaign Builder is not used.</p>
 ${blockedReason ? `<p style="color:#9a3412;font-weight:800">${esc(blockedReason)}</p>
 <p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Approve Growth Plan →</a></p>` : ""}
 ${!blockedReason && !generated ? `<form method="post" action="/api/growth-engine/${encodeURIComponent(slug)}/generate-approved-plan" style="margin-top:12px">
 <button type="submit" class="ge-btn ge-btn-primary">Generate approved content</button>
 </form>
-<p style="font-size:13px;color:#64748b;margin-top:12px">Maximum initial items: 3. Drafts stay unpublished and unindexed until Review Centre.</p>` : ""}
+<p style="font-size:13px;color:#64748b;margin-top:12px">Maximum initial items: 3. Only commercially mapped briefs are generated. Drafts stay unpublished and unindexed until Review Centre.</p>` : ""}
 ${generated ? `<p style="font-weight:800;color:#166534">CONTENT GENERATED — READY FOR REVIEW. Published=false. Indexed=false.</p>
 <p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="${esc(reviewUrl)}">Review generated content →</a></p>` : ""}
 </div>
-${itemCards || `<div class="ge-panel"><p>No approved Growth Plan items are available to generate.</p></div>`}`;
+${itemCards || `<div class="ge-panel"><p>No approved Growth Plan items are available to generate.</p></div>`}
+${skippedCards}`;
     return pageShell(slug, "Create Content", copy.generateStepSubtitle, "generate", body, {
       prevUrl: prev,
       nextUrl: next,

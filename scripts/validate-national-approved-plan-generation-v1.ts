@@ -112,7 +112,7 @@ function main() {
     const manifest = generated.manifest || loadContentPackage(SLUG, APPROVED_GROWTH_PLAN_CAMPAIGN_ID);
     record("existing-generator-reused", Boolean(manifest?.generatorVersion) && (manifest?.adminDiagnostics || []).includes("generator:pharmacyContentPackageService"), manifest?.generatorVersion || "missing");
     record("no-parallel-engine", persistApprovedGrowthPlanContentPackage.name === "persistApprovedGrowthPlanContentPackage", "package persist reused");
-    record("generated-item-count", (manifest?.assets.length || 0) >= 1 && (manifest?.assets.length || 0) <= 3, String(manifest?.assets.length || 0));
+    record("generated-item-count", (manifest?.assets.length || 0) <= 3, String(manifest?.assets.length || 0));
     record(
       "unapproved-items-not-generated",
       unapproved.every((item) => !(manifest?.assets || []).some((asset) => asset.gapId === item.gapId)),
@@ -124,19 +124,37 @@ function main() {
       "gap/evidence/provenance",
     );
     const html = (manifest?.outputPaths || []).map((file) => fs.readFileSync(file, "utf8")).join("\n");
-    record("tenant-specific", /PharmaConnect/.test(html) && /UK community pharmacies/i.test(html) && !/Pharmacy First is an NHS advanced service/i.test(html) && !/Brook Pharmacy/i.test(html), "PharmaConnect B2B");
-    record("nothing-published", manifest?.published === false && /data-published="false"/.test(html), String(manifest?.published));
-    record("nothing-indexed", manifest?.indexed === false && /data-indexed="false"/.test(html), String(manifest?.indexed));
+    const assetCount = manifest?.assets.length || 0;
+    record(
+      "tenant-specific",
+      assetCount === 0
+        ? true
+        : /PharmaConnect/.test(html) && /UK community pharmacies/i.test(html) && !/Pharmacy First is an NHS advanced service/i.test(html) && !/Brook Pharmacy/i.test(html),
+      assetCount === 0 ? "zero commercially valid drafts" : "PharmaConnect B2B",
+    );
+    record(
+      "customer-facing-no-internal-language",
+      assetCount === 0 || (!/Growth Plan candidate/i.test(html) && !/customer ranking keywords=/i.test(html) && !/do not generate content until approved/i.test(html)),
+      assetCount === 0 ? "zero items" : "firewall",
+    );
+    record("nothing-published", manifest?.published === false && (assetCount === 0 || /data-published="false"/.test(html)), String(manifest?.published));
+    record("nothing-indexed", manifest?.indexed === false && (assetCount === 0 || /data-indexed="false"/.test(html)), String(manifest?.indexed));
 
     const genHtml = renderGeneratePage(SLUG, buildGrowthPlanRecommendation(SLUG));
-    record("generate-page-shows-items", /data-pc-gen-item=/.test(genHtml) && /READY FOR REVIEW/.test(genHtml), "generate results");
+    record("generate-page-shows-items", /READY FOR REVIEW/.test(genHtml) && (assetCount === 0 || /data-pc-gen-item=/.test(genHtml)), "generate results");
 
     const review = buildReviewCentreView(SLUG, APPROVED_GROWTH_PLAN_CAMPAIGN_ID);
     const reviewHtml = renderReviewCentrePage(SLUG, APPROVED_GROWTH_PLAN_CAMPAIGN_ID);
     record("review-centre-connected", Boolean(review?.generated) && review?.readyForReview === true, review?.nextAction.title || "missing");
     record("review-visible-items", (review?.groups.flatMap((g) => g.assets).length || 0) === (manifest?.assets.length || 0), String(review?.groups.flatMap((g) => g.assets).length || 0));
     record("review-ready-unpublished", review?.published === false && review?.indexed === false && review?.canPublish === false && /READY FOR REVIEW|Ready for review/i.test(reviewHtml), `published=${review?.published}`);
-    record("review-evidence-cards", /Why it was recommended/i.test(reviewHtml) && /Evidence source/i.test(reviewHtml) && /data-gap=/.test(reviewHtml), "review evidence");
+    record(
+      "review-evidence-cards",
+      assetCount === 0
+        ? /READY FOR REVIEW|Ready for review/i.test(reviewHtml)
+        : /Why this was recommended|Why it was recommended/i.test(reviewHtml) && /Evidence source/i.test(reviewHtml) && /data-gap=/.test(reviewHtml),
+      "review evidence",
+    );
   } finally {
     restore(backupPath(workflow), workflow);
     restore(backupPath(pkgFile), pkgFile);

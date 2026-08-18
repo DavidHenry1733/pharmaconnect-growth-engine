@@ -172,13 +172,11 @@ function buildAssets(slug: string, campaignId: string, campaignName: string): Re
       : sec.previewUrl;
 
     const national = isNationalGrowthPlatform(slug);
-    const why = sec.whyRecommended ? ` Why: ${sec.whyRecommended}` : "";
-    const evidence = sec.evidence?.length ? ` Evidence: ${sec.evidence.join(" ")}` : "";
     assets.push({
       key: assetKey,
       title: national ? sec.title || customerTitle(sec, campaignName) : customerTitle(sec, campaignName),
       summary: national
-        ? `${sec.commercialService || campaignName} · ${sec.targetPageType || sec.type}.${why}${evidence}`
+        ? `${sec.commercialService || campaignName} · ${sec.contentAction || sec.targetPageType || sec.type}`
         : customerSummary(sec, campaignName),
       typeLabel: customerTypeLabel(sec),
       groupId,
@@ -189,7 +187,7 @@ function buildAssets(slug: string, campaignId: string, campaignName: string): Re
       count: sec.count,
       improveMessage: needsImprovement ? REVIEW_CENTRE_IMPROVE_MESSAGE : null,
       commercialService: sec.commercialService || null,
-      whyRecommended: sec.whyRecommended || null,
+      whyRecommended: sec.whyRecommended || sec.reasonForCreation || null,
       evidenceSource: sec.evidenceSource || sec.provenance || null,
       priority: sec.priority || null,
       generationStatus: sec.generationStatus || (sec.included ? "generated" : "missing"),
@@ -199,6 +197,13 @@ function buildAssets(slug: string, campaignId: string, campaignName: string): Re
       gapId: sec.gapId || null,
       recommendationId: sec.recommendationId || null,
       provenance: sec.provenance || null,
+      evidence: sec.evidence || [],
+      customerIntent: sec.customerIntent || null,
+      targetAudience: sec.targetAudience || null,
+      contentAction: sec.contentAction || null,
+      existingPageUrl: sec.existingPageUrl || null,
+      reasonForCreation: sec.reasonForCreation || sec.whyRecommended || null,
+      confidence: sec.confidence || null,
     });
   }
 

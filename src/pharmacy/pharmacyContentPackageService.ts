@@ -80,6 +80,12 @@ export interface ContentPackageAsset {
   generationStatus?: string;
   published?: boolean;
   indexed?: boolean;
+  customerIntent?: string | null;
+  targetAudience?: string | null;
+  contentAction?: string | null;
+  existingPageUrl?: string | null;
+  reasonForCreation?: string | null;
+  internalNotes?: string[];
 }
 
 export interface ContentPackageManifest {
@@ -110,6 +116,7 @@ export interface ContentPackageManifest {
   indexed?: boolean;
   source?: string;
   reviewState?: string;
+  skippedItems?: Array<{ recommendationId: string; gapId: string; reason: string; detail: string }>;
 }
 
 function tenantKey(slug: string): string {
@@ -1029,11 +1036,21 @@ export interface ApprovedPlanDraftAssetInput {
   confidence: string;
   provenance: string;
   targetPageType: string;
+  customerIntent?: string | null;
+  targetAudience?: string | null;
+  contentAction?: string | null;
+  existingPageUrl?: string | null;
+  reasonForCreation?: string | null;
+  internalNotes?: string[];
 }
 
 export function persistApprovedGrowthPlanContentPackage(
   slug: string,
   drafts: ApprovedPlanDraftAssetInput[],
+  options?: {
+    skippedItems?: Array<{ recommendationId: string; gapId: string; reason: string; detail: string }>;
+    adminDiagnostics?: string[];
+  },
 ): ContentPackageManifest {
   const key = tenantKey(slug);
   const serviceId = "approved-growth-plan";
@@ -1075,6 +1092,12 @@ export function persistApprovedGrowthPlanContentPackage(
       generationStatus: "generated",
       published: false,
       indexed: false,
+      customerIntent: draft.customerIntent || null,
+      targetAudience: draft.targetAudience || null,
+      contentAction: draft.contentAction || null,
+      existingPageUrl: draft.existingPageUrl || null,
+      reasonForCreation: draft.reasonForCreation || draft.whyRecommended,
+      internalNotes: draft.internalNotes || [],
     });
     indexAssets.push({ id: draft.key, type: draft.type, outputPath: outPath });
   }
@@ -1126,17 +1149,25 @@ export function persistApprovedGrowthPlanContentPackage(
       "scope:max-3-approved-items",
       "publish:blocked",
       "index:blocked",
+      ...(options?.adminDiagnostics || []),
     ],
     generationReportPath: null,
-    packageValidation: { ok: assets.length > 0, detail: `${assets.length} approved-plan drafts` },
+    packageValidation: {
+      ok: true,
+      detail: `${assets.length} commercially valid drafts; ${options?.skippedItems?.length || 0} not generated`,
+    },
     serviceValidation: { ok: true, detail: "Approved Growth Plan drafts" },
     tenantValidation: { ok: tenantOk, detail: tenantOk ? "Tenant-specific drafts" : "Tenant check failed" },
     published: false,
     indexed: false,
     source: "approved-growth-plan",
     reviewState: "ready_for_review",
+    skippedItems: options?.skippedItems || [],
   };
   saveContentPackage(manifest);
+  if (assets.length === 0) {
+    return manifest;
+  }
   const handoff = verifyContentPackageHandoff(key, serviceId, { scope: "full" });
   if (!handoff.ok) {
     const failed: ContentPackageManifest = {
