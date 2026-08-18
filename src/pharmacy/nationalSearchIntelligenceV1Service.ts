@@ -468,6 +468,10 @@ function hydrateSnapshot(snapshot: NationalSearchIntelligenceSnapshot, subjectDo
       serviceOverlap: false,
       marketRelevance: false,
       matchedServices: [],
+      tenantServices: [],
+      candidateServicesDetected: [],
+      overlappingServices: [],
+      nonOverlappingServices: [],
       organicOverlapSupportingOnly: true,
     },
   }));
@@ -644,7 +648,9 @@ function mapLabsCompetitor(input: {
   why.push(
     gate.role === "commercial_competitor"
       ? "This business competes for the same customers and services."
-      : "This domain competes in search. Organic overlap is not commercial competitor proof.",
+      : gate.role === "adjacent_commercial_provider"
+        ? "This business targets the same customers but does not overlap the tenant's commercial services."
+        : "This domain competes in search. Organic overlap is not commercial competitor proof.",
   );
   why.push(...gate.reasons);
   const excluded = gate.classification === "excluded";
@@ -677,6 +683,10 @@ function mapLabsCompetitor(input: {
       serviceOverlap: gate.serviceOverlap,
       marketRelevance: gate.marketRelevance,
       matchedServices: gate.matchedServices,
+      tenantServices: gate.tenantServices,
+      candidateServicesDetected: gate.candidateServicesDetected,
+      overlappingServices: gate.overlappingServices,
+      nonOverlappingServices: gate.nonOverlappingServices,
       organicOverlapSupportingOnly: true,
     },
     analysed: input.analysed,

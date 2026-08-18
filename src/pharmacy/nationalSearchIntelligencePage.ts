@@ -77,11 +77,15 @@ function competitorCard(row: NationalOrganicSearchCompetitor): string {
     : "Shared keyword overlap recorded";
   const traffic = row.organicEtv != null ? `Estimated organic traffic ${row.organicEtv}` : "Traffic estimate not returned";
   const commercial = row.role === "commercial_competitor" && row.eligibleForKeywordExpansion;
+  const adjacent = row.role === "adjacent_commercial_provider";
   const distinction = commercial
     ? "This business competes for your customers."
-    : "This domain competes in search.";
+    : adjacent
+      ? "This business sells to the same customers, but not overlapping services."
+      : "This domain competes in search.";
   const analysed = row.analysed ? "YES" : "NO";
   const expansion = row.eligibleForKeywordExpansion ? "eligible" : "not eligible";
+  const gate = row.commercialGate;
   return `<article class="ge-competitor" data-ni03b-competitor="${esc(row.domain)}" data-ni03c-competitor="${esc(row.domain)}" data-ni03c1-role="${esc(row.role)}" data-ni03c1-eligible="${row.eligibleForKeywordExpansion ? "true" : "false"}">
 <div class="ge-competitor-head">
 <div>
@@ -92,6 +96,11 @@ function competitorCard(row: NationalOrganicSearchCompetitor): string {
 </div>
 <p style="font-size:13px;color:#334155;margin:0 0 8px">${esc(distinction)}</p>
 <p class="ge-meta">${esc(overlap)} · ${esc(traffic)} · Organic overlap is SERP evidence only.</p>
+<p class="ge-meta">TENANT SERVICES: ${esc((gate?.tenantServices || []).join(", ") || "—")}</p>
+<p class="ge-meta">CANDIDATE SERVICES DETECTED: ${esc((gate?.candidateServicesDetected || []).join(", ") || "—")}</p>
+<p class="ge-meta">OVERLAPPING SERVICES: ${esc((gate?.overlappingServices || gate?.matchedServices || []).join(", ") || "—")}</p>
+<p class="ge-meta">NON-OVERLAPPING SERVICES: ${esc((gate?.nonOverlappingServices || []).join(", ") || "—")}</p>
+<p class="ge-meta">SERVICE_OVERLAP=${gate?.serviceOverlap ? "true" : "false"}</p>
 <p class="ge-meta">Qualification evidence: ${esc((row.qualificationEvidence || row.whyIdentified || []).join(" "))}</p>
 <p class="ge-meta">Keyword expansion: ${esc(expansion)} · Analysed: ${esc(analysed)}${row.nonSelectionReason ? ` · ${esc(row.nonSelectionReason)}` : ""}</p>
 <p class="ge-meta">Evidence status: ${esc(row.evidenceSource)} · Verified: no · Source: Labs competitors domain</p>

@@ -372,7 +372,7 @@ check(
   !serviceSource.includes('commercial ? qualification.classification : "adjacent_competitor"')
     && serviceSource.includes("selectCompetitorsForKeywordExpansion")
     && gateSource.includes("eligibleForKeywordExpansion: false")
-    && !/boots\.com|sciencedirect\.com|brainly\.com|rcpharm\.org|pharmacymagazine\.co\.uk/.test(gateSource + serviceSource)
+    && !/boots\.com|sciencedirect\.com|brainly\.com|rcpharm\.org|pharmacymagazine\.co\.uk|communitypharmacy\.org\.uk|nymopmr\.co\.uk|surveyfocus\.co\.uk/.test(gateSource + serviceSource)
     && labsSource.includes("docs.dataforseo.com/v3/dataforseo_labs-google-competitors_domain-live")
     && labsSource.includes("full_domain_metrics"),
   "insufficient_evidence is not auto-promoted; no PharmaConnect domain blacklist",

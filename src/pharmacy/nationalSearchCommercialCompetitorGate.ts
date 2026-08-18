@@ -8,10 +8,12 @@
  */
 import { qualifyNationalCompetitor } from "./nationalCompetitorQualificationService.ts";
 import { qualifyNationalCompetitorV2 } from "./nationalCompetitorQualificationV2Service.ts";
+import { compareNationalCommercialServiceOverlap } from "./nationalCommercialServiceOverlap.ts";
 import type { NationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
 
 export type NationalSearchCompetitorRole =
   | "commercial_competitor"
+  | "adjacent_commercial_provider"
   | "serp_content_competitor"
   | "customer_market"
   | "publisher"
@@ -52,6 +54,10 @@ export type NationalSearchCommercialGateResult = {
   serviceOverlap: boolean;
   marketRelevance: boolean;
   matchedServices: string[];
+  tenantServices: string[];
+  candidateServicesDetected: string[];
+  overlappingServices: string[];
+  nonOverlappingServices: string[];
   reasons: string[];
   exclusionReasons: string[];
   nonSelectionReason: string | null;
@@ -106,6 +112,14 @@ const ROLE_SIGNALS: Array<{ role: NationalSearchCompetitorRole; signals: string[
       "professional standards",
       "register of members",
       "become a member",
+      "representative organisation",
+      "representative body",
+      "represents independent",
+      "industry body",
+      "trade body",
+      "statutory",
+      "sector representation",
+      "sector representative",
     ],
   },
   {
@@ -141,6 +155,11 @@ const ROLE_SIGNALS: Array<{ role: NationalSearchCompetitorRole; signals: string[
       "wiki article",
       "what is a",
       "how-to guide",
+      "patient information",
+      "information for patients",
+      "information for the public",
+      "nhs community-pharmacy information",
+      "community pharmacy england",
     ],
   },
 ];
@@ -242,10 +261,26 @@ export function assessNationalSearchCommercialCompetitor(
     ownDomains,
   });
 
+  const overlap = compareNationalCommercialServiceOverlap({
+    tenantServices: services,
+    websiteText: text,
+  });
   const targetMarketRelevance = marketTerms.some((term) => text.includes(normalise(term)));
-  const serviceOverlap = v1.matchedServices.length > 0;
+  const serviceOverlap = overlap.serviceOverlap;
+  const organisationExcluded = v2.exclusionReasons.some((reason) =>
+    /publisher|regulator|professional body|non-competing organisation|non-commercial evidence/i.test(reason),
+  );
+  const nonCommercialRole = roleFromEvidence != null
+    && roleFromEvidence !== "commercial_competitor"
+    && roleFromEvidence !== "adjacent_commercial_provider"
+    && roleFromEvidence !== "serp_content_competitor"
+    && roleFromEvidence !== "insufficient_evidence";
+  const strongCommercialProvider = /\b(agency|we provide|we offer|our clients|our customers|book a call|request a quote|get started|free consultation|software provider)\b/.test(text)
+    || v1.qualificationReasons.some((reason) => /commercial digital-service/i.test(reason));
   const commercialProvider =
-    (v2.evidence.commercialProvider || v1.qualificationReasons.some((reason) => /commercial digital-service/i.test(reason)))
+    strongCommercialProvider
+    && !nonCommercialRole
+    && !organisationExcluded
     && roleFromEvidence !== "publisher"
     && roleFromEvidence !== "education_academic"
     && roleFromEvidence !== "professional_body"
@@ -254,14 +289,11 @@ export function assessNationalSearchCommercialCompetitor(
     && roleFromEvidence !== "generic_informational";
   const marketRelevance = v2.evidence.ukMarket || geographicRelevance(text, input.subject.country, domain);
   const infrastructure = isInfrastructureDomain(domain, ownDomains) || v1.rejectionReasons.some((reason) => /own domain/i.test(reason));
-  const nonCommercialRole = roleFromEvidence != null
-    && roleFromEvidence !== "commercial_competitor"
-    && roleFromEvidence !== "serp_content_competitor"
-    && roleFromEvidence !== "insufficient_evidence";
 
   const commercialGate =
     !infrastructure
     && !nonCommercialRole
+    && !organisationExcluded
     && targetMarketRelevance
     && commercialProvider
     && serviceOverlap
@@ -271,7 +303,9 @@ export function assessNationalSearchCommercialCompetitor(
     ...v2.reasons,
     ...v1.qualificationReasons,
     targetMarketRelevance ? "Tenant target-market terms appear in website evidence." : "",
-    serviceOverlap ? `Tenant service overlap: ${v1.matchedServices.join(", ")}.` : "",
+    serviceOverlap ? `Material tenant service overlap: ${overlap.overlappingServices.join(", ")}.` : "No material tenant-service overlap evidenced.",
+    overlap.overlappingPhrases.length ? `Overlapping service phrases: ${overlap.overlappingPhrases.join(", ")}.` : "",
+    overlap.nonOverlappingServices.length ? `Non-overlapping services detected: ${overlap.nonOverlappingServices.join(", ")}.` : "",
     commercialProvider ? "Commercial provider evidence present." : "",
     marketRelevance ? "Geographic/commercial market evidence present." : "",
     input.sharedKeywordCount != null
@@ -290,7 +324,11 @@ export function assessNationalSearchCommercialCompetitor(
     commercialProvider: Boolean(commercialProvider),
     serviceOverlap,
     marketRelevance,
-    matchedServices: v1.matchedServices,
+    matchedServices: overlap.overlappingServices,
+    tenantServices: overlap.tenantServices,
+    candidateServicesDetected: overlap.candidateServicesDetected,
+    overlappingServices: overlap.overlappingServices,
+    nonOverlappingServices: overlap.nonOverlappingServices,
   };
 
   if (infrastructure) {
@@ -334,6 +372,20 @@ export function assessNationalSearchCommercialCompetitor(
       reasons,
       exclusionReasons: [],
       nonSelectionReason: null,
+    };
+  }
+
+  if (targetMarketRelevance && commercialProvider && !serviceOverlap && !infrastructure && !nonCommercialRole) {
+    return {
+      role: "adjacent_commercial_provider",
+      classification: "insufficient_evidence",
+      qualification: "candidate",
+      eligibleForKeywordExpansion: false,
+      score: Math.max(v2.score, v1.score),
+      ...gateFields,
+      reasons,
+      exclusionReasons,
+      nonSelectionReason: "Targets the same customer market as a commercial supplier, but website evidence does not show material overlap with the tenant's configured commercial services.",
     };
   }
 

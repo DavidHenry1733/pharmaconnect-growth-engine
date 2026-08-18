@@ -89,6 +89,10 @@ export interface NationalOrganicSearchCompetitor {
     serviceOverlap: boolean;
     marketRelevance: boolean;
     matchedServices: string[];
+    tenantServices: string[];
+    candidateServicesDetected: string[];
+    overlappingServices: string[];
+    nonOverlappingServices: string[];
     organicOverlapSupportingOnly: true;
   };
   analysed: boolean;

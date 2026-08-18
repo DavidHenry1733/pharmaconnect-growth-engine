@@ -70,10 +70,21 @@ check(
     && gateSource.includes("Organic overlap is SERP competition, not commercial competition"),
   "Competitors Domain field semantics taken from official docs",
 );
+const overlapSource = read("src/pharmacy/nationalCommercialServiceOverlap.ts");
 check(
   "no-pharmaconnect-domain-blacklist",
-  !/boots\.com|sciencedirect\.com|brainly\.com|rcpharm\.org|pharmacymagazine\.co\.uk/.test(gateSource + serviceSource + modelSource),
+  !/boots\.com|sciencedirect\.com|brainly\.com|rcpharm\.org|pharmacymagazine\.co\.uk|communitypharmacy\.org\.uk|nymopmr\.co\.uk|surveyfocus\.co\.uk/.test(gateSource + serviceSource + modelSource + overlapSource),
   "no PharmaConnect-specific competitor domain blacklist",
+);
+check(
+  "hard-service-overlap-module",
+  overlapSource.includes("BROAD_ALONE")
+    && overlapSource.includes("website design")
+    && gateSource.includes("compareNationalCommercialServiceOverlap")
+    && gateSource.includes("adjacent_commercial_provider")
+    && pageSource.includes("TENANT SERVICES")
+    && pageSource.includes("SERVICE_OVERLAP="),
+  "material overlap ignores broad words; adjacent commercial providers preserved",
 );
 check(
   "no-insufficient-evidence-auto-promotion",
@@ -129,13 +140,16 @@ check(
   `services=${subject.commercialServices.map((row) => row.serviceName).join(" | ")} market=${subject.primaryMarket}`,
 );
 
-const agencyText = "We are a UK digital agency for community pharmacies. We provide pharmacy website design, local SEO, email marketing, hosting and growth audits. We work with pharmacy businesses across the United Kingdom. Our services help pharmacy owners. Contact us to get started.";
-const retailerText = "Boots is a health and beauty retailer. Add to basket. Store locator. Our stores. Shop now. Buy online. Repeat prescription. We dispense medicines and health products. Opening hours. We do not sell website design or SEO to pharmacies.";
+const agencyText = "We are a UK digital agency for community pharmacies. We provide pharmacy website design, local SEO, email marketing, website hosting and growth audits. We work with pharmacy businesses across the United Kingdom. Our services help pharmacy owners. Contact us to get started.";
+const retailerText = "Boots is a health and beauty retailer. Add to basket. Store locator. Our stores. Shop now. Buy online. Repeat prescription. We dispense medicines and health products. Opening hours.";
 const publisherText = "Pharmacy Magazine is the leading trade press publication. Read the latest issue. Editorial team. Subscribe to our magazine. Newsroom.";
 const educationText = "Elsevier ScienceDirect hosts peer-reviewed scientific journal articles and academic research. DOI: 10.0000/example. Open access articles and textbook chapters.";
 const homeworkText = "Homework help and study help quizzes for students.";
 const professionalText = "The Royal College is a professional body. Membership benefits. Become a member. Professional standards. Register of members. Faculty of pharmacy.";
 const overlapOnlyText = "";
+const pmrText = "We provide PMR and dispensing software for community pharmacies. Prescription management, stock management and pharmacy operations. Our platform helps pharmacy owners across the United Kingdom. Contact us to get started.";
+const surveyText = "We provide a CPPQ community pharmacy patient questionnaire survey platform and compliance software for UK pharmacy businesses. Contact us to get started.";
+const representativeText = "Community Pharmacy England is the representative organisation for community pharmacies. Patient information service and information for the public. NHS community-pharmacy information. Statutory sector representation. Guidance for pharmacies.";
 
 function assess(domain: string, websiteText: string, sharedKeywordCount = 20, organicEtv = 100) {
   return gate.assessNationalSearchCommercialCompetitor({
@@ -163,9 +177,38 @@ check(
   `${agency.role} eligible=${agency.eligibleForKeywordExpansion} services=${agency.matchedServices.join(",")}`,
 );
 
+const pmr = assess("pharmacy-pmr-software.co.uk", pmrText, 22, 1200);
+check(
+  "B-pmr-provider",
+  pmr.role === "adjacent_commercial_provider"
+    && pmr.targetMarketRelevance === true
+    && pmr.commercialProvider === true
+    && pmr.serviceOverlap === false
+    && pmr.eligibleForKeywordExpansion === false,
+  `${pmr.role} overlap=${pmr.serviceOverlap} eligible=${pmr.eligibleForKeywordExpansion} detected=${pmr.candidateServicesDetected.join(",")}`,
+);
+
+const survey = assess("pharmacy-survey-platform.co.uk", surveyText, 19, 800);
+check(
+  "C-survey-platform",
+  survey.role === "adjacent_commercial_provider"
+    && survey.commercialProvider === true
+    && survey.serviceOverlap === false
+    && survey.eligibleForKeywordExpansion === false,
+  `${survey.role} overlap=${survey.serviceOverlap} eligible=${survey.eligibleForKeywordExpansion}`,
+);
+
+const representative = assess("community-pharmacy-body.example", representativeText, 15, 4000);
+check(
+  "D-representative-body",
+  (representative.role === "professional_body" || representative.role === "generic_informational")
+    && representative.commercialProvider === false
+    && representative.eligibleForKeywordExpansion === false,
+  `${representative.role} commercialProvider=${representative.commercialProvider} eligible=${representative.eligibleForKeywordExpansion}`,
+);
 const retailer = assess("retail-pharmacy-chain.co.uk", retailerText, 40, 90000);
 check(
-  "B-retail-pharmacy",
+  "F-retail-pharmacy",
   retailer.role === "customer_market"
     && retailer.eligibleForKeywordExpansion === false
     && retailer.classification !== "direct_competitor"
@@ -175,7 +218,7 @@ check(
 
 const publisher = assess("pharmacy-trade-press.co.uk", publisherText, 30, 2100);
 check(
-  "C-publisher",
+  "E-publisher",
   publisher.role === "publisher"
     && publisher.eligibleForKeywordExpansion === false,
   `${publisher.role} eligible=${publisher.eligibleForKeywordExpansion}`,
@@ -202,7 +245,7 @@ check(
 
 const overlapOnly = assess("high-authority-overlap.example", overlapOnlyText, 80, 500000);
 check(
-  "F-organic-overlap-only",
+  "G-organic-overlap-only",
   overlapOnly.eligibleForKeywordExpansion === false
     && (overlapOnly.role === "serp_content_competitor" || overlapOnly.role === "insufficient_evidence")
     && overlapOnly.classification === "insufficient_evidence",
@@ -214,9 +257,10 @@ const selected = gate.selectCompetitorsForKeywordExpansion([
   { domain: "pharmacy-digital-agency.co.uk", eligibleForKeywordExpansion: agency.eligibleForKeywordExpansion, score: agency.score, sharedKeywordCount: 4, organicEtv: 80 },
 ], 5);
 check(
-  "G-commercial-outranks-overlap-metrics",
+  "H-agency-outranks-overlap-metrics",
   selected.length === 1
-    && selected[0]?.domain === "pharmacy-digital-agency.co.uk",
+    && selected[0]?.domain === "pharmacy-digital-agency.co.uk"
+    && agency.eligibleForKeywordExpansion === true,
   selected.map((row) => row.domain).join(","),
 );
 
@@ -273,6 +317,9 @@ const websiteEvidenceByDomain = {
   "study-help.example": { title: "Study Help", websiteText: homeworkText },
   "royal-college.example": { title: "Royal College", websiteText: professionalText },
   "high-authority-overlap.example": { title: "high-authority-overlap.example", websiteText: overlapOnlyText },
+  "pharmacy-pmr-software.co.uk": { title: "Pharmacy PMR", websiteText: pmrText },
+  "pharmacy-survey-platform.co.uk": { title: "Pharmacy Surveys", websiteText: surveyText },
+  "community-pharmacy-body.example": { title: "Community Pharmacy Body", websiteText: representativeText },
 };
 
 async function collectScenario(
@@ -334,11 +381,11 @@ check(
 );
 
 const zero = await collectScenario([
-  { domain: "retail-pharmacy-chain.co.uk", intersections: 40, etv: 90000 },
-  { domain: "pharmacy-trade-press.co.uk", intersections: 30, etv: 2100 },
-  { domain: "scientific-articles.example", intersections: 25, etv: 99999 },
-  { domain: "study-help.example", intersections: 18, etv: 80000 },
-  { domain: "royal-college.example", intersections: 11, etv: 4000 },
+  { domain: "pharmacy-pmr-software.co.uk", intersections: 40, etv: 1200 },
+  { domain: "pharmacy-survey-platform.co.uk", intersections: 30, etv: 800 },
+  { domain: "community-pharmacy-body.example", intersections: 25, etv: 4000 },
+  { domain: "retail-pharmacy-chain.co.uk", intersections: 22, etv: 90000 },
+  { domain: "pharmacy-trade-press.co.uk", intersections: 18, etv: 2100 },
 ], { customerKeywordUniverse: 20, qualifiedCompetitorsAnalysed: 5 });
 
 check(
@@ -377,7 +424,8 @@ check(
     && html.includes("pharmacy-digital-agency.co.uk")
     && html.includes("high-authority-overlap.example")
     && html.includes('data-ni03c1-eligible="false"')
-    && html.includes('data-ni03c1-eligible="true"'),
+    && html.includes("TENANT SERVICES")
+    && html.includes("SERVICE_OVERLAP="),
   "collected page keeps SERP competitors visible and marks expansion eligibility",
 );
 
