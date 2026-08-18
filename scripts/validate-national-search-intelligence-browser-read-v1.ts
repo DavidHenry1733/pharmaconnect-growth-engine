@@ -94,7 +94,8 @@ check(
 check(
   "no-organic-candidate-truncation",
   !pageSource.includes("organicCompetitors.slice(0, 12)")
-    && pageSource.includes("const competitors = snapshot.organicCompetitors;"),
+    && pageSource.includes("snapshot.organicCompetitors")
+    && pageSource.includes('data-ni03c2-section="organic-candidate-list"'),
   "all persisted organic candidates are rendered",
 );
 check(
@@ -295,16 +296,17 @@ const routed = pageRenderers.renderSearchIntelligencePage(tenantSlug);
 const competitorCards = (html.match(/data-ni03c-competitor="/g) || []).length;
 const commercialPills = (html.match(/>commercial competitor</g) || []).length;
 
-check("page-status-collected", html.includes('data-ni03c2-page-status="COLLECTED"') && html.includes(">COLLECTED<"), "STATUS=COLLECTED");
-check("customer-keywords-rendered", html.includes("pharmacy website design uk") && html.includes('data-ni03c2-customer-keywords="1"'), "1 customer keyword");
-check("organic-candidates-rendered", competitorCards === 19 && html.includes('data-ni03c2-organic-count="19"'), `organic cards=${competitorCards}`);
-check("qualified-commercial-rendered", html.includes('data-ni03c2-qualified-count="0"') && html.includes("COMMERCIAL COMPETITORS = 0 QUALIFIED"), "0 qualified commercial competitors");
-check("paid-expansions-rendered", html.includes('data-ni03c2-paid-expansions="0"') && html.includes("PAID EXPANSION = 0 REQUESTS"), "0 paid expansions");
+check("page-status-collected", html.includes('data-ni03c2-page-status="collected"') && html.includes(">Collected<"), "STATUS=Collected");
+check("customer-keywords-rendered", html.includes("pharmacy website design uk") && html.includes('data-ni03c2-customer-keywords="1"') && html.includes("Ranking keywords: 1"), "1 customer keyword");
+check("organic-candidates-rendered", competitorCards === 19 && html.includes('data-ni03c2-organic-count="19"') && html.includes("Organic / SERP candidates: 19"), `organic cards=${competitorCards}`);
+check("qualified-commercial-rendered", html.includes('data-ni03c2-qualified-count="0"') && html.includes("Qualified commercial competitors: 0"), "0 qualified commercial competitors");
+check("paid-expansions-rendered", html.includes('data-ni03c2-paid-expansions="0"') && html.includes("Paid competitor expansions: 0"), "0 paid expansions");
 check(
   "sparse-warning-rendered",
   html.includes('data-ni03c2-section="sparse-warning"')
     && html.includes("currently has a sparse organic search footprint")
-    && html.includes("Competitor discovery from shared ranking keywords is therefore limited")
+    && html.includes("Competitor discovery from shared ranking evidence is limited because fewer than")
+    && html.includes("customer keywords currently rank")
     && html.includes("This is an evidence limitation, not a system error"),
   "sparse footprint explained as evidence limitation",
 );
@@ -313,25 +315,25 @@ check(
   html.includes('data-ni03c2-section="zero-commercial"')
     && html.includes("No commercially qualified competitors were found from the current organic-overlap evidence")
     && html.includes("Weak or non-overlapping domains were intentionally excluded from paid competitor keyword expansion")
-    && html.includes("DATA COLLECTION = COLLECTED")
+    && html.includes("DATA COLLECTION = Collected")
     && !html.includes('data-ni03b-status="not_collected"')
     && !html.includes('data-ni03b-status="error"'),
   "zero commercial competitors is a valid collected state",
 );
-check("requests-rendered", html.includes('data-ni03c2-requests="2"'), "requests=2");
-check("tasks-rendered", html.includes('data-ni03c2-tasks="2"'), "tasks=2");
-check("total-cost-rendered", html.includes("0.02652") && html.includes('data-ni03c2-total-cost="0.02652"'), "cost=0.02652");
+check("requests-rendered", html.includes('data-ni03c2-requests="2"') && html.includes("Requests:"), "requests=2");
+check("tasks-rendered", html.includes('data-ni03c2-tasks="2"') && html.includes("Tasks:"), "tasks=2");
+check("total-cost-rendered", html.includes("$0.02652") && html.includes('data-ni03c2-total-cost="0.02652"'), "cost=$0.02652");
 check(
   "evidence-source-rendered",
-  html.includes('data-ni03c2-evidence-source="DATAFORSEO_LIVE"') && html.includes("DATAFORSEO_LIVE"),
-  "DATAFORSEO_LIVE",
+  html.includes('data-ni03c2-evidence-source="DATAFORSEO_LIVE"') && html.includes("DataForSEO Live"),
+  "DataForSEO Live",
 );
 check(
   "authority-rendered",
-  html.includes('data-ni03c2-authority="PERSISTED_PROVEN"') && html.includes("PERSISTED_PROVEN"),
-  "PERSISTED_PROVEN",
+  html.includes('data-ni03c2-authority="PERSISTED_PROVEN"') && html.includes("Persisted Proven"),
+  "Persisted Proven",
 );
-check("captured-at-rendered", html.includes(capturedAt), capturedAt);
+check("captured-at-rendered", html.includes(capturedAt) && html.includes("18 August 2026"), capturedAt);
 check(
   "false-positives-not-commercial-pills",
   commercialPills === 0
@@ -350,7 +352,7 @@ check(
     && html.includes("https://example-ni03c2-browser-read.co.uk/pharmacy-websites"),
   "keyword position/volume/url rendered",
 );
-check("routed-renderer-matches", routed.includes('data-ni03c2-page-status="COLLECTED"') && routed.includes("0.02652"), "growthEnginePageRenderers uses the same page");
+check("routed-renderer-matches", routed.includes('data-ni03c2-page-status="collected"') && routed.includes("$0.02652"), "growthEnginePageRenderers uses the same page");
 check("no-external-calls", fetchCalls === 0, `fetchCalls=${fetchCalls} urls=${fetchUrls.join(" | ") || "none"}`);
 
 if (fs.existsSync(snapshotFile)) fs.unlinkSync(snapshotFile);
