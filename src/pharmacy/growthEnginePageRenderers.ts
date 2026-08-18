@@ -84,6 +84,7 @@ import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 import { renderLocalMarketIntelligencePage } from "./growthEngineLocalMarketPage.ts";
 import { renderNationalSearchIntelligencePage } from "./nationalSearchIntelligencePage.ts";
 import { renderGrowthIntelligenceV1Page } from "./growthEngineGrowthIntelligencePage.ts";
+import { renderNationalGrowthIntelligencePage } from "./nationalGrowthIntelligencePage.ts";
 import { renderWebsiteIntelligencePage as renderWebsiteIntelligenceHtml } from "./growthEngineWebsiteIntelligencePage.ts";
 import { resolveWebsiteIntelligenceSnapshot } from "./growthEngineWebsiteIntelligenceService.ts";
 import { readSetupProfile } from "./growthEngineCustomerSetupImportSplitService.ts";
@@ -219,6 +220,9 @@ export function renderSearchIntelligencePage(slug: string): string {
 export function renderGrowthIntelligencePage(slug: string, snapshot: GrowthEngineCompetitorSnapshot | null): string {
   const framework = buildGrowthEngineFramework(slug);
   const { prev, next } = stepNavUrls(slug, framework, 4);
+  if (isNationalGrowthPlatform(slug)) {
+    return renderNationalGrowthIntelligencePage(slug, { prevUrl: prev, nextUrl: next });
+  }
   return renderGrowthIntelligenceV1Page(slug, snapshot, { prevUrl: prev, nextUrl: next });
 }
 

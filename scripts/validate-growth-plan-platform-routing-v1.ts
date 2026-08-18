@@ -47,7 +47,7 @@ function main() {
   const { resolveGrowthPlan } = exported(growthEngineGrowthPlanResolver);
   const { readGrowthPlanIntelligenceV1 } = exported(growthPlanIntelligenceV1Service);
   const { resolveTenantServiceCatalogue } = exported(growthEngineTenantServiceCatalogue);
-  const { renderGrowthPlanPage } = exported(growthEnginePageRenderers);
+  const { renderGrowthPlanPage, renderGrowthIntelligencePage } = exported(growthEnginePageRenderers);
   const { renderCampaignBuilderPage } = exported(growthEngineCampaignBuilderPage);
   const { buildGrowthEngineFramework, buildGrowthPlanRecommendation } = exported(growthEngineFrameworkService);
   const { listLockedCommercialSupportedServices } = exported(masterAdminLockedCommercialServiceCatalog);
@@ -196,6 +196,18 @@ function main() {
   );
   record("local-html-campaign-engine", localHtml.includes("Open Campaign Builder") || localHtml.includes("No evidence-backed campaign"), "local engine path");
   record("local-html-platform-attr", localHtml.includes('data-growth-platform="local"'), "platform attribute");
+
+  const nationalGi = renderGrowthIntelligencePage("pharmaconnect", null);
+  const localGi = renderGrowthIntelligencePage("leeds-pharmacy", null);
+  record("national-gi-platform", /data-growth-platform="national"/.test(nationalGi), "national GI shell");
+  record(
+    "national-gi-no-places-warning",
+    !/Live Google Places data is not available/i.test(nationalGi) && !/nearby pharmacies/i.test(nationalGi),
+    "national GI does not use local Places copy",
+  );
+  record("national-gi-surfaces-search-intelligence", /Search Intelligence/i.test(nationalGi) && /Organic \/ SERP candidates/i.test(nationalGi), "SI evidence connected");
+  record("national-gi-surfaces-persisted-plan", /Persisted Growth Plan/i.test(nationalGi) && /does not yet consume the collected Search Intelligence/i.test(nationalGi), "honest GP-01 vs SI order");
+  record("local-gi-places-section", /Local Visibility/i.test(localGi) && /Google Places/i.test(localGi), "local GI unchanged");
 
   const nationalBuilder = renderCampaignBuilderPage("pharmaconnect", "choose");
   const localBuilder = renderCampaignBuilderPage("leeds-pharmacy", "choose");
