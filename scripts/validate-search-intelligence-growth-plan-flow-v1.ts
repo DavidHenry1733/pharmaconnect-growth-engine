@@ -83,9 +83,9 @@ function main() {
       plan.plan.priorities.length > 0 && plan.plan.priorities.every((item) => item.evidence.length > 0 && item.provenance && item.gapId),
       String(plan.plan.priorities.length),
     );
-    record("generation-gated", plan.plan.readyToGenerate === false && plan.plan.contentGenerationState === "not_implemented" && plan.plan.generationState === "not_started", `${plan.plan.readyToGenerate}/${plan.plan.contentGenerationState}`);
+    record("generation-gated", plan.plan.readyToGenerate === false && plan.plan.contentGenerationState === "blocked" && plan.plan.generationState === "not_started", `${plan.plan.readyToGenerate}/${plan.plan.contentGenerationState}`);
     record("approval-gate-present", /Approve Growth Plan/i.test(gpHtml) && /acknowledge\/growth-plan/.test(gpHtml), "approval form");
-    record("content-generation-not-executed", !/Create content package|Campaign Builder to generate/i.test(gpHtml) && /content generation is not yet implemented/i.test(gpHtml), "generation blocked");
+    record("content-generation-not-executed", !/Campaign Builder to generate/i.test(gpHtml) && /generation stays blocked|blocked before approval/i.test(gpHtml), "generation blocked");
     record("indexing-not-executed", !/Request Indexing|submit published pages for search indexing/i.test(giHtml + gpHtml), "no indexing");
     record("gi-html-si-counts", /data-pc-gi-search-status="collected"/.test(giHtml) && /data-pc-gi-customer-keywords="1"/.test(giHtml) && /data-pc-gi-organic-candidates="19"/.test(giHtml) && /data-pc-gi-qualified-commercial="0"/.test(giHtml) && /data-pc-gi-sparse="yes"/.test(giHtml), "GI visible SI contract");
     record("gp-html-priorities", /data-pc-gp-section="priorities"/.test(gpHtml) && /data-pc-gp-priority=/.test(gpHtml) && /data-pc-gp-section="limitations"/.test(gpHtml), "plan priorities + limitations");

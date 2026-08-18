@@ -232,7 +232,7 @@ function renderReadiness(items: CampaignReadinessItem[], ready: boolean, platfor
 </div>`,
     )
     .join("")}
-<p style="margin-top:14px;font-size:14px;font-weight:800;color:${ready ? "#166534" : "#9a3412"}">${ready ? "Ready to Generate" : platform === "national" ? "Strategy recommendation — generation not implemented" : "Not ready to generate yet"}</p>
+<p style="margin-top:14px;font-size:14px;font-weight:800;color:${ready ? "#166534" : "#9a3412"}">${ready ? "Ready to Generate" : platform === "national" ? "Approve the Growth Plan before creating content" : "Not ready to generate yet"}</p>
 </div>`;
 }
 
@@ -347,18 +347,22 @@ ${view.limitations.length
     : `<div class="gp-empty">No additional limitations recorded.</div>`}
 <p class="gp-section-note" data-pc-gp-sparse="${view.search.sparse ? "yes" : "no"}">Sparse current organic footprint: ${view.search.sparse ? "YES" : "NO"} · Customer ranking keywords: ${view.search.customerKeywords} · Qualified commercial competitors: ${view.search.qualifiedCommercialCompetitors}.</p>
 </div>
-${renderReadiness(view.readiness, false, "national")}
-<div class="ge-panel" data-pc-gp-section="approval" data-pc-gp-generation="${esc(view.generationState)}" data-pc-gp-approved="${view.planApproved ? "yes" : "no"}">
+${renderReadiness(view.readiness, view.readyToGenerate, "national")}
+<div class="ge-panel" data-pc-gp-section="approval" data-pc-gp-generation="${esc(view.generationState)}" data-pc-gp-approved="${view.planApproved ? "yes" : "no"}" data-pc-gp-ready="${view.readyToGenerate ? "yes" : "no"}">
 <h2>Approve Growth Plan</h2>
-<p class="gp-section-note">National commercial content generation is not yet implemented. Approving the plan records readiness only. Generation stays blocked.</p>
+<p class="gp-section-note">${view.planApproved
+    ? "This Growth Plan is approved. Content can now be created from the approved items only. Patient-service Campaign Builder is not the next step."
+    : "Generation stays blocked until you approve this Growth Plan. Approving records the tenant, plan version, time, and approved recommendation items."}</p>
 <form method="post" action="/api/growth-engine/${esc(view.slug)}/acknowledge/growth-plan" style="margin-top:12px">
-<button type="submit" class="ge-btn ge-btn-primary">${view.planApproved ? "Plan approved — keep blocked from generation" : "Approve Growth Plan"}</button>
+<button type="submit" class="ge-btn ge-btn-primary">${view.planApproved ? "Plan approved" : "Approve Growth Plan"}</button>
 </form>
 <div class="gp-cta-band">
-<span class="ge-btn ge-btn-primary" aria-disabled="true" style="opacity:.7;pointer-events:none">${esc(copy.generateCta)}</span>
+${view.readyToGenerate
+    ? `<a class="ge-btn ge-btn-primary" href="/api/growth-engine/generate?slug=${encodeURIComponent(view.slug)}">${esc(copy.generateCta)}</a>`
+    : `<span class="ge-btn ge-btn-primary" aria-disabled="true" style="opacity:.7;pointer-events:none">${esc(copy.generateCta)}</span>`}
 <a class="ge-btn ge-btn-ghost" href="#campaign-readiness">Review evidence</a>
 </div>
-<div class="gp-empty" style="margin-top:14px">Bounded state: ${view.planApproved ? "plan approved" : "approval required"}; content generation is not yet implemented; patient-service generation is not the next step.</div>
+<div class="gp-empty" style="margin-top:14px">Bounded state: ${view.planApproved ? "plan approved" : "approval required"}; generation ${view.readyToGenerate ? "unlocked for approved items" : "blocked before approval"}; patient-service generation is not the next step.</div>
 </div>`;
 }
 

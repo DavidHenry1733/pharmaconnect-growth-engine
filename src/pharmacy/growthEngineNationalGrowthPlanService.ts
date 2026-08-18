@@ -17,6 +17,8 @@ import {
 } from "./nationalGrowthIntelligenceService.ts";
 import type { NationalGrowthGap, NationalSearchEvidenceSummary } from "./nationalGrowthIntelligenceModel.ts";
 import { getPharmacyProjectConfigPath, safePharmacySlug, WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
+import type { ApprovedGrowthPlanSnapshot } from "./nationalApprovedPlanContract.ts";
+import { contentPackageGenerated } from "./pharmacyContentPackageService.ts";
 
 export interface NationalPrimaryRecommendation {
   actionId: string;
@@ -63,6 +65,7 @@ export interface NationalPlanPriority {
   source: string;
   provenance: string;
   commercialService: string | null;
+  recommendedPageType?: string;
 }
 
 export interface NationalGrowthPlanView {
@@ -87,11 +90,12 @@ export interface NationalGrowthPlanView {
   search: NationalSearchEvidenceSummary;
   gapsConsumed: true;
   planApproved: boolean;
+  approvedPlan: ApprovedGrowthPlanSnapshot | null;
   readiness: CampaignReadinessItem[];
   strategyReady: boolean;
-  readyToGenerate: false;
-  contentGenerationState: "not_implemented";
-  generationState: "not_started";
+  readyToGenerate: boolean;
+  contentGenerationState: "blocked" | "ready" | "generated";
+  generationState: "not_started" | "approved" | "ready_for_review";
   intelligenceLoaded: boolean;
 }
 
@@ -111,14 +115,20 @@ function readProjectIdentity(slug: string): { businessName: string; primaryLocat
   }
 }
 
-function readPlanApproved(slug: string): boolean {
+function readWorkflowApproval(slug: string): { planApproved: boolean; approvedPlan: ApprovedGrowthPlanSnapshot | null } {
   const file = path.join(WORKSPACE_ROOT, "data/growth-engine", `${safePharmacySlug(slug)}-workflow.json`);
-  if (!fs.existsSync(file)) return false;
+  if (!fs.existsSync(file)) return { planApproved: false, approvedPlan: null };
   try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { acknowledgedSteps?: Record<string, string> };
-    return Boolean(raw.acknowledgedSteps?.["growth-plan"]);
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      acknowledgedSteps?: Record<string, string>;
+      approvedPlan?: ApprovedGrowthPlanSnapshot;
+    };
+    const planApproved = Boolean(raw.acknowledgedSteps?.["growth-plan"]);
+    const approvedPlan =
+      planApproved && raw.approvedPlan && Array.isArray(raw.approvedPlan.items) ? raw.approvedPlan : null;
+    return { planApproved, approvedPlan };
   } catch {
-    return false;
+    return { planApproved: false, approvedPlan: null };
   }
 }
 
@@ -182,6 +192,7 @@ function toPriority(item: NationalGrowthGap): NationalPlanPriority {
     source: item.source,
     provenance: `${item.provenance.evidenceSource} · ${item.provenance.authority}`,
     commercialService: item.commercialService,
+    recommendedPageType: item.recommendedPageType,
   };
 }
 
@@ -191,6 +202,7 @@ function buildNationalReadiness(
   services: TenantServiceCatalogueEntry[],
   primary: NationalPrimaryRecommendation | null,
   approved: boolean,
+  generated: boolean,
 ): CampaignReadinessItem[] {
   return [
     {
@@ -236,14 +248,18 @@ function buildNationalReadiness(
       label: "Growth Plan approved",
       complete: approved,
       detail: approved
-        ? "Plan acknowledged. National content generation remains blocked."
+        ? "Plan acknowledged. Approved items are the only generation inputs."
         : "Approve this Growth Plan before any content generation.",
     },
     {
       id: "national-generation",
       label: "National content generation",
-      complete: false,
-      detail: "National commercial content generation is not implemented. Strategy recommendation only — patient-service Campaign Builder is not used.",
+      complete: generated,
+      detail: generated
+        ? "Approved Growth Plan drafts are ready for review and are not published."
+        : approved
+          ? "Create up to 3 drafts from approved Growth Plan items. Patient-service Campaign Builder is not used."
+          : "Generation stays blocked until this Growth Plan is approved.",
     },
   ];
 }
@@ -262,14 +278,33 @@ export function buildNationalGrowthPlanView(slug: string): NationalGrowthPlanVie
   const primary = primaryGap ? toRecommendation(primaryGap) : null;
   const alternatives = actionable.slice(1, 4).map(toRecommendation);
   const priorities = actionable.map(toPriority);
-  const approved = readPlanApproved(slug);
+  const { planApproved: approved, approvedPlan } = readWorkflowApproval(slug);
+  const generated = contentPackageGenerated(slug, "approved-growth-plan");
+  const readyToGenerate = approved && Boolean(approvedPlan?.items.length);
+  const contentGenerationState: NationalGrowthPlanView["contentGenerationState"] = generated
+    ? "generated"
+    : readyToGenerate
+      ? "ready"
+      : "blocked";
+  const generationState: NationalGrowthPlanView["generationState"] = generated
+    ? "ready_for_review"
+    : approved
+      ? "approved"
+      : "not_started";
   const primaryMarket = resolvePrimaryMarket(slug) || identity.primaryLocation || "United Kingdom";
   const market = "UK Community Pharmacy Digital Growth";
   const searchCollected =
     intelligence.search.status === "collected"
     || intelligence.search.status === "empty"
     || intelligence.search.status === "partial";
-  const readiness = buildNationalReadiness(searchCollected, actionable.length > 0, catalogue.services, primary, approved);
+  const readiness = buildNationalReadiness(
+    searchCollected,
+    actionable.length > 0,
+    catalogue.services,
+    primary,
+    approved,
+    generated,
+  );
   const strategyReady = Boolean(primary);
 
   const currentPosition = `${identity.businessName} is a national digital-growth provider serving UK community pharmacies. Commercial market: ${primaryMarket} (${market}). Search Intelligence: ${intelligence.search.customerKeywords} ranking keywords, ${intelligence.search.organicCandidates} organic/SERP candidates, ${intelligence.search.qualifiedCommercialCompetitors} qualified commercial competitors.`;
@@ -279,7 +314,7 @@ export function buildNationalGrowthPlanView(slug: string): NationalGrowthPlanVie
         currentPosition,
         primaryOpportunity: primary.title,
         whyRecommended: primary.rationale,
-        estimatedBusinessBenefit: `${primary.recommendedIntent}. Evidence class ${primary.evidenceClass}. Generation stays blocked until this plan is approved, and national generation is not implemented.`,
+        estimatedBusinessBenefit: `${primary.recommendedIntent}. Evidence class ${primary.evidenceClass}. Generation stays blocked until this plan is approved.`,
       }
     : {
         currentPosition,
@@ -306,11 +341,12 @@ export function buildNationalGrowthPlanView(slug: string): NationalGrowthPlanVie
     search: intelligence.search,
     gapsConsumed: true,
     planApproved: approved,
+    approvedPlan,
     readiness,
     strategyReady,
-    readyToGenerate: false,
-    contentGenerationState: "not_implemented",
-    generationState: "not_started",
+    readyToGenerate,
+    contentGenerationState,
+    generationState,
     intelligenceLoaded: intelligence.gaps.length > 0,
   };
 }

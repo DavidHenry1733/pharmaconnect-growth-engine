@@ -31,6 +31,7 @@ import {
   planNationalSearchIntelligenceCollection,
   readNationalSearchIntelligence,
 } from "../../../../../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
+import { generateApprovedGrowthPlanContent } from "../../../../../src/pharmacy/nationalApprovedPlanGenerationService.ts";
 import {
   loadLiveIntegrationProof,
   runLiveIntegrationProof,
@@ -295,6 +296,24 @@ for (const stepId of ACK_STEPS) {
     res.redirect(next[stepId]);
   });
 }
+
+router.post("/growth-engine/:slug/generate-approved-plan", (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({ ok: false, error: "Approved-plan generation is for national tenants only" });
+  }
+  const result = generateApprovedGrowthPlanContent(slug);
+  if (result.blocked) {
+    return res.redirect(`/api/growth-engine/generate?slug=${encodeURIComponent(slug)}`);
+  }
+  if (!result.ok) {
+    return res.status(400).type("html").send(`<pre>${String(result.error || "Generation failed")}</pre>`);
+  }
+  return res.redirect(
+    `/api/growth-engine/review-centre?slug=${encodeURIComponent(slug)}&campaign=approved-growth-plan`,
+  );
+});
 
 router.post("/growth-engine/:slug/setup-start", async (req, res) => {
   const slug = resolveSlug(req.params.slug);

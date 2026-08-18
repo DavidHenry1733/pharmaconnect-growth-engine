@@ -148,7 +148,7 @@ function main() {
   record("national-html-no-places-prereq", /Google Places \/ Your Local Market is not a prerequisite/i.test(nationalHtml), "national readiness");
   record("national-html-no-side-panel", !nationalHtml.includes("Market Opportunity Plan"), "GP-01 side panel removed");
   record("national-html-workflow", nationalHtml.includes("Your Business") && nationalHtml.includes("National Market") && !nationalHtml.includes('<div class="ge-step-title">Your Pharmacy</div>'), "national stepper");
-  record("national-html-bounded-cta", /National strategy is ready|content generation is not yet implemented/i.test(nationalHtml), "bounded generation state");
+  record("national-html-bounded-cta", /Approve Growth Plan/i.test(nationalHtml) && /blocked before approval/i.test(nationalHtml), "bounded generation state");
   record("national-html-platform-attr", nationalHtml.includes('data-growth-platform="national"'), "platform attribute");
 
   record("local-html-renders", localHtml.includes("Where you stand") && localHtml.includes("Campaign Readiness"), "local plan renders");
@@ -187,7 +187,7 @@ function main() {
 
   const nationalBuilder = renderCampaignBuilderPage("pharmaconnect", "choose");
   const localBuilder = renderCampaignBuilderPage("leeds-pharmacy", "choose");
-  record("national-builder-bounded", /National campaign strategy/i.test(nationalBuilder) && /not yet implemented/i.test(nationalBuilder), "no NHS explorer");
+  record("national-builder-bounded", /National campaign strategy/i.test(nationalBuilder) && /must not open the NHS/i.test(nationalBuilder) && /generate\?slug=pharmaconnect/.test(nationalBuilder), "no NHS explorer");
   record("national-builder-explicit-non-routing", /must not open the NHS \/ Pharmacy First/i.test(nationalBuilder), "explicit non-routing copy");
   record("local-builder-explorer", /campaign-builder|Choose|Pharmacy First|Select a service/i.test(localBuilder) || localBuilder.includes("data-growth-platform") === false, "local builder retained");
 

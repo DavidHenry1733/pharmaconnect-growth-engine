@@ -74,7 +74,7 @@ async function main() {
     check("gp-approval-visible", /Approve Growth Plan/i.test(gp.text) && /acknowledge\/growth-plan/.test(gp.html), "approval");
     check(
       "gp-generation-not-started",
-      /data-pc-gp-generation="not_started"/.test(gp.html) && /content generation is not yet implemented/i.test(gp.text),
+      /data-pc-gp-generation="not_started"/.test(gp.html) && /blocked before approval/i.test(gp.text),
       "generation blocked",
     );
 

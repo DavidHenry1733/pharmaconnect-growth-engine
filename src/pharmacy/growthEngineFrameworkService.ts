@@ -111,6 +111,28 @@ export interface GrowthEngineWorkflowDoc {
   version: number;
   updatedAt: string;
   acknowledgedSteps: Partial<Record<GrowthEngineStepId, string>>;
+  approvedPlan?: {
+    tenant: string;
+    planVersion: string;
+    approvedAt: string;
+    campaignId: string;
+    items: Array<{
+      recommendationId: string;
+      gapId: string;
+      commercialService: string | null;
+      recommendedAction: string;
+      targetPageType: string;
+      contentType: string;
+      evidence: string[];
+      priority: string;
+      confidence: string;
+      provenance: string;
+      whyRecommended: string;
+      evidenceClass: string;
+      source: string;
+      type: string;
+    }>;
+  };
 }
 
 export interface GrowthEngineFramework {
@@ -152,17 +174,101 @@ function loadWorkflowDoc(slug: string): GrowthEngineWorkflowDoc {
       version: Number(raw.version) || GROWTH_ENGINE_VERSION,
       updatedAt: String(raw.updatedAt || ""),
       acknowledgedSteps: raw.acknowledgedSteps && typeof raw.acknowledgedSteps === "object" ? raw.acknowledgedSteps : {},
+      approvedPlan: raw.approvedPlan && typeof raw.approvedPlan === "object" ? raw.approvedPlan : undefined,
     };
   } catch {
     return { slug, version: GROWTH_ENGINE_VERSION, updatedAt: "", acknowledgedSteps: {} };
   }
 }
 
+export function loadGrowthEngineWorkflow(slug: string): GrowthEngineWorkflowDoc {
+  return loadWorkflowDoc(slug);
+}
+
+function snapshotNationalApprovedPlan(
+  slug: string,
+  plan: { primary: { actionId: string; gapId: string; commercialService: string | null; recommendedNextStep: string; title: string; recommendedPageType: string; evidenceReasons: string[]; priority: string; confidence: string; provenance: string; rationale: string; evidenceClass: string; source: string; type: string } | null; priorities: Array<{ gapId: string; commercialService: string | null; action: string; recommendedPageType?: string; evidence: string[]; priority: string; confidence: string; provenance: string; recommendation: string; evidenceClass: string; source: string; type: string }> },
+  approvedAt: string,
+): NonNullable<GrowthEngineWorkflowDoc["approvedPlan"]> {
+  const types = ["blog", "guides", "service-page"] as const;
+  const items: NonNullable<GrowthEngineWorkflowDoc["approvedPlan"]>["items"] = [];
+  const seen = new Set<string>();
+  const push = (
+    rec: {
+      recommendationId: string;
+      gapId: string;
+      commercialService: string | null;
+      recommendedAction: string;
+      targetPageType: string;
+      evidence: string[];
+      priority: string;
+      confidence: string;
+      provenance: string;
+      whyRecommended: string;
+      evidenceClass: string;
+      source: string;
+      type: string;
+    },
+  ) => {
+    if (items.length >= 3 || seen.has(rec.gapId)) return;
+    seen.add(rec.gapId);
+    items.push({ ...rec, contentType: types[items.length] || "blog" });
+  };
+  if (plan.primary) {
+    push({
+      recommendationId: plan.primary.actionId,
+      gapId: plan.primary.gapId,
+      commercialService: plan.primary.commercialService,
+      recommendedAction: plan.primary.recommendedNextStep || plan.primary.title,
+      targetPageType: plan.primary.recommendedPageType,
+      evidence: [...plan.primary.evidenceReasons],
+      priority: plan.primary.priority,
+      confidence: plan.primary.confidence,
+      provenance: plan.primary.provenance,
+      whyRecommended: plan.primary.rationale,
+      evidenceClass: plan.primary.evidenceClass,
+      source: plan.primary.source,
+      type: plan.primary.type,
+    });
+  }
+  for (const row of plan.priorities) {
+    push({
+      recommendationId: row.gapId,
+      gapId: row.gapId,
+      commercialService: row.commercialService,
+      recommendedAction: row.action,
+      targetPageType: row.recommendedPageType || "EXISTING PAGE IMPROVEMENT",
+      evidence: [...row.evidence],
+      priority: row.priority,
+      confidence: row.confidence,
+      provenance: row.provenance,
+      whyRecommended: row.recommendation,
+      evidenceClass: row.evidenceClass,
+      source: row.source,
+      type: row.type,
+    });
+  }
+  return {
+    tenant: slug,
+    planVersion: "approved-growth-plan-v1",
+    approvedAt,
+    campaignId: "approved-growth-plan",
+    items,
+  };
+}
+
 export function saveWorkflowAcknowledgement(slug: string, stepId: GrowthEngineStepId): GrowthEngineWorkflowDoc {
   fs.mkdirSync(path.dirname(workflowPath(slug)), { recursive: true });
   const doc = loadWorkflowDoc(slug);
-  doc.acknowledgedSteps[stepId] = new Date().toISOString();
-  doc.updatedAt = new Date().toISOString();
+  const approvedAt = new Date().toISOString();
+  doc.acknowledgedSteps[stepId] = approvedAt;
+  if (stepId === "growth-plan" && isNationalGrowthPlatform(slug)) {
+    const resolved = resolveGrowthPlan(slug);
+    if (resolved.platform === "national") {
+      doc.approvedPlan = snapshotNationalApprovedPlan(slug, resolved.plan, approvedAt);
+    }
+  }
+  doc.updatedAt = approvedAt;
   fs.writeFileSync(workflowPath(slug), JSON.stringify(doc, null, 2));
   return doc;
 }
@@ -176,7 +282,9 @@ function stepUrl(slug: string, id: GrowthEngineStepId): string {
     "website-intelligence": `/api/growth-engine/website-intelligence?slug=${encodeURIComponent(slug)}`,
     "growth-intelligence": `/api/growth-engine/growth-intelligence?slug=${encodeURIComponent(slug)}`,
     "growth-plan": `/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}`,
-    generate: `/api/growth-engine/campaign-builder?slug=${encodeURIComponent(slug)}`,
+    generate: isNationalGrowthPlatform(slug)
+      ? `/api/growth-engine/generate?slug=${encodeURIComponent(slug)}`
+      : `/api/growth-engine/campaign-builder?slug=${encodeURIComponent(slug)}`,
     dashboard: `/api/growth-engine/dashboard?slug=${encodeURIComponent(slug)}`,
   };
   return map[id];
@@ -232,16 +340,16 @@ export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework 
       ? {
           suggestedCampaign: resolvedPlan.plan.primary?.primaryKeyword || "National commercial strategy",
           suggestedEcosystem: resolvedPlan.plan.market,
-          estimatedPages: 0,
-          estimatedPublishingDays: "Strategy only",
-          expectedIndexingTimeline: "Not applicable until national generation exists",
-          expectedReviewPeriod: "Strategy review",
-          primaryServiceId: resolvedPlan.plan.primary?.actionId || "",
-          primaryServiceName: resolvedPlan.plan.primary?.primaryKeyword || "National commercial action",
+          estimatedPages: Math.max(1, Math.min(3, resolvedPlan.plan.priorities.length || 1)),
+          estimatedPublishingDays: "Drafts for review",
+          expectedIndexingTimeline: "Not applicable until content is published",
+          expectedReviewPeriod: "Review Centre before publish",
+          primaryServiceId: "approved-growth-plan",
+          primaryServiceName: resolvedPlan.plan.primary?.title || "Approved Growth Plan content",
           areaCount: 0,
         }
       : toGrowthEnginePlanRecommendation(resolvedPlan.plan, data);
-  const generated = national ? false : contentPackageGenerated(slug, plan.primaryServiceId);
+  const generated = contentPackageGenerated(slug, national ? "approved-growth-plan" : plan.primaryServiceId);
   const importFields = buildWizardImportFields(data);
   const importSummary = countImportSummary(importFields);
 
@@ -345,9 +453,17 @@ export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework 
       case "generate":
         return {
           ...base,
-          status: generateComplete ? "complete" : national ? "not_started" : planAck ? "in_progress" : "not_started",
-          completionPct: generateComplete ? 100 : national ? 0 : planAck ? 30 : 0,
-          summary: national ? "National content generation not yet implemented" : generateComplete ? "Content package created" : `~${plan.estimatedPages} pages estimated`,
+          status: generateComplete ? "complete" : planAck ? "in_progress" : "not_started",
+          completionPct: generateComplete ? 100 : planAck ? 30 : 0,
+          summary: national
+            ? generateComplete
+              ? "Approved Growth Plan drafts ready for review"
+              : planAck
+                ? "Create up to 3 approved Growth Plan drafts"
+                : "Approve the Growth Plan before creating content"
+            : generateComplete
+              ? "Content package created"
+              : `~${plan.estimatedPages} pages estimated`,
         };
       case "dashboard":
         return {

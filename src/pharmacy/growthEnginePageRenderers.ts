@@ -32,6 +32,41 @@ import { renderGrowthPlanV1Page } from "./growthEngineGrowthPlanPage.ts";
 import { renderPremiumCustomerDashboardPage } from "./growthEnginePremiumCustomerDashboardPage.ts";
 import { renderLiveIntegrationProofPage } from "./growthEngineLiveIntegrationProofPage.ts";
 import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import fs from "node:fs";
+import path from "node:path";
+import { WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
+
+function nationalGenerationBlockedReason(slug: string): string | null {
+  const file = path.join(WORKSPACE_ROOT, "data/growth-engine", `${slug}-workflow.json`);
+  if (!fs.existsSync(file)) return "Generation is blocked until the Growth Plan is approved.";
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      acknowledgedSteps?: Record<string, string>;
+      approvedPlan?: { items?: unknown[] };
+    };
+    if (!raw.acknowledgedSteps?.["growth-plan"]) return "Generation is blocked until the Growth Plan is approved.";
+    if (!raw.approvedPlan?.items?.length) return "Generation is blocked until approved Growth Plan items are recorded.";
+    return null;
+  } catch {
+    return "Generation is blocked until the Growth Plan is approved.";
+  }
+}
+
+function readApprovedPlanGenerationInput(slug: string): { items: Array<Record<string, unknown>> } | null {
+  const file = path.join(WORKSPACE_ROOT, "data/growth-engine", `${slug}-workflow.json`);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      acknowledgedSteps?: Record<string, string>;
+      approvedPlan?: { items?: Array<Record<string, unknown>> };
+    };
+    if (!raw.acknowledgedSteps?.["growth-plan"] || !raw.approvedPlan?.items?.length) return null;
+    return { items: raw.approvedPlan.items };
+  } catch {
+    return null;
+  }
+}
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -80,7 +115,6 @@ function importBadgeClass(status: string): string {
   return "confirmed";
 }
 
-import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 import { renderLocalMarketIntelligencePage } from "./growthEngineLocalMarketPage.ts";
 import { renderNationalSearchIntelligencePage } from "./nationalSearchIntelligencePage.ts";
 import { renderGrowthIntelligenceV1Page } from "./growthEngineGrowthIntelligencePage.ts";
@@ -238,12 +272,55 @@ export function renderGeneratePage(slug: string, plan: GrowthEnginePlanRecommend
   const framework = buildGrowthEngineFramework(slug);
   const { prev, next } = stepNavUrls(slug, framework, 6);
   if (copy.platform === "national") {
-    const body = `<div class="ge-panel">
-<h2>Campaign strategy</h2>
-<p class="ge-lead">This national tenant uses persisted commercial intelligence. Patient-service Campaign Builder is not the next step. National commercial content generation is not yet implemented.</p>
-<p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Return to Growth Plan →</a></p>
-</div>`;
-    return pageShell(slug, copy.generateStepTitle, copy.generateStepSubtitle, "generate", body, {
+    const blockedReason = nationalGenerationBlockedReason(slug);
+    const input = readApprovedPlanGenerationInput(slug);
+    const pkg = loadContentPackage(slug, "approved-growth-plan");
+    const generated = Boolean(pkg?.generatedAt && pkg.status !== "error" && pkg.status !== "missing");
+    const reviewUrl = `/api/growth-engine/review-centre?slug=${encodeURIComponent(slug)}&campaign=approved-growth-plan`;
+    const items = generated ? pkg?.assets || [] : input?.items || [];
+    const itemCards = items
+      .map((item) => {
+        const rec = item as Record<string, unknown>;
+        const recId = String(rec.recommendationId || rec.key || "");
+        const gapId = String(rec.gapId || "");
+        const title = String(rec.title || rec.recommendedAction || recId);
+        const pageType = String(rec.targetPageType || rec.type || "");
+        const service = rec.commercialService == null ? null : String(rec.commercialService);
+        const why = String(rec.whyRecommended || "");
+        const evidence = Array.isArray(rec.evidence) ? rec.evidence.map(String).join(" ") : "";
+        const provenance = String(rec.provenance || rec.evidenceSource || "");
+        const priority = String(rec.priority || "");
+        return `<article class="ge-panel" data-pc-gen-item="${esc(recId)}" data-pc-gen-gap="${esc(gapId)}" data-published="false" data-indexed="false">
+<h3>${esc(title)}</h3>
+<ul style="font-size:14px;color:#475569">
+<li><strong>Content / page type:</strong> ${esc(pageType)}</li>
+<li><strong>Commercial service:</strong> ${esc(service || "National digital-growth visibility")}</li>
+<li><strong>Why it was recommended:</strong> ${esc(why)}</li>
+<li><strong>Evidence:</strong> ${esc(evidence)}</li>
+<li><strong>Evidence source:</strong> ${esc(provenance)}</li>
+<li><strong>Priority:</strong> ${esc(priority)}</li>
+<li><strong>Generation status:</strong> ${generated ? "CONTENT GENERATED" : blockedReason ? "BLOCKED BEFORE APPROVAL" : "READY TO GENERATE"}</li>
+<li><strong>Review status:</strong> ${generated ? "READY FOR REVIEW" : "NOT GENERATED"}</li>
+<li><strong>Published:</strong> false</li>
+<li><strong>Indexed:</strong> false</li>
+</ul>
+</article>`;
+      })
+      .join("");
+    const body = `<div class="ge-panel" data-pc-generate-page="national" data-content-package="approved-growth-plan" data-pc-gen-blocked="${blockedReason ? "yes" : "no"}" data-pc-gen-generated="${generated ? "yes" : "no"}">
+<h2>Create your content</h2>
+<p class="ge-lead">This is what the Growth Plan recommended, why it recommended it, and what ${esc(slug)} can create from approved items. Patient-service Campaign Builder is not used.</p>
+${blockedReason ? `<p style="color:#9a3412;font-weight:800">${esc(blockedReason)}</p>
+<p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Approve Growth Plan →</a></p>` : ""}
+${!blockedReason && !generated ? `<form method="post" action="/api/growth-engine/${encodeURIComponent(slug)}/generate-approved-plan" style="margin-top:12px">
+<button type="submit" class="ge-btn ge-btn-primary">Generate approved content</button>
+</form>
+<p style="font-size:13px;color:#64748b;margin-top:12px">Maximum initial items: 3. Drafts stay unpublished and unindexed until Review Centre.</p>` : ""}
+${generated ? `<p style="font-weight:800;color:#166534">CONTENT GENERATED — READY FOR REVIEW. Published=false. Indexed=false.</p>
+<p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="${esc(reviewUrl)}">Review generated content →</a></p>` : ""}
+</div>
+${itemCards || `<div class="ge-panel"><p>No approved Growth Plan items are available to generate.</p></div>`}`;
+    return pageShell(slug, "Create Content", copy.generateStepSubtitle, "generate", body, {
       prevUrl: prev,
       nextUrl: next,
       nextLabel: "Continue to Dashboard →",

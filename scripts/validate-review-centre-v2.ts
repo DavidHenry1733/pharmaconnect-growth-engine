@@ -5,21 +5,32 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { REVIEW_CENTRE_GROUPS } from "../src/pharmacy/growthEngineReviewCentreModel.ts";
-import {
+import * as growthEngineReviewCentreModel from "../src/pharmacy/growthEngineReviewCentreModel.ts";
+import * as growthEngineReviewCentreService from "../src/pharmacy/growthEngineReviewCentreService.ts";
+import * as growthEngineReviewCentrePage from "../src/pharmacy/growthEngineReviewCentrePage.ts";
+import * as growthEngineCampaignBuilderService from "../src/pharmacy/growthEngineCampaignBuilderService.ts";
+import * as pharmacyContentPackageService from "../src/pharmacy/pharmacyContentPackageService.ts";
+
+function exported<T extends object>(mod: T | { default: T }): T {
+  const maybe = mod as { default?: T };
+  return maybe.default ?? (mod as T);
+}
+
+const { REVIEW_CENTRE_GROUPS } = exported(growthEngineReviewCentreModel);
+const {
   approveReviewCentreAsset,
   buildReviewCentreView,
   improveReviewCentreAsset,
   loadReviewCentreSession,
   reviewCentreUrl,
-} from "../src/pharmacy/growthEngineReviewCentreService.ts";
-import { renderReviewCentrePage } from "../src/pharmacy/growthEngineReviewCentrePage.ts";
-import {
+} = exported(growthEngineReviewCentreService);
+const { renderReviewCentrePage } = exported(growthEngineReviewCentrePage);
+const {
   buildCampaignBuilderList,
   loadCampaignBuilderSession,
   selectCampaignBuilderService,
-} from "../src/pharmacy/growthEngineCampaignBuilderService.ts";
-import { contentPackageGenerated } from "../src/pharmacy/pharmacyContentPackageService.ts";
+} = exported(growthEngineCampaignBuilderService);
+const { contentPackageGenerated } = exported(pharmacyContentPackageService);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");

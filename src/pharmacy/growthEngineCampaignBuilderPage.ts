@@ -923,8 +923,9 @@ body{font-family:Inter,Arial,sans-serif;margin:0;background:#f0f4f8;color:#0f172
 <div class="cb-panel">
 <h1>National campaign strategy</h1>
 <p>${esc(copy.generateStepSubtitle)}</p>
-<p>A national recommendation such as pharmacy SEO must not open the NHS / Pharmacy First campaign explorer. National commercial content generation is not yet implemented.</p>
-<p style="margin-top:18px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Return to national Growth Plan →</a></p>
+<p>A national recommendation such as pharmacy SEO must not open the NHS / Pharmacy First campaign explorer. Use approved Growth Plan generation instead.</p>
+<p style="margin-top:18px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/generate?slug=${encodeURIComponent(slug)}">Create approved content →</a></p>
+<p style="margin-top:10px"><a class="ge-btn" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Return to national Growth Plan →</a></p>
 </div>
 </div>
 </body></html>`;

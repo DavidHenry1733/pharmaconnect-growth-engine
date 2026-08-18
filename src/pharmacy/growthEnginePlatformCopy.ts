@@ -74,19 +74,19 @@ const NATIONAL_COPY: GrowthEnginePlatformCopy = {
   websiteStepSubtitle: "What your website contains and what is missing",
   planStepTitle: "Your Growth Plan",
   planStepSubtitle: "Evidence-backed national commercial recommendation",
-  generateStepTitle: "Campaign Strategy",
-  generateStepSubtitle: "National recommendation is strategy-first — patient-service generation is not used here",
+  generateStepTitle: "Create Content",
+  generateStepSubtitle: "Create approved Growth Plan drafts for review — patient-service Campaign Builder is not used",
   dashboardStepTitle: "Your Dashboard",
   stepperAriaLabel: "National digital-growth reports",
   readinessBusiness: "National business identity confirmed",
   readinessWebsite: "Website report available",
   readinessMarket: "National market intelligence (Google Places not required)",
   readinessIntelligence: "National commercial intelligence loaded",
-  readinessGenerator: "National content generation not yet available",
+  readinessGenerator: "Approved Growth Plan content",
   evidencePharmacyProfile: "your national commercial profile",
   emptyCampaignNote:
     "No eligible national commercial action is available in persisted Growth Plan Intelligence. Local pharmacy prerequisites are not required.",
-  generateCta: "National strategy is ready",
+  generateCta: "Create approved content →",
 };
 
 export function growthEnginePlatformCopy(slugOrPlatform: string | GrowthPlatform): GrowthEnginePlatformCopy {
