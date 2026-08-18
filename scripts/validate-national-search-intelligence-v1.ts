@@ -277,7 +277,8 @@ check(
     && modelSource.includes("sourceQueries")
     && modelSource.includes("qualification")
     && serviceSource.includes("qualifyNationalCompetitorV2")
-    && serviceSource.includes("searchNationalGoogleOrganic"),
+    && serviceSource.includes("executeNationalGoogleOrganic")
+    && !serviceSource.includes("searchNationalGoogleOrganic"),
   "organic competitor evidence + qualification retained",
 );
 check(
