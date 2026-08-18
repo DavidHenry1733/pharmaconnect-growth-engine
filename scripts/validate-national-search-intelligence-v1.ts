@@ -18,6 +18,7 @@ import * as searchPageMod from "../src/pharmacy/nationalSearchIntelligencePage.t
 import * as pageRenderersMod from "../src/pharmacy/growthEnginePageRenderers.ts";
 import * as frameworkMod from "../src/pharmacy/growthEngineFrameworkService.ts";
 import * as localMarketPageMod from "../src/pharmacy/growthEngineLocalMarketPage.ts";
+import * as locationResolverMod from "../src/pharmacy/dataForSeoSearchLocationResolver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -37,6 +38,7 @@ const searchPage = exported(searchPageMod);
 const pageRenderers = exported(pageRenderersMod);
 const framework = exported(frameworkMod);
 const localMarketPage = exported(localMarketPageMod);
+const locationResolver = exported(locationResolverMod);
 
 let pass = 0;
 let fail = 0;
@@ -81,6 +83,8 @@ const healthcareSource = read("src/pharmacy/growthEngineHealthcareDiscovery.ts")
 const campaignEngineSource = read("src/pharmacy/growthEngineCampaignRecommendationEngine.ts");
 const contentPackageSource = read("src/pharmacy/pharmacyContentPackageService.ts");
 const labsSource = read("src/pharmacy/dataForSeoRankedKeywordIntelligenceService.ts");
+const adapterSource = read("src/pharmacy/dataForSeoNationalSearchAdapter.ts");
+const locationResolverSource = read("src/pharmacy/dataForSeoSearchLocationResolver.ts");
 
 check(
   "platform-national-eligible",
@@ -137,6 +141,45 @@ check(
   tenantB.subjectDomain,
 );
 
+const ukLocation = locationResolver.resolveDataForSeoSearchLocation("United Kingdom");
+const ieLocation = locationResolver.resolveDataForSeoSearchLocation("Ireland");
+const usLocation = locationResolver.resolveDataForSeoSearchLocation("United States");
+const subjectLocation = locationResolver.resolveDataForSeoSearchLocationFromSubject(subject);
+check(
+  "uk-location-code-2826",
+  ukLocation.locationCode === 2826 && subjectLocation.locationCode === 2826,
+  `UK=${ukLocation.locationCode} subjectCountry=${subject.country} subjectCode=${subjectLocation.locationCode}`,
+);
+check(
+  "subject-country-feeds-location-resolver",
+  subject.country === "United Kingdom" && subjectLocation.country === "United Kingdom",
+  subject.country,
+);
+check(
+  "other-national-country-does-not-inherit-uk",
+  ieLocation.locationCode === 2372 && usLocation.locationCode === 2840 && ieLocation.locationCode !== ukLocation.locationCode,
+  `IE=${ieLocation.locationCode} US=${usLocation.locationCode}`,
+);
+check(
+  "serp-adapter-uses-location-code",
+  adapterSource.includes("location_code: location.locationCode")
+    && !adapterSource.includes("location_name"),
+  "SERP adapter submits location_code only",
+);
+check(
+  "serp-adapter-not-primary-market-location-name",
+  !adapterSource.includes("primaryMarket")
+    && !serviceSource.includes("marketCountry: query.marketCountry")
+    && serviceSource.includes("locationCode: serpLocation.locationCode")
+    && serviceSource.includes("resolveDataForSeoSearchLocationFromSubject(subject)"),
+  "SERP uses subject country location_code, not primaryMarket as location_name",
+);
+check(
+  "location-resolver-no-pharmaconnect",
+  !/["']pharmaconnect["']|pharmaconnect\.uk/i.test(locationResolverSource + adapterSource),
+  "location resolver/adapter have no PharmaConnect hardcode",
+);
+
 check(
   "collection-explicit-function",
   typeof searchService.collectNationalSearchIntelligence === "function"
@@ -165,10 +208,10 @@ check(
 );
 check(
   "bounded-limits",
-  searchModel.NI03B_LIMITS.customerRankedKeywords <= 40
-    && searchModel.NI03B_LIMITS.serpQueries <= 3
-    && searchModel.NI03B_LIMITS.serpDepth <= 10
-    && searchModel.NI03B_LIMITS.competitorCandidates <= 15,
+  searchModel.NI03B_LIMITS.customerRankedKeywords === 40
+    && searchModel.NI03B_LIMITS.serpQueries === 3
+    && searchModel.NI03B_LIMITS.serpDepth === 10
+    && searchModel.NI03B_LIMITS.competitorCandidates === 15,
   JSON.stringify(searchModel.NI03B_LIMITS),
 );
 check(
@@ -538,12 +581,16 @@ const previousPassword = process.env.DATAFORSEO_PASSWORD;
 process.env.DATAFORSEO_LOGIN = "ni03b-validator";
 process.env.DATAFORSEO_PASSWORD = "ni03b-validator";
 let mockedRequests = 0;
-globalThis.fetch = (async (input: RequestInfo | URL) => {
+const serpRequestBodies: unknown[] = [];
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   mockedRequests += 1;
   fetchCalls += 1;
   const url = String(input);
   fetchUrls.push(url);
   const labs = url.includes("ranked_keywords");
+  if (!labs && init?.body) {
+    serpRequestBodies.push(JSON.parse(String(init.body)));
+  }
   const body = labs
     ? {
       status_code: 20000,
@@ -605,6 +652,17 @@ check(
   "duplicate-collect-does-not-double-paid-calls",
   mockedRequests === 4 && (firstCollect.reusedExistingSnapshot || secondCollect.reusedExistingSnapshot),
   `requests=${mockedRequests} reused=${firstCollect.reusedExistingSnapshot}/${secondCollect.reusedExistingSnapshot}`,
+);
+check(
+  "live-serp-requests-use-location-code-2826",
+  serpRequestBodies.length === 3
+    && serpRequestBodies.every((payload) => {
+      const task = Array.isArray(payload) ? payload[0] as Record<string, unknown> : null;
+      return Boolean(task)
+        && task.location_code === 2826
+        && !("location_name" in task);
+    }),
+  JSON.stringify(serpRequestBodies),
 );
 const liveCollect = firstCollect.liveExecution ? firstCollect : secondCollect.liveExecution ? secondCollect : firstCollect;
 check(

@@ -35,6 +35,7 @@ import {
 } from "./nationalSearchIntelligenceV1Model.ts";
 import { writeNationalCompetitorDiscovery } from "./nationalCompetitorDiscoveryStorageService.ts";
 import { emptyNationalCompetitorDiscoveryResult } from "./nationalCompetitorDiscoveryModel.ts";
+import { resolveDataForSeoSearchLocationFromSubject } from "./dataForSeoSearchLocationResolver.ts";
 
 const SERP_ENDPOINT = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
 
@@ -160,6 +161,14 @@ function snapshotShell(input: {
     status: input.status,
     lastError: input.lastError,
     reusedExistingSnapshot: input.reusedExistingSnapshot,
+    serpLocation: (() => {
+      try {
+        const location = resolveDataForSeoSearchLocationFromSubject(subject);
+        return { country: subject.country, locationCode: location.locationCode };
+      } catch {
+        return null;
+      }
+    })(),
     limits: NI03B_LIMITS,
     endpoints: input.endpoints,
     costs: {
@@ -232,6 +241,7 @@ function persistSnapshot(snapshot: NationalSearchIntelligenceSnapshot): void {
     requests: snapshot.costs.requests,
     tasks: snapshot.costs.tasks,
     totalCost: snapshot.costs.totalCost,
+    serpLocation: snapshot.serpLocation,
   });
 }
 
@@ -375,6 +385,7 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
   }
 
   const capturedAt = new Date().toISOString();
+  const serpLocation = resolveDataForSeoSearchLocationFromSubject(subject);
   const endpoints = [
     { endpoint: DATAFORSEO_LABS_ENDPOINTS.rankedKeywords, requests: 0, tasks: 0, cost: 0 },
     { endpoint: SERP_ENDPOINT, requests: 0, tasks: 0, cost: 0 },
@@ -423,7 +434,8 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
   for (const query of queries) {
     const serp = await searchNationalGoogleOrganic({
       query: query.query,
-      marketCountry: query.marketCountry,
+      marketCountry: subject.country,
+      locationCode: serpLocation.locationCode,
       languageCode: subject.languageCode || "en",
       depth: NI03B_LIMITS.serpDepth,
     });

@@ -13,6 +13,7 @@ export interface NationalSearchRequest {
   marketCountry: string;
   languageCode?: string;
   depth?: number;
+  locationCode?: number;
 }
 
 export interface NationalSearchEvidence {
@@ -28,6 +29,7 @@ export interface NationalSearchResponse {
   provider: string;
   query: string;
   marketCountry: string;
+  locationCode: number;
   capturedAt: string;
   cost: number | null;
   organicResultCount: number;

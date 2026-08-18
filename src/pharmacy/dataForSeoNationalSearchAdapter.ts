@@ -14,6 +14,7 @@ import type {
   NationalSearchResponse,
   NationalSearchEvidence,
 } from "./nationalSearchProviderModel.ts";
+import { resolveDataForSeoSearchLocation } from "./dataForSeoSearchLocationResolver.ts";
 
 const ENDPOINT =
   "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
@@ -60,8 +61,10 @@ export class DataForSeoNationalSearchProvider
       throw new Error("National search query is required");
     }
 
-    const marketCountry =
-      String(request.marketCountry || "").trim() || "United Kingdom";
+    const marketCountry = String(request.marketCountry || "").trim();
+    const location = Number.isInteger(request.locationCode) && Number(request.locationCode) > 0
+      ? { locationCode: Number(request.locationCode), country: marketCountry }
+      : resolveDataForSeoSearchLocation(marketCountry);
 
     const languageCode =
       String(request.languageCode || "").trim() || "en";
@@ -85,7 +88,7 @@ export class DataForSeoNationalSearchProvider
       body: JSON.stringify([
         {
           keyword: query,
-          location_name: marketCountry,
+          location_code: location.locationCode,
           language_code: languageCode,
           depth,
         },
@@ -157,7 +160,8 @@ export class DataForSeoNationalSearchProvider
     return {
       provider: this.id,
       query,
-      marketCountry,
+      marketCountry: location.country || marketCountry,
+      locationCode: location.locationCode,
       capturedAt: new Date().toISOString(),
       cost:
         typeof task.cost === "number"

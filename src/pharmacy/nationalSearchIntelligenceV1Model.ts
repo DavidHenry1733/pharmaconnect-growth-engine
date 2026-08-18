@@ -67,6 +67,10 @@ export interface NationalSearchIntelligenceSnapshot {
   status: NationalSearchIntelligenceStatus;
   lastError: string | null;
   reusedExistingSnapshot: boolean;
+  serpLocation: {
+    country: string;
+    locationCode: number;
+  } | null;
   limits: typeof NI03B_LIMITS;
   endpoints: Array<{ endpoint: string; requests: number; tasks: number; cost: number }>;
   costs: { requests: number; tasks: number; totalCost: number };
