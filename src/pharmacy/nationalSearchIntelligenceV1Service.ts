@@ -10,6 +10,7 @@ import {
   getDomainRankedKeywordsWithCost,
 } from "./dataForSeoRankedKeywordIntelligenceService.ts";
 import { DATAFORSEO_SERP_ENDPOINT, executeNationalGoogleOrganic } from "./dataForSeoNationalSearchAdapter.ts";
+import { isDataForSeoTransportTimeout } from "./dataForSeoHttp.ts";
 import { buildNationalCompetitorDiscoveryQueries } from "./nationalCompetitorDiscoveryQueryService.ts";
 import { qualifyNationalCompetitorV2 } from "./nationalCompetitorQualificationV2Service.ts";
 import { resolveNationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
@@ -42,6 +43,17 @@ import { resolveDataForSeoSearchLocationFromSubject } from "./dataForSeoSearchLo
 const SERP_ENDPOINT = DATAFORSEO_SERP_ENDPOINT;
 
 const inFlight = new Map<string, Promise<NationalSearchIntelligenceSnapshot>>();
+
+export type NationalSearchIntelligenceProgressEvent =
+  | { type: "ranked_start" }
+  | { type: "ranked_complete"; rows: number; cost: number }
+  | { type: "ranked_failed"; timedOut: boolean; message: string }
+  | { type: "serp_start"; index: number; total: number; query: string }
+  | { type: "serp_retry"; index: number; total: number; query: string; statusCode: number | null }
+  | { type: "serp_complete"; index: number; total: number; query: string; results: number; cost: number; retried: boolean }
+  | { type: "serp_failed"; index: number; total: number; query: string; timedOut: boolean; statusCode: number | null; retried: boolean; cost: number };
+
+export type NationalSearchIntelligenceProgress = (event: NationalSearchIntelligenceProgressEvent) => void;
 
 function json<T>(file: string): T {
   return JSON.parse(fs.readFileSync(file, "utf8")) as T;
@@ -369,7 +381,11 @@ function mapCompetitor(input: {
   };
 }
 
-async function collectInner(slug: string, force: boolean): Promise<NationalSearchIntelligenceSnapshot> {
+async function collectInner(
+  slug: string,
+  force: boolean,
+  onProgress?: NationalSearchIntelligenceProgress,
+): Promise<NationalSearchIntelligenceSnapshot> {
   const subject = resolveNationalIntelligenceSubject(slug);
   if (!subject.eligibleForNationalIntelligence) {
     throw new Error(`National Search Intelligence is not eligible for ${slug}`);
@@ -400,6 +416,8 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
   const serpAttempts: NationalSearchIntelligenceSnapshot["serpAttempts"] = [];
 
   let keywords: NationalCustomerRankingKeyword[] = [];
+  let rankedIncomplete = false;
+  onProgress?.({ type: "ranked_start" });
   try {
     const ranked = await getDomainRankedKeywordsWithCost({
       domain: subject.subjectDomain,
@@ -423,14 +441,19 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
       evidenceSource: "DATAFORSEO_LIVE",
       calculated: false,
     }));
+    onProgress?.({ type: "ranked_complete", rows: keywords.length, cost: ranked.cost });
   } catch (err) {
-    const failed = emptySnapshot(
-      slug,
-      "error",
-      err instanceof Error ? err.message : "DataForSEO ranked keyword collection failed.",
-    );
-    persistSnapshot(failed);
-    return failed;
+    const timedOut = isDataForSeoTransportTimeout(err);
+    const message = err instanceof Error ? err.message : "DataForSEO ranked keyword collection failed.";
+    onProgress?.({ type: "ranked_failed", timedOut, message });
+    if (!timedOut) {
+      const failed = emptySnapshot(slug, "error", message);
+      persistSnapshot(failed);
+      return failed;
+    }
+    endpoints[0].requests = 1;
+    endpoints[0].tasks = 1;
+    rankedIncomplete = true;
   }
 
   const queries = buildNationalCompetitorDiscoveryQueries({
@@ -450,13 +473,25 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
   }>();
 
   let serpQueryFailed = false;
-  for (const query of queries) {
+  for (let index = 0; index < queries.length; index += 1) {
+    const query = queries[index];
+    onProgress?.({ type: "serp_start", index: index + 1, total: queries.length, query: query.query });
     const executed = await executeNationalGoogleOrganic({
       query: query.query,
       marketCountry: subject.country,
       locationCode: serpLocation.locationCode,
       languageCode: subject.languageCode || "en",
       depth: NI03B_LIMITS.serpDepth,
+    }, {
+      onRetry(attempt) {
+        onProgress?.({
+          type: "serp_retry",
+          index: index + 1,
+          total: queries.length,
+          query: query.query,
+          statusCode: attempt.taskStatusCode,
+        });
+      },
     });
     for (const attempt of executed.attempts) {
       endpoints[1].requests += 1;
@@ -470,8 +505,33 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
         taskStatusMessage: attempt.taskStatusMessage,
         cost: attempt.cost,
         successful: attempt.successful,
+        timedOut: attempt.timedOut,
         attemptNumber: attempt.attemptNumber,
         capturedAt: attempt.capturedAt,
+      });
+    }
+    const retried = executed.attempts.length > 1;
+    const lastAttempt = executed.attempts[executed.attempts.length - 1];
+    if (executed.successful) {
+      onProgress?.({
+        type: "serp_complete",
+        index: index + 1,
+        total: queries.length,
+        query: query.query,
+        results: executed.organicResultCount,
+        cost: executed.cost,
+        retried,
+      });
+    } else {
+      onProgress?.({
+        type: "serp_failed",
+        index: index + 1,
+        total: queries.length,
+        query: query.query,
+        timedOut: Boolean(lastAttempt?.timedOut),
+        statusCode: lastAttempt?.taskStatusCode ?? null,
+        retried,
+        cost: executed.cost,
       });
     }
     if (executed.fatal) {
@@ -520,14 +580,15 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
     .filter((row): row is NationalOrganicSearchCompetitor => Boolean(row));
 
   const usable = keywords.length > 0 || competitors.length > 0;
+  const collectionIncomplete = rankedIncomplete || serpQueryFailed;
   let status: NationalSearchIntelligenceSnapshot["status"];
   let lastError: string | null = null;
-  if (!usable && serpQueryFailed) {
+  if (!usable && collectionIncomplete) {
     status = "error";
     lastError = "Search intelligence collection could not complete. No usable live evidence was returned.";
   } else if (!usable) {
     status = "empty";
-  } else if (serpQueryFailed) {
+  } else if (collectionIncomplete) {
     status = "partial";
     lastError = PARTIAL_COLLECTION_CUSTOMER_MESSAGE;
   } else {
@@ -554,7 +615,7 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
 
 export async function collectNationalSearchIntelligence(
   slug: string,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; onProgress?: NationalSearchIntelligenceProgress } = {},
 ): Promise<NationalSearchIntelligenceSnapshot> {
   const subject = resolveNationalIntelligenceSubject(slug);
   if (!subject.eligibleForNationalIntelligence) {
@@ -565,7 +626,7 @@ export async function collectNationalSearchIntelligence(
     const snapshot = await existing;
     return { ...snapshot, reusedExistingSnapshot: true };
   }
-  const pending = collectInner(subject.slug, Boolean(options.force));
+  const pending = collectInner(subject.slug, Boolean(options.force), options.onProgress);
   inFlight.set(subject.slug, pending);
   try {
     return await pending;

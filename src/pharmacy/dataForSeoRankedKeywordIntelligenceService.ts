@@ -3,6 +3,7 @@
  * Live HTTP runs only when an explicit execution function is called.
  * Read/render paths must not import-call these live functions.
  */
+import { fetchDataForSeo } from "./dataForSeoHttp.ts";
 
 export const DATAFORSEO_LABS_ENDPOINTS = {
   rankedKeywords: "https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live",
@@ -80,7 +81,7 @@ export function parseLabsKeywordItems(payload: unknown, sourceDomain: string): {
 
 export async function postDataForSeoLabs(endpoint: string, body: unknown): Promise<unknown> {
   const { login, password } = credentials();
-  const response = await fetch(endpoint, {
+  const response = await fetchDataForSeo(endpoint, {
     method: "POST",
     headers: {
       authorization: "Basic " + Buffer.from(`${login}:${password}`).toString("base64"),

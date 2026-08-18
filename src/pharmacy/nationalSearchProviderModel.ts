@@ -45,6 +45,10 @@ export const DATAFORSEO_TASK_OK = 20000;
 export const DATAFORSEO_TASK_INTERNAL_SE_ERROR = 40101;
 export const MAX_DATAFORSEO_INTERNAL_SE_RETRIES = 1;
 
+export interface NationalSearchExecuteHooks {
+  onRetry?: (attempt: NationalSearchTaskAttempt) => void;
+}
+
 export interface NationalSearchTaskAttempt {
   query: string;
   endpoint: string;
@@ -54,6 +58,7 @@ export interface NationalSearchTaskAttempt {
   cost: number | null;
   successful: boolean;
   retryable: boolean;
+  timedOut: boolean;
   attemptNumber: number;
   capturedAt: string;
 }

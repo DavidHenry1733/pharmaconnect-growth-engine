@@ -97,6 +97,7 @@ export interface NationalSearchIntelligenceSnapshot {
     taskStatusMessage: string | null;
     cost: number | null;
     successful: boolean;
+    timedOut?: boolean;
     attemptNumber: number;
     capturedAt: string;
   }>;

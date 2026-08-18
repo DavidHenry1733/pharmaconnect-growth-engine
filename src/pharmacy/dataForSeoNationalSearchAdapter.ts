@@ -14,6 +14,7 @@ import type {
   NationalSearchEvidence,
   NationalSearchExecutionResult,
   NationalSearchTaskAttempt,
+  NationalSearchExecuteHooks,
 } from "./nationalSearchProviderModel.ts";
 import {
   DATAFORSEO_TASK_INTERNAL_SE_ERROR,
@@ -21,6 +22,11 @@ import {
   MAX_DATAFORSEO_INTERNAL_SE_RETRIES,
 } from "./nationalSearchProviderModel.ts";
 import { resolveDataForSeoSearchLocation } from "./dataForSeoSearchLocationResolver.ts";
+import {
+  fetchDataForSeo,
+  isDataForSeoTransportTimeout,
+  resolveDataForSeoHttpTimeoutMs,
+} from "./dataForSeoHttp.ts";
 
 export const DATAFORSEO_SERP_ENDPOINT =
   "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
@@ -103,11 +109,12 @@ async function executeOnce(
     endpoint: DATAFORSEO_SERP_ENDPOINT,
     attemptNumber,
     capturedAt,
+    timedOut: false,
   };
 
   let response: Response;
   try {
-    response = await fetch(DATAFORSEO_SERP_ENDPOINT, {
+    response = await fetchDataForSeo(DATAFORSEO_SERP_ENDPOINT, {
       method: "POST",
       headers: {
         Authorization: `Basic ${auth}`,
@@ -123,15 +130,19 @@ async function executeOnce(
       ]),
     });
   } catch (err) {
+    const timedOut = isDataForSeoTransportTimeout(err);
     return {
       attempt: {
         ...baseAttempt,
         taskId: null,
         taskStatusCode: null,
-        taskStatusMessage: err instanceof Error ? err.message : String(err),
+        taskStatusMessage: timedOut
+          ? `HTTP timeout after ${resolveDataForSeoHttpTimeoutMs()}ms`
+          : err instanceof Error ? err.message : String(err),
         cost: null,
         successful: false,
         retryable: false,
+        timedOut,
       },
       results: [],
       locationCode: location.locationCode,
@@ -155,6 +166,7 @@ async function executeOnce(
         cost: null,
         successful: false,
         retryable: false,
+        timedOut: false,
       },
       results: [],
       locationCode: location.locationCode,
@@ -182,6 +194,7 @@ async function executeOnce(
         cost,
         successful: false,
         retryable: false,
+        timedOut: false,
       },
       results: [],
       locationCode: location.locationCode,
@@ -203,6 +216,7 @@ async function executeOnce(
         cost,
         successful: true,
         retryable: false,
+        timedOut: false,
       },
       results: organic,
       locationCode: location.locationCode,
@@ -223,6 +237,7 @@ async function executeOnce(
       cost,
       successful: false,
       retryable: taskStatus === DATAFORSEO_TASK_INTERNAL_SE_ERROR,
+      timedOut: false,
     },
     results: [],
     locationCode: location.locationCode,
@@ -239,13 +254,15 @@ export class DataForSeoNationalSearchProvider
 
   async execute(
     request: NationalSearchRequest,
+    hooks: NationalSearchExecuteHooks = {},
   ): Promise<NationalSearchExecutionResult> {
     const attempts: NationalSearchTaskAttempt[] = [];
     const first = await executeOnce(request, 1, this.id);
     attempts.push(first.attempt);
 
     let current = first;
-    if (!first.attempt.successful && first.attempt.retryable && !first.fatal) {
+    if (!first.attempt.successful && first.attempt.retryable && !first.fatal && !first.attempt.timedOut) {
+      hooks.onRetry?.(first.attempt);
       const retry = await executeOnce(request, 1 + MAX_DATAFORSEO_INTERNAL_SE_RETRIES, this.id);
       attempts.push(retry.attempt);
       current = retry;
@@ -293,9 +310,10 @@ export class DataForSeoNationalSearchProvider
 
 export async function executeNationalGoogleOrganic(
   request: NationalSearchRequest,
+  hooks: NationalSearchExecuteHooks = {},
 ): Promise<NationalSearchExecutionResult> {
   const provider = new DataForSeoNationalSearchProvider();
-  return provider.execute(request);
+  return provider.execute(request, hooks);
 }
 
 export async function searchNationalGoogleOrganic(

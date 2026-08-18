@@ -20,6 +20,7 @@ import * as frameworkMod from "../src/pharmacy/growthEngineFrameworkService.ts";
 import * as localMarketPageMod from "../src/pharmacy/growthEngineLocalMarketPage.ts";
 import * as locationResolverMod from "../src/pharmacy/dataForSeoSearchLocationResolver.ts";
 import * as searchProviderMod from "../src/pharmacy/nationalSearchProviderModel.ts";
+import * as dataForSeoHttpMod from "../src/pharmacy/dataForSeoHttp.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -41,6 +42,7 @@ const framework = exported(frameworkMod);
 const localMarketPage = exported(localMarketPageMod);
 const locationResolver = exported(locationResolverMod);
 const searchProvider = exported(searchProviderMod);
+const dataForSeoHttp = exported(dataForSeoHttpMod);
 
 let pass = 0;
 let fail = 0;
@@ -87,6 +89,8 @@ const contentPackageSource = read("src/pharmacy/pharmacyContentPackageService.ts
 const labsSource = read("src/pharmacy/dataForSeoRankedKeywordIntelligenceService.ts");
 const adapterSource = read("src/pharmacy/dataForSeoNationalSearchAdapter.ts");
 const locationResolverSource = read("src/pharmacy/dataForSeoSearchLocationResolver.ts");
+const httpSource = read("src/pharmacy/dataForSeoHttp.ts");
+const collectScriptSource = read("scripts/collect-national-search-intelligence-v1.ts");
 
 check(
   "platform-national-eligible",
@@ -180,6 +184,32 @@ check(
   "location-resolver-no-pharmaconnect",
   !/["']pharmaconnect["']|pharmaconnect\.uk/i.test(locationResolverSource + adapterSource),
   "location resolver/adapter have no PharmaConnect hardcode",
+);
+check(
+  "shared-dataforseo-http-timeout-60s",
+  dataForSeoHttp.DATAFORSEO_HTTP_TIMEOUT_MS === 60000
+    && httpSource.includes("export const DATAFORSEO_HTTP_TIMEOUT_MS = 60_000")
+    && labsSource.includes("fetchDataForSeo")
+    && adapterSource.includes("fetchDataForSeo"),
+  `timeoutMs=${dataForSeoHttp.DATAFORSEO_HTTP_TIMEOUT_MS}`,
+);
+check(
+  "transport-timeout-is-not-retryable",
+  httpSource.includes("retryable = false")
+    && adapterSource.includes("!first.attempt.timedOut")
+    && serviceSource.includes("isDataForSeoTransportTimeout"),
+  "timeout failures are typed and not retried",
+);
+check(
+  "cli-progress-is-concise",
+  collectScriptSource.includes("COLLECTING ranked_keywords...")
+    && collectScriptSource.includes("COLLECTING SERP")
+    && collectScriptSource.includes("retrying once")
+    && collectScriptSource.includes("PERSISTED snapshot=")
+    && collectScriptSource.includes("STATUS=")
+    && collectScriptSource.includes("TOTAL_COST=")
+    && !/DATAFORSEO_(LOGIN|PASSWORD)/.test(collectScriptSource),
+  "collector CLI prints bounded progress without credentials",
 );
 
 check(
@@ -780,17 +810,36 @@ function writeNationalTenant(slug: string, domain: string): string {
   return file;
 }
 
-async function collectWithSerpQueue(slug: string, queue: object[], rankedAuthFail = false) {
+async function collectWithSerpQueue(
+  slug: string,
+  queue: object[],
+  options: { rankedAuthFail?: boolean; hangRanked?: boolean; hangFirstSerp?: boolean } = {},
+) {
   const remaining = [...queue];
   let rankedCalls = 0;
   let serpCalls = 0;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  let fetchesWithSignal = 0;
+  let fetchesMissingSignal = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     fetchCalls += 1;
     const url = String(input);
     fetchUrls.push(url);
+    if (init?.signal) fetchesWithSignal += 1;
+    else fetchesMissingSignal += 1;
+    const hang = (): Promise<Response> => new Promise((_, reject) => {
+      const fail = () => {
+        const err = new Error("The operation was aborted");
+        err.name = "AbortError";
+        reject(err);
+      };
+      if (init?.signal?.aborted) return fail();
+      init?.signal?.addEventListener("abort", fail, { once: true });
+      setTimeout(() => reject(new Error("NI-03B validator hang mock was not aborted")), 5000);
+    });
     if (url.includes("ranked_keywords")) {
       rankedCalls += 1;
-      if (rankedAuthFail) {
+      if (options.hangRanked) return hang();
+      if (options.rankedAuthFail) {
         return new Response(JSON.stringify({ status_code: 40100, status_message: "You are not authorized." }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -799,22 +848,27 @@ async function collectWithSerpQueue(slug: string, queue: object[], rankedAuthFai
       return new Response(JSON.stringify(rankedOkPayload()), { status: 200, headers: { "content-type": "application/json" } });
     }
     serpCalls += 1;
+    if (options.hangFirstSerp && serpCalls === 1) return hang();
     const next = remaining.shift() || serp40101Payload();
     return new Response(JSON.stringify(next), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   const snapshot = await searchService.collectNationalSearchIntelligence(slug, { force: true });
-  return { snapshot, rankedCalls, serpCalls, unusedQueue: remaining.length };
+  return { snapshot, rankedCalls, serpCalls, fetchesWithSignal, fetchesMissingSignal, unusedQueue: remaining.length };
 }
 
 const tenantRetry = "ni03b-resilience-retry";
 const tenantPartial = "ni03b-resilience-partial";
 const tenantAllFail = "ni03b-resilience-allfail";
 const tenantAuth = "ni03b-resilience-auth";
+const tenantTimeoutSerp = "ni03b-timeout-serp";
+const tenantTimeoutRanked = "ni03b-timeout-ranked";
 const extraTenantFiles = [
   writeNationalTenant(tenantRetry, "example-national-retry.co.uk"),
   writeNationalTenant(tenantPartial, "example-national-partial.co.uk"),
   writeNationalTenant(tenantAllFail, "example-national-allfail.co.uk"),
   writeNationalTenant(tenantAuth, "example-national-auth.co.uk"),
+  writeNationalTenant(tenantTimeoutSerp, "example-national-timeout-serp.co.uk"),
+  writeNationalTenant(tenantTimeoutRanked, "example-national-timeout-ranked.co.uk"),
 ];
 
 const retryCase = await collectWithSerpQueue(tenantRetry, [
@@ -877,7 +931,7 @@ check(
   `${allFail.snapshot.status} keywords=${allFail.snapshot.customerKeywords.length} competitors=${allFail.snapshot.organicCompetitors.length} serpCalls=${allFail.serpCalls}`,
 );
 
-const authCase = await collectWithSerpQueue(tenantAuth, [], true);
+const authCase = await collectWithSerpQueue(tenantAuth, [], { rankedAuthFail: true });
 check(
   "resilience-fatal-auth-no-serp-retry",
   authCase.snapshot.status === "error"
@@ -887,6 +941,42 @@ check(
     && authCase.snapshot.organicCompetitors.length === 0,
   `${authCase.snapshot.status} ranked=${authCase.rankedCalls} serp=${authCase.serpCalls}`,
 );
+
+dataForSeoHttp.setDataForSeoHttpTimeoutMsForTests(80);
+try {
+  const timeoutSerp = await collectWithSerpQueue(tenantTimeoutSerp, [
+    serpOkPayload("timeout-two-agency.co.uk"),
+    serpOkPayload("timeout-three-agency.co.uk"),
+  ], { hangFirstSerp: true });
+  check(
+    "http-timeout-does-not-retry-serp",
+    timeoutSerp.snapshot.status === "partial"
+      && timeoutSerp.serpCalls === 3
+      && timeoutSerp.snapshot.customerKeywords.length === 1
+      && timeoutSerp.snapshot.organicCompetitors.length >= 1
+      && timeoutSerp.snapshot.serpAttempts.filter((row) => row.timedOut).length === 1
+      && timeoutSerp.snapshot.serpAttempts.filter((row) => row.timedOut).every((row) => row.successful === false)
+      && timeoutSerp.fetchesMissingSignal === 0,
+    `${timeoutSerp.snapshot.status} serpCalls=${timeoutSerp.serpCalls} timedOut=${timeoutSerp.snapshot.serpAttempts.filter((row) => row.timedOut).length} keywords=${timeoutSerp.snapshot.customerKeywords.length}`,
+  );
+
+  const timeoutRanked = await collectWithSerpQueue(tenantTimeoutRanked, [
+    serpOkPayload("ranked-timeout-one-agency.co.uk"),
+    serpOkPayload("ranked-timeout-two-agency.co.uk"),
+    serpOkPayload("ranked-timeout-three-agency.co.uk"),
+  ], { hangRanked: true });
+  check(
+    "ranked-timeout-continues-serps-partial",
+    timeoutRanked.snapshot.status === "partial"
+      && timeoutRanked.rankedCalls === 1
+      && timeoutRanked.serpCalls === 3
+      && timeoutRanked.snapshot.customerKeywords.length === 0
+      && timeoutRanked.snapshot.organicCompetitors.length >= 1,
+    `${timeoutRanked.snapshot.status} ranked=${timeoutRanked.rankedCalls} serp=${timeoutRanked.serpCalls} keywords=${timeoutRanked.snapshot.customerKeywords.length} competitors=${timeoutRanked.snapshot.organicCompetitors.length}`,
+  );
+} finally {
+  dataForSeoHttp.setDataForSeoHttpTimeoutMsForTests(null);
+}
 
 const fetchBeforePartialRead = fetchCalls;
 searchService.readNationalSearchIntelligence(tenantPartial);
@@ -922,7 +1012,7 @@ else process.env.DATAFORSEO_LOGIN = previousLogin;
 if (previousPassword === undefined) delete process.env.DATAFORSEO_PASSWORD;
 else process.env.DATAFORSEO_PASSWORD = previousPassword;
 
-for (const slug of [tenantBSlug, tenantRetry, tenantPartial, tenantAllFail, tenantAuth]) {
+for (const slug of [tenantBSlug, tenantRetry, tenantPartial, tenantAllFail, tenantAuth, tenantTimeoutSerp, tenantTimeoutRanked]) {
   for (const artifact of [
     "search-intelligence-v1",
     "ranked-keywords-customer",
