@@ -26,7 +26,22 @@ function fmt(value: number | null | undefined): string {
 }
 
 function money(value: number | null | undefined): string {
-  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(4) : "—";
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  if (value === 0) return "0";
+  return value.toFixed(5).replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "0");
+}
+
+function displayEvidenceSource(snapshot: NationalSearchIntelligenceSnapshot): string {
+  if (snapshot.status === "not_collected") return snapshot.provenance.evidenceSource;
+  if (snapshot.authority === "FIXTURE_ONLY" || snapshot.provenance.evidenceSource === "FIXTURE") return "FIXTURE";
+  if (snapshot.authority === "RECOVERED_EVIDENCE" || snapshot.provenance.evidenceSource === "RECOVERED") return "RECOVERED";
+  if (
+    snapshot.provenance.evidenceSource === "DATAFORSEO_LIVE"
+    || snapshot.provenance.evidenceSource === "DATAFORSEO_PERSISTED"
+  ) {
+    return "DATAFORSEO_LIVE";
+  }
+  return snapshot.provenance.evidenceSource;
 }
 
 function authorityLabel(snapshot: NationalSearchIntelligenceSnapshot): string {
@@ -34,16 +49,15 @@ function authorityLabel(snapshot: NationalSearchIntelligenceSnapshot): string {
   if (snapshot.status === "error") return "Collection error";
   if (snapshot.authority === "FIXTURE_ONLY") return "Fixture / non-live";
   if (snapshot.authority === "RECOVERED_EVIDENCE") return "Recovered evidence";
-  if (snapshot.provenance.evidenceSource === "DATAFORSEO_LIVE") return "Live DataForSEO";
-  if (snapshot.provenance.evidenceSource === "DATAFORSEO_PERSISTED") return "Persisted DataForSEO";
+  if (displayEvidenceSource(snapshot) === "DATAFORSEO_LIVE") return "Live DataForSEO";
   if (snapshot.provenance.evidenceSource === "FALLBACK") return "Fallback";
   return snapshot.provenance.evidenceSource;
 }
 
 function statusLabel(snapshot: NationalSearchIntelligenceSnapshot): string {
-  if (snapshot.status === "collected") return "Intelligence collected";
-  if (snapshot.status === "partial") return "Intelligence collected with incomplete search-engine results";
-  if (snapshot.status === "empty") return "Collected — no ranking keywords or search competitors returned";
+  if (snapshot.status === "collected") return "COLLECTED";
+  if (snapshot.status === "partial") return "PARTIAL — collected with incomplete search-engine results";
+  if (snapshot.status === "empty") return "COLLECTED — no ranking keywords or search competitors returned";
   if (snapshot.status === "error") return "Collection failed";
   if (snapshot.status === "collecting") return "Collecting";
   return "Intelligence not collected";
@@ -84,9 +98,12 @@ function competitorCard(row: NationalOrganicSearchCompetitor): string {
       ? "This business sells to the same customers, but not overlapping services."
       : "This domain competes in search.";
   const analysed = row.analysed ? "YES" : "NO";
-  const expansion = row.eligibleForKeywordExpansion ? "eligible" : "not eligible";
+  const expansion = row.eligibleForKeywordExpansion ? "YES" : "NO";
   const gate = row.commercialGate;
-  return `<article class="ge-competitor" data-ni03b-competitor="${esc(row.domain)}" data-ni03c-competitor="${esc(row.domain)}" data-ni03c1-role="${esc(row.role)}" data-ni03c1-eligible="${row.eligibleForKeywordExpansion ? "true" : "false"}">
+  const reason = row.nonSelectionReason
+    || (row.qualificationEvidence || row.whyIdentified || []).join(" ")
+    || "Organic overlap is SERP evidence only.";
+  return `<article class="ge-competitor" data-ni03b-competitor="${esc(row.domain)}" data-ni03c-competitor="${esc(row.domain)}" data-ni03c1-role="${esc(row.role)}" data-ni03c1-eligible="${row.eligibleForKeywordExpansion ? "true" : "false"}" data-ni03c2-expansion="${row.eligibleForKeywordExpansion ? "true" : "false"}">
 <div class="ge-competitor-head">
 <div>
 <p class="ge-competitor-name">${esc(row.name)}</p>
@@ -95,6 +112,7 @@ function competitorCard(row: NationalOrganicSearchCompetitor): string {
 <span class="ge-pill">${esc(commercial ? "commercial competitor" : (row.role || "search competitor").replace(/_/g, " "))}</span>
 </div>
 <p style="font-size:13px;color:#334155;margin:0 0 8px">${esc(distinction)}</p>
+<p class="ge-meta">Classification: ${esc(row.classification.replace(/_/g, " "))} · Qualification: ${esc(row.qualification)} · Selected for paid expansion: ${esc(expansion)}</p>
 <p class="ge-meta">${esc(overlap)} · ${esc(traffic)} · Organic overlap is SERP evidence only.</p>
 <p class="ge-meta">TENANT SERVICES: ${esc((gate?.tenantServices || []).join(", ") || "—")}</p>
 <p class="ge-meta">CANDIDATE SERVICES DETECTED: ${esc((gate?.candidateServicesDetected || []).join(", ") || "—")}</p>
@@ -102,7 +120,8 @@ function competitorCard(row: NationalOrganicSearchCompetitor): string {
 <p class="ge-meta">NON-OVERLAPPING SERVICES: ${esc((gate?.nonOverlappingServices || []).join(", ") || "—")}</p>
 <p class="ge-meta">SERVICE_OVERLAP=${gate?.serviceOverlap ? "true" : "false"}</p>
 <p class="ge-meta">Qualification evidence: ${esc((row.qualificationEvidence || row.whyIdentified || []).join(" "))}</p>
-<p class="ge-meta">Keyword expansion: ${esc(expansion)} · Analysed: ${esc(analysed)}${row.nonSelectionReason ? ` · ${esc(row.nonSelectionReason)}` : ""}</p>
+<p class="ge-meta">Keyword expansion: ${esc(row.eligibleForKeywordExpansion ? "eligible" : "not eligible")} · Analysed: ${esc(analysed)}${row.nonSelectionReason ? ` · ${esc(row.nonSelectionReason)}` : ""}</p>
+<p class="ge-meta">Reason: ${esc(reason)}</p>
 <p class="ge-meta">Evidence status: ${esc(row.evidenceSource)} · Verified: no · Source: Labs competitors domain</p>
 </article>`;
 }
@@ -141,8 +160,13 @@ export function renderNationalSearchIntelligencePage(
   const snapshot = readNationalSearchIntelligence(slug);
   const collected = snapshot.status === "collected" || snapshot.status === "empty" || snapshot.status === "partial";
   const sourceLabel = authorityLabel(snapshot);
+  const evidenceSourceLabel = displayEvidenceSource(snapshot);
   const keywords = snapshot.customerKeywords.slice(0, 100);
-  const competitors = snapshot.organicCompetitors.slice(0, 12);
+  const competitors = snapshot.organicCompetitors;
+  const qualifiedCommercial = snapshot.organicCompetitors.filter((row) => row.eligibleForKeywordExpansion).length;
+  const paidExpansions = snapshot.competitorKeywordUniverses.length;
+  const organicCount = snapshot.organicCompetitors.length;
+  const sparse = Boolean(snapshot.customerOrganicFootprint?.sparse);
   const collectUrl = `/api/growth-engine/${encodeURIComponent(slug)}/search-intelligence/collect`;
   const strongestPages = snapshot.summary.strongestRankingPages || [];
 
@@ -157,13 +181,13 @@ export function renderNationalSearchIntelligencePage(
 </div>
 <div class="ge-grid-3" style="margin-top:12px">
 <div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Ranking pages</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.rankingPageCount}</p></div>
-<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Organic search competitors</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.organicCompetitorCount}</p></div>
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Organic / SERP competitors</h3><p style="font-size:28px;font-weight:900;margin:0" data-ni03c2-organic-count="${organicCount}">${organicCount}</p><p class="ge-meta">Domains overlapping in Google results — not automatically commercial competitors</p></div>
 <div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Latest collection</h3><p style="font-size:16px;font-weight:700;margin:0">${snapshot.status === "not_collected" ? "Not collected" : esc(snapshot.capturedAt)}</p><p class="ge-meta">${esc(sourceLabel)}</p></div>
 </div>
-<div class="ge-grid-3" style="margin-top:12px" data-ni03c1-section="competitor-distinction">
-<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Commercial competitors</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.commercialCompetitorCount || 0}</p><p class="ge-meta">Businesses that compete for your customers</p></div>
-<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Search competitors</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.serpCompetitorCount || 0}</p><p class="ge-meta">Domains that compete in search, not for your customers</p></div>
-<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Customer organic footprint</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.customerOrganicFootprint?.keywordCount ?? snapshot.summary.rankingKeywordCount}</p><p class="ge-meta">${esc(snapshot.customerOrganicFootprint?.note || "Customer keyword universe used for competitor discovery.")}</p></div>
+<div class="ge-grid-3" style="margin-top:12px" data-ni03c1-section="competitor-distinction" data-ni03c2-section="commercial-summary">
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Qualified commercial competitors</h3><p style="font-size:28px;font-weight:900;margin:0" data-ni03c2-qualified-count="${qualifiedCommercial}">${qualifiedCommercial}</p><p class="ge-meta">Businesses that compete for your customers</p></div>
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Paid competitor expansions</h3><p style="font-size:28px;font-weight:900;margin:0" data-ni03c2-paid-expansions="${paidExpansions}">${paidExpansions}</p><p class="ge-meta">Competitor ranked-keyword requests made after the commercial gate</p></div>
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Customer organic footprint</h3><p style="font-size:28px;font-weight:900;margin:0" data-ni03c2-customer-keywords="${snapshot.customerOrganicFootprint?.keywordCount ?? snapshot.summary.rankingKeywordCount}">${snapshot.customerOrganicFootprint?.keywordCount ?? snapshot.summary.rankingKeywordCount}</p><p class="ge-meta">${esc(sparse ? "SPARSE" : "NORMAL")} · ${esc(snapshot.customerOrganicFootprint?.note || "Customer keyword universe used for competitor discovery.")}</p></div>
 </div>`
     : `<p class="ge-lead" data-ni03b-section="empty-metrics">No collection has been performed yet. Metrics will appear from persisted DataForSEO evidence only.</p>`;
 
@@ -187,7 +211,7 @@ export function renderNationalSearchIntelligencePage(
 
   const competitorKeywordHtml = snapshot.competitorKeywordUniverses.length
     ? snapshot.competitorKeywordUniverses.map(competitorKeywordSection).join("")
-    : `<p class="ge-lead">${snapshot.status === "not_collected" ? "Competitor keyword universes will appear after collection." : "No competitor keyword universes were collected."}</p>`;
+    : `<p class="ge-lead" data-ni03c2-section="zero-paid-expansion">${snapshot.status === "not_collected" ? "Competitor keyword universes will appear after collection." : "Paid competitor expansions: 0. No commercially qualified competitors were selected for ranked-keyword expansion."}</p>`;
 
   const body = `<div class="ge-panel" data-ni03b-section="search-intelligence">
 <h2>Search Intelligence</h2>
@@ -196,12 +220,19 @@ export function renderNationalSearchIntelligencePage(
 <div class="ge-card"><h3>Business</h3><p>${esc(snapshot.businessName)}</p></div>
 <div class="ge-card"><h3>Domain</h3><p data-ni03b-domain="${esc(snapshot.subjectDomain)}">${esc(snapshot.subjectDomain || "Not configured")}</p></div>
 <div class="ge-card"><h3>Market</h3><p data-ni03b-market="${esc(snapshot.primaryMarket)}">${esc(snapshot.primaryMarket)}</p></div>
-<div class="ge-card"><h3>Status</h3><p data-ni03b-status="${esc(snapshot.status)}">${esc(statusLabel(snapshot))}</p></div>
+<div class="ge-card"><h3>Status</h3><p data-ni03b-status="${esc(snapshot.status)}" data-ni03c2-page-status="${esc(snapshot.status === "collected" ? "COLLECTED" : snapshot.status.toUpperCase())}">${esc(statusLabel(snapshot))}</p></div>
 <div class="ge-card"><h3>Last collected</h3><p data-ni03b-captured="${esc(snapshot.capturedAt)}">${snapshot.status === "not_collected" ? "Not collected" : esc(snapshot.capturedAt)}</p></div>
-<div class="ge-card" data-ni03b-section="provenance"><h3>Source / provenance</h3><p>${esc(sourceLabel)}</p><p class="ge-meta">${esc(snapshot.provenance.evidenceSource)} · ${esc(snapshot.authority)}</p></div>
-<div class="ge-card" data-ni03b-section="cost"><h3>Collection cost</h3><p>DataForSEO ${money(snapshot.costs.totalCost)}</p><p class="ge-meta">${snapshot.costs.requests} request(s) · ${snapshot.costs.tasks} task(s)</p></div>
+<div class="ge-card" data-ni03b-section="provenance"><h3>Source / provenance</h3><p>${esc(sourceLabel)}</p><p class="ge-meta" data-ni03c2-evidence-source="${esc(evidenceSourceLabel)}" data-ni03c2-authority="${esc(snapshot.authority)}">${esc(evidenceSourceLabel)} · ${esc(snapshot.authority)}</p></div>
+<div class="ge-card" data-ni03b-section="cost"><h3>Collection cost</h3><p>Total DataForSEO cost <span data-ni03c2-total-cost="${esc(money(snapshot.costs.totalCost))}">${money(snapshot.costs.totalCost)}</span></p><p class="ge-meta"><span data-ni03c2-requests="${snapshot.costs.requests}">${snapshot.costs.requests}</span> request(s) · <span data-ni03c2-tasks="${snapshot.costs.tasks}">${snapshot.costs.tasks}</span> task(s)</p></div>
 </div>
-${snapshot.status === "partial" ? `<p class="ge-lead" style="color:#b45309" data-ni03b-section="partial">${esc(PARTIAL_COLLECTION_CUSTOMER_MESSAGE)}</p>` : snapshot.lastError && snapshot.status !== "partial" ? `<p class="ge-lead" style="color:#b45309" data-ni03b-section="error">${esc(snapshot.lastError)}</p>` : ""}
+${collected ? `<div class="ge-panel" style="margin:16px 0 0;padding:14px 16px;background:#fff" data-ni03c2-section="collection-state">
+<p class="ge-meta">DATA COLLECTION = ${esc(snapshot.status === "collected" ? "COLLECTED" : snapshot.status.toUpperCase())}</p>
+<p class="ge-meta">CUSTOMER FOOTPRINT = ${esc(sparse ? "SPARSE" : "NORMAL")}</p>
+<p class="ge-meta">ORGANIC CANDIDATES = ${organicCount}</p>
+<p class="ge-meta">COMMERCIAL COMPETITORS = ${qualifiedCommercial} QUALIFIED</p>
+<p class="ge-meta">PAID EXPANSION = ${paidExpansions} REQUESTS</p>
+</div>` : ""}
+${snapshot.status === "partial" ? `<p class="ge-lead" style="color:#b45309" data-ni03b-section="partial">${esc(PARTIAL_COLLECTION_CUSTOMER_MESSAGE)}</p>` : snapshot.lastError && snapshot.status !== "partial" && snapshot.status !== "collected" ? `<p class="ge-lead" style="color:#b45309" data-ni03b-section="error">${esc(snapshot.lastError)}</p>` : ""}
 <p style="margin-top:16px" data-ni03b-section="explicit-refresh">
 <button class="ge-btn ge-btn-primary" type="button" id="ni03bCollect">${collected ? "Refresh Search Intelligence" : "Collect Search Intelligence"}</button>
 <span id="ni03bCollectStatus" class="ge-meta" style="margin-left:10px"></span>
@@ -235,7 +266,9 @@ ${cards}
 <p class="ge-lead">These domains compete with you in Google search results. That is not the same as competing for your customers.</p>
 <p class="ge-lead">Organic overlap is SERP evidence only. Only commercially qualified competitors are selected for paid keyword expansion.</p>
 <p class="ge-lead">They are not selected based on physical proximity.</p>
-${collected && snapshot.customerOrganicFootprint?.sparse ? `<p class="ge-lead" data-ni03c1-section="sparse-footprint">${esc(snapshot.customerOrganicFootprint.note)}</p>` : ""}
+${collected && sparse ? `<p class="ge-lead" data-ni03c1-section="sparse-footprint" data-ni03c2-section="sparse-warning">${esc(snapshot.businessName)} currently has a sparse organic search footprint. Competitor discovery from shared ranking keywords is therefore limited.</p>
+<p class="ge-meta">This is an evidence limitation, not a system error. Status remains COLLECTED. ${esc(snapshot.customerOrganicFootprint?.note || "")}</p>` : ""}
+${collected && qualifiedCommercial === 0 ? `<p class="ge-lead" data-ni03c2-section="zero-commercial">No commercially qualified competitors were found from the current organic-overlap evidence. Weak or non-overlapping domains were intentionally excluded from paid competitor keyword expansion.</p>` : ""}
 ${competitorCards}
 </div>
 

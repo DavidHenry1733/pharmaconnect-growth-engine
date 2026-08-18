@@ -407,6 +407,14 @@ check(
     && !storage.nationalIntelligenceDataPath("pharmaconnect", "search-intelligence-v1").includes(process.cwd() === ROOT ? "FORCE_FAIL" : process.cwd()),
   storage.nationalIntelligenceDataPath("pharmaconnect", "search-intelligence-v1"),
 );
+check(
+  "ui-renders-all-organic-candidates",
+  !pageSource.includes("organicCompetitors.slice(0, 12)")
+    && pageSource.includes("const competitors = snapshot.organicCompetitors")
+    && pageSource.includes("currently has a sparse organic search footprint")
+    && pageSource.includes("No commercially qualified competitors were found from the current organic-overlap evidence"),
+  "Search Intelligence page renders every organic candidate and the collected zero-commercial state",
+);
 
 check(
   "cost-ledger-used",
