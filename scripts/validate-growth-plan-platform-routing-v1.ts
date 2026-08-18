@@ -16,6 +16,7 @@ import * as growthEngineCampaignBuilderPage from "../src/pharmacy/growthEngineCa
 import * as growthEngineFrameworkService from "../src/pharmacy/growthEngineFrameworkService.ts";
 import * as masterAdminLockedCommercialServiceCatalog from "../src/pharmacy/masterAdminLockedCommercialServiceCatalog.ts";
 import * as masterAdminPlatformOperationsDashboardService from "../src/pharmacy/masterAdminPlatformOperationsDashboardService.ts";
+import * as nationalGrowthIntelligenceService from "../src/pharmacy/nationalGrowthIntelligenceService.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -52,6 +53,7 @@ function main() {
   const { buildGrowthEngineFramework, buildGrowthPlanRecommendation } = exported(growthEngineFrameworkService);
   const { listLockedCommercialSupportedServices } = exported(masterAdminLockedCommercialServiceCatalog);
   const { buildPlatformOperationsDashboard } = exported(masterAdminPlatformOperationsDashboardService);
+  const { buildNationalGrowthIntelligence } = exported(nationalGrowthIntelligenceService);
 
   console.log("\n=== GP-01C Growth Plan platform routing ===\n");
 
@@ -78,66 +80,31 @@ function main() {
   record("unknown-never-reads-national-snapshot", readGrowthPlanIntelligenceV1("__gp01c_unknown_tenant__") === null, "unknown slug gated");
 
   const primary = nationalPlan.plan.primary;
+  const intelligence = buildNationalGrowthIntelligence("pharmaconnect");
   const snapshotActions = snapshot?.actions || [];
-  const corePrimaryActions = snapshotActions.filter(
-    (a) => a.growthPlanRole === "PRIMARY_COMMERCIAL" && a.marketScope === "CORE",
-  );
-  const sourceAction =
-    snapshotActions.find((a) => primary && a.id === primary.actionId) ||
-    snapshotActions.find((a) => primary && a.primaryKeyword === primary.primaryKeyword);
-  const knownGapStatuses = new Set([
-    "PROVEN_UNTAPPED",
-    "PROVEN_WEAK_COVERAGE",
-    "PROVEN_DEFEND_IMPROVE",
-    "NEW_MARKET_EVIDENCE",
-    "INSUFFICIENT_EVIDENCE",
-    "NOT_APPLICABLE",
-  ]);
-  const knownGapConfidence = new Set(["HIGH", "MEDIUM", "LOW", "NONE"]);
-  const provenUntappedHighInSnapshot = corePrimaryActions.some(
-    (a) => a.gapEvidenceStatus === "PROVEN_UNTAPPED" && a.gapConfidence === "HIGH",
-  );
-  const selectedMatchesSource =
-    Boolean(primary && sourceAction) &&
-    primary!.gapEvidenceStatus === sourceAction!.gapEvidenceStatus &&
-    primary!.gapConfidence === sourceAction!.gapConfidence;
-  const selectedProvenUntappedHigh =
-    primary?.gapEvidenceStatus === "PROVEN_UNTAPPED" && primary?.gapConfidence === "HIGH";
-  const selectedNewMarketLow =
-    primary?.gapEvidenceStatus === "NEW_MARKET_EVIDENCE" && primary?.gapConfidence === "LOW";
+  const gp01StatusesRetained = intelligence.gaps
+    .filter((item) => item.id.startsWith("gp01-"))
+    .every((item) => /NEW_MARKET_EVIDENCE\/LOW retained/i.test(item.currentState) || item.evidence.some((row) => /NEW_MARKET_EVIDENCE remains LOW|not upgraded/i.test(row)));
+  const competitorGaps = intelligence.gaps.filter((item) => item.competitorGap || item.type === "COMPETITOR_GAP");
 
-  record("national-primary-present", Boolean(primary), primary?.primaryKeyword || "none");
+  record("national-primary-present", Boolean(primary), primary?.title || primary?.primaryKeyword || "none");
   record(
-    "national-primary-keyword",
-    Boolean(
-      primary &&
-        primary.growthPlanRole === "PRIMARY_COMMERCIAL" &&
-        primary.marketScope === "CORE" &&
-        corePrimaryActions.some((a) => a.primaryKeyword === primary.primaryKeyword),
-    ),
-    primary ? `${primary.primaryKeyword} · ${primary.growthPlanRole}/${primary.marketScope}` : "none",
+    "national-primary-from-gaps",
+    Boolean(nationalPlan.plan.gapsConsumed && primary?.gapId && nationalPlan.plan.priorities.some((p) => p.gapId === primary.gapId)),
+    primary ? `${primary.gapId} · ${primary.evidenceClass}` : "none",
   );
   record(
     "gap-evidence-truthful",
-    selectedMatchesSource,
-    primary && sourceAction
-      ? `selected ${primary.gapEvidenceStatus}/${primary.gapConfidence} = source ${sourceAction.gapEvidenceStatus}/${sourceAction.gapConfidence}`
-      : `${primary?.gapEvidenceStatus}/${primary?.gapConfidence}`,
+    Boolean(primary && primary.evidenceReasons.length > 0 && primary.provenance && intelligence.gaps.some((g) => g.id === primary.gapId)),
+    primary ? `${primary.gapEvidenceStatus}/${primary.gapConfidence} from ${primary.gapId}` : "none",
   );
   record(
     "gap-not-upgraded",
-    Boolean(
-      selectedMatchesSource &&
-        knownGapStatuses.has(primary!.gapEvidenceStatus) &&
-        knownGapConfidence.has(primary!.gapConfidence) &&
-        (!selectedProvenUntappedHigh || provenUntappedHighInSnapshot) &&
-        (selectedProvenUntappedHigh || selectedNewMarketLow || selectedMatchesSource),
-    ),
-    selectedProvenUntappedHigh
-      ? "PROVEN_UNTAPPED/HIGH retained from snapshot"
-      : selectedNewMarketLow
-        ? "NEW_MARKET_EVIDENCE/LOW retained from snapshot"
-        : `${primary?.gapEvidenceStatus}/${primary?.gapConfidence} retained from snapshot`,
+    snapshotActions.filter((a) => a.gapEvidenceStatus === "NEW_MARKET_EVIDENCE" && a.gapConfidence === "LOW").length > 0
+      && gp01StatusesRetained
+      && competitorGaps.length === 0
+      && intelligence.competitorGapsFabricated === false,
+    `gp01 retained=${gp01StatusesRetained} competitorGaps=${competitorGaps.length}`,
   );
   record("national-market-identity", /United Kingdom|UK Community Pharmacy Digital Growth|national/i.test(`${nationalPlan.plan.primaryMarket} ${nationalPlan.plan.market}`), `${nationalPlan.plan.primaryMarket} / ${nationalPlan.plan.market}`);
   record("national-market-not-rotherham", !/rotherham/i.test(`${nationalPlan.plan.primaryMarket} ${nationalPlan.plan.market} ${nationalPlan.plan.executiveSummary.currentPosition}`), nationalPlan.plan.primaryMarket);
@@ -172,8 +139,8 @@ function main() {
   record("national-html-not-rotherham-market", !/commercial market: rotherham/i.test(nationalHtml) && !/serves Rotherham/i.test(nationalHtml), "Rotherham not commercial market");
   record(
     "national-html-primary-keyword",
-    Boolean(primary?.primaryKeyword) && nationalHtml.includes(primary!.primaryKeyword),
-    "primary keyword visible",
+    Boolean(primary?.title) && nationalHtml.includes(primary!.title),
+    "primary recommendation visible",
   );
   record("national-html-no-priority-empty", !nationalHtml.includes("No priority campaign yet"), "empty campaign copy absent");
   record("national-html-no-patient-service-cards", containsAny(nationalHtml, patientNames).length === 0, containsAny(nationalHtml, patientNames).join(", ") || "none");
@@ -206,7 +173,16 @@ function main() {
     "national GI does not use local Places copy",
   );
   record("national-gi-surfaces-search-intelligence", /Search Intelligence/i.test(nationalGi) && /Organic \/ SERP candidates/i.test(nationalGi), "SI evidence connected");
-  record("national-gi-surfaces-persisted-plan", /Persisted Growth Plan/i.test(nationalGi) && /does not yet consume the collected Search Intelligence/i.test(nationalGi), "honest GP-01 vs SI order");
+  record(
+    "national-gi-consumes-gaps",
+    /Growth opportunities \/ gaps/i.test(nationalGi) && /data-pc-gi-opportunity=/i.test(nationalGi),
+    "opportunity list from connected evidence",
+  );
+  record(
+    "national-gi-no-fabricated-competitor-gap",
+    /data-pc-gi-competitor-gaps="0"/.test(nationalGi) && !/data-pc-gi-type="COMPETITOR_GAP"/.test(nationalGi),
+    "no fabricated competitor gaps",
+  );
   record("local-gi-places-section", /Local Visibility/i.test(localGi) && /Google Places/i.test(localGi), "local GI unchanged");
 
   const nationalBuilder = renderCampaignBuilderPage("pharmaconnect", "choose");

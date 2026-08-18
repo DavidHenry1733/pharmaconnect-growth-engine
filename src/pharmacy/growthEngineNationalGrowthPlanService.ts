@@ -1,21 +1,26 @@
 /**
- * National Growth Plan authority — consumes persisted GP-01 snapshot only.
+ * National Growth Plan — consumes canonical Growth Intelligence / gap evidence.
  * Does not call DataForSEO, Google Places, or GSC.
  * Does not use the local pharmacy campaign recommendation engine.
+ * Does not generate content.
  */
+import fs from "node:fs";
+import path from "node:path";
+
+import type { CampaignReadinessItem } from "./growthEngineCampaignModel.ts";
+import { resolveTenantServiceCatalogue, type TenantServiceCatalogueEntry } from "./growthEngineTenantServiceCatalogue.ts";
 import { resolveGrowthPlatform } from "./growthPlatformResolverService.ts";
 import { resolvePrimaryMarket } from "./masterAdminMarketScopeService.ts";
-import { getPharmacyProjectConfigPath, safePharmacySlug } from "./pharmacyWorkspacePaths.ts";
-import { resolveTenantServiceCatalogue, type TenantServiceCatalogueEntry } from "./growthEngineTenantServiceCatalogue.ts";
-import { readGrowthPlanIntelligenceV1 } from "./growthPlanIntelligenceV1Service.ts";
-import { compareGapEvidenceQuality, type GrowthPlanAction, type GrowthPlanIntelligenceSnapshot } from "./growthPlanIntelligenceV1Model.ts";
-import type { CampaignReadinessItem } from "./growthEngineCampaignModel.ts";
-import fs from "node:fs";
-
-const ELIGIBLE_ROLES = new Set(["PRIMARY_COMMERCIAL", "SUPPORTING_COMMERCIAL", "AUTHORITY_SUPPORT"]);
+import {
+  actionableNationalGaps,
+  buildNationalGrowthIntelligence,
+} from "./nationalGrowthIntelligenceService.ts";
+import type { NationalGrowthGap, NationalSearchEvidenceSummary } from "./nationalGrowthIntelligenceModel.ts";
+import { getPharmacyProjectConfigPath, safePharmacySlug, WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
 
 export interface NationalPrimaryRecommendation {
   actionId: string;
+  gapId: string;
   actionType: string;
   title: string;
   primaryKeyword: string;
@@ -38,6 +43,26 @@ export interface NationalPrimaryRecommendation {
   recommendedPageType: string;
   recommendedIntent: string;
   recommendedNextStep: string;
+  commercialService: string | null;
+  evidenceClass: string;
+  type: string;
+  source: string;
+  provenance: string;
+}
+
+export interface NationalPlanPriority {
+  gapId: string;
+  recommendation: string;
+  evidence: string[];
+  commercialObjective: string;
+  action: string;
+  priority: string;
+  confidence: string;
+  evidenceClass: string;
+  type: string;
+  source: string;
+  provenance: string;
+  commercialService: string | null;
 }
 
 export interface NationalGrowthPlanView {
@@ -57,10 +82,16 @@ export interface NationalGrowthPlanView {
   };
   primary: NationalPrimaryRecommendation | null;
   alternatives: NationalPrimaryRecommendation[];
+  priorities: NationalPlanPriority[];
+  limitations: string[];
+  search: NationalSearchEvidenceSummary;
+  gapsConsumed: true;
+  planApproved: boolean;
   readiness: CampaignReadinessItem[];
   strategyReady: boolean;
   readyToGenerate: false;
   contentGenerationState: "not_implemented";
+  generationState: "not_started";
   intelligenceLoaded: boolean;
 }
 
@@ -80,75 +111,103 @@ function readProjectIdentity(slug: string): { businessName: string; primaryLocat
   }
 }
 
-function toRecommendation(action: GrowthPlanAction): NationalPrimaryRecommendation {
+function readPlanApproved(slug: string): boolean {
+  const file = path.join(WORKSPACE_ROOT, "data/growth-engine", `${safePharmacySlug(slug)}-workflow.json`);
+  if (!fs.existsSync(file)) return false;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { acknowledgedSteps?: Record<string, string> };
+    return Boolean(raw.acknowledgedSteps?.["growth-plan"]);
+  } catch {
+    return false;
+  }
+}
+
+function gapEvidenceStatus(item: NationalGrowthGap): string {
+  if (item.evidenceClass === "PROVEN_GAP") {
+    return item.type === "KEYWORD_VISIBILITY_GAP" ? "PROVEN_WEAK_COVERAGE" : "PROVEN_UNTAPPED";
+  }
+  if (item.evidenceClass === "INSUFFICIENT_COMPETITOR_EVIDENCE" || item.type === "INSUFFICIENT_COMPETITOR_EVIDENCE") {
+    return "INSUFFICIENT_EVIDENCE";
+  }
+  return "NEW_MARKET_EVIDENCE";
+}
+
+function toRecommendation(item: NationalGrowthGap): NationalPrimaryRecommendation {
   return {
-    actionId: action.id,
-    actionType: action.actionType,
-    title: action.title,
-    primaryKeyword: action.primaryKeyword,
-    supportingKeywords: [...(action.supportingKeywords || [])],
-    combinedSearchDemand: action.combinedSearchDemand,
-    searchVolume: action.searchVolume,
-    priority: action.priority,
-    actionScore: action.actionScore,
-    marketScope: action.marketScope,
-    growthPlanRole: action.growthPlanRole,
-    gapEvidenceStatus: action.gapEvidenceStatus,
-    gapConfidence: action.gapConfidence,
-    confidence: action.confidence,
-    competitorCount: action.competitorCount,
-    bestCompetitorDomain: action.bestCompetitorDomain,
-    bestCompetitorPosition: action.bestCompetitorPosition,
-    bestRankingUrl: action.bestRankingUrl,
-    rationale: action.rationale,
-    evidenceReasons: [...(action.evidenceReasons || [])],
-    recommendedPageType: action.recommendedPageType,
-    recommendedIntent: action.recommendedIntent,
-    recommendedNextStep: action.recommendedNextStep,
+    actionId: item.id,
+    gapId: item.id,
+    actionType: item.recommendedPageType.replace(/\s+/g, "_"),
+    title: item.recommendedAction,
+    primaryKeyword: item.commercialService || item.type.replace(/_/g, " ").toLowerCase(),
+    supportingKeywords: [],
+    combinedSearchDemand: 0,
+    searchVolume: null,
+    priority: item.priority,
+    actionScore: item.priority === "HIGH" ? 80 : item.priority === "MEDIUM" ? 55 : 30,
+    marketScope: "CORE",
+    growthPlanRole: "PRIMARY_COMMERCIAL",
+    gapEvidenceStatus: gapEvidenceStatus(item),
+    gapConfidence: item.confidence,
+    confidence: item.confidence,
+    competitorCount: item.competitorGap ? 1 : 0,
+    bestCompetitorDomain: null,
+    bestCompetitorPosition: null,
+    bestRankingUrl: null,
+    rationale: item.whyItMatters,
+    evidenceReasons: item.evidence,
+    recommendedPageType: item.recommendedPageType,
+    recommendedIntent: item.commercialService ? `Strengthen ${item.commercialService}` : "Strengthen commercial visibility",
+    recommendedNextStep: item.recommendedAction,
+    commercialService: item.commercialService,
+    evidenceClass: item.evidenceClass,
+    type: item.type,
+    source: item.source,
+    provenance: `${item.provenance.evidenceSource} · ${item.provenance.authority} · ${item.provenance.sourceSystem}`,
   };
 }
 
-function selectEligible(snapshot: GrowthPlanIntelligenceSnapshot | null): GrowthPlanAction[] {
-  if (!snapshot) return [];
-  return snapshot.actions.filter((action) => ELIGIBLE_ROLES.has(action.growthPlanRole));
-}
-
-const PRIORITY_RANK: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
-
-function selectPrimary(eligible: GrowthPlanAction[]): GrowthPlanAction | null {
-  const corePrimary = eligible.filter((a) => a.growthPlanRole === "PRIMARY_COMMERCIAL" && a.marketScope === "CORE");
-  const primaryCommercial = eligible.filter((a) => a.growthPlanRole === "PRIMARY_COMMERCIAL");
-  const pool = corePrimary.length ? corePrimary : primaryCommercial.length ? primaryCommercial : eligible;
-  const sorted = [...pool].sort((a, b) => {
-    const evidence = compareGapEvidenceQuality(a, b);
-    if (evidence) return evidence;
-    const priorityDelta = (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0);
-    if (priorityDelta) return priorityDelta;
-    if (b.actionScore !== a.actionScore) return b.actionScore - a.actionScore;
-    if (b.combinedSearchDemand !== a.combinedSearchDemand) return b.combinedSearchDemand - a.combinedSearchDemand;
-    if (b.competitorCount !== a.competitorCount) return b.competitorCount - a.competitorCount;
-    const posA = a.bestCompetitorPosition ?? 999;
-    const posB = b.bestCompetitorPosition ?? 999;
-    if (posA !== posB) return posA - posB;
-    return a.primaryKeyword.localeCompare(b.primaryKeyword);
-  });
-  return sorted[0] || null;
+function toPriority(item: NationalGrowthGap): NationalPlanPriority {
+  return {
+    gapId: item.id,
+    recommendation: item.recommendedAction,
+    evidence: item.evidence,
+    commercialObjective: item.commercialService
+      ? `Support ${item.commercialService}`
+      : "Strengthen national digital-growth visibility",
+    action: item.recommendedAction,
+    priority: item.priority,
+    confidence: item.confidence,
+    evidenceClass: item.evidenceClass,
+    type: item.type,
+    source: item.source,
+    provenance: `${item.provenance.evidenceSource} · ${item.provenance.authority}`,
+    commercialService: item.commercialService,
+  };
 }
 
 function buildNationalReadiness(
-  snapshot: GrowthPlanIntelligenceSnapshot | null,
+  searchCollected: boolean,
+  gapsLoaded: boolean,
   services: TenantServiceCatalogueEntry[],
-  primary: GrowthPlanAction | null,
+  primary: NationalPrimaryRecommendation | null,
+  approved: boolean,
 ): CampaignReadinessItem[] {
-  const intelligenceLoaded = Boolean(snapshot);
   return [
     {
-      id: "national-intelligence",
-      label: "National commercial intelligence",
-      complete: intelligenceLoaded,
-      detail: intelligenceLoaded
-        ? `${snapshot!.summary.totalActions} persisted Growth Plan actions · source ${snapshot!.intelligenceSourceVersion}`
-        : "Persisted national Growth Plan Intelligence was not found",
+      id: "search-intelligence",
+      label: "Search Intelligence collected",
+      complete: searchCollected,
+      detail: searchCollected
+        ? "Current Search Intelligence snapshot is collected and feeds Growth Intelligence."
+        : "Collect Search Intelligence before treating the Growth Plan as evidence-led.",
+    },
+    {
+      id: "growth-intelligence-gaps",
+      label: "Growth Intelligence gaps connected",
+      complete: gapsLoaded,
+      detail: gapsLoaded
+        ? "Growth Plan recommendations are selected from Growth Intelligence gaps."
+        : "No actionable Growth Intelligence gaps are available.",
     },
     {
       id: "national-market",
@@ -169,8 +228,16 @@ function buildNationalReadiness(
       label: "Eligible national recommendation",
       complete: Boolean(primary),
       detail: primary
-        ? `${primary.primaryKeyword} · ${primary.growthPlanRole} · gap ${primary.gapEvidenceStatus}/${primary.gapConfidence}`
-        : "No PRIMARY_COMMERCIAL / SUPPORTING_COMMERCIAL / AUTHORITY_SUPPORT action in the persisted snapshot",
+        ? `${primary.title} · ${primary.evidenceClass} · gap ${primary.gapEvidenceStatus}/${primary.gapConfidence}`
+        : "No evidence-backed national gap is ready for a recommendation",
+    },
+    {
+      id: "plan-approval",
+      label: "Growth Plan approved",
+      complete: approved,
+      detail: approved
+        ? "Plan acknowledged. National content generation remains blocked."
+        : "Approve this Growth Plan before any content generation.",
     },
     {
       id: "national-generation",
@@ -189,43 +256,44 @@ export function buildNationalGrowthPlanView(slug: string): NationalGrowthPlanVie
 
   const identity = readProjectIdentity(slug);
   const catalogue = resolveTenantServiceCatalogue(slug);
-  const snapshot = readGrowthPlanIntelligenceV1(slug);
-  const eligible = selectEligible(snapshot);
-  const primaryAction = selectPrimary(eligible);
-  const primary = primaryAction ? toRecommendation(primaryAction) : null;
-  const alternatives = eligible
-    .filter((a) => a.id !== primaryAction?.id)
-    .slice(0, 3)
-    .map(toRecommendation);
+  const intelligence = buildNationalGrowthIntelligence(slug);
+  const actionable = actionableNationalGaps(intelligence);
+  const primaryGap = actionable[0] || null;
+  const primary = primaryGap ? toRecommendation(primaryGap) : null;
+  const alternatives = actionable.slice(1, 4).map(toRecommendation);
+  const priorities = actionable.map(toPriority);
+  const approved = readPlanApproved(slug);
   const primaryMarket = resolvePrimaryMarket(slug) || identity.primaryLocation || "United Kingdom";
-  const market = snapshot?.market || "UK Community Pharmacy Digital Growth";
-  const readiness = buildNationalReadiness(snapshot, catalogue.services, primaryAction);
+  const market = "UK Community Pharmacy Digital Growth";
+  const searchCollected =
+    intelligence.search.status === "collected"
+    || intelligence.search.status === "empty"
+    || intelligence.search.status === "partial";
+  const readiness = buildNationalReadiness(searchCollected, actionable.length > 0, catalogue.services, primary, approved);
   const strategyReady = Boolean(primary);
 
-  const currentPosition = `${identity.businessName} is a national digital-growth provider serving UK community pharmacies. Commercial market: ${primaryMarket} (${market}). Registered office location does not define this market.`;
+  const currentPosition = `${identity.businessName} is a national digital-growth provider serving UK community pharmacies. Commercial market: ${primaryMarket} (${market}). Search Intelligence: ${intelligence.search.customerKeywords} ranking keywords, ${intelligence.search.organicCandidates} organic/SERP candidates, ${intelligence.search.qualifiedCommercialCompetitors} qualified commercial competitors.`;
 
   const executiveSummary = primary
     ? {
         currentPosition,
-        primaryOpportunity: `${primary.recommendedPageType}: ${primary.primaryKeyword}`,
+        primaryOpportunity: primary.title,
         whyRecommended: primary.rationale,
-        estimatedBusinessBenefit: `${primary.recommendedIntent}. Combined search demand ${primary.combinedSearchDemand}. Gap evidence remains ${primary.gapEvidenceStatus} at ${primary.gapConfidence} confidence — this is not upgraded.`,
+        estimatedBusinessBenefit: `${primary.recommendedIntent}. Evidence class ${primary.evidenceClass}. Generation stays blocked until this plan is approved, and national generation is not implemented.`,
       }
     : {
         currentPosition,
-        primaryOpportunity: snapshot
-          ? "No eligible national commercial action in the persisted snapshot"
-          : "National Growth Plan Intelligence has not been loaded",
+        primaryOpportunity: "No evidence-backed national action yet",
         whyRecommended:
-          "The national plan only recommends actions already classified as PRIMARY_COMMERCIAL, SUPPORTING_COMMERCIAL, or AUTHORITY_SUPPORT in persisted GP-01 intelligence.",
-        estimatedBusinessBenefit: "Complete national intelligence persistence before treating a recommendation as ready.",
+          "The national plan only recommends actions taken from Growth Intelligence gaps. It does not jump from keywords to content.",
+        estimatedBusinessBenefit: "Complete Search Intelligence and gap review before treating a recommendation as ready.",
       };
 
   return {
     platform: "national",
     slug: safePharmacySlug(slug),
-    generatedAt: snapshot?.generatedAt || new Date().toISOString(),
-    subjectDomain: snapshot?.subjectDomain || "",
+    generatedAt: intelligence.generatedAt,
+    subjectDomain: intelligence.subjectDomain,
     market,
     primaryMarket,
     businessName: identity.businessName,
@@ -233,10 +301,16 @@ export function buildNationalGrowthPlanView(slug: string): NationalGrowthPlanVie
     executiveSummary,
     primary,
     alternatives,
+    priorities,
+    limitations: intelligence.limitations,
+    search: intelligence.search,
+    gapsConsumed: true,
+    planApproved: approved,
     readiness,
     strategyReady,
     readyToGenerate: false,
     contentGenerationState: "not_implemented",
-    intelligenceLoaded: Boolean(snapshot),
+    generationState: "not_started",
+    intelligenceLoaded: intelligence.gaps.length > 0,
   };
 }
