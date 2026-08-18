@@ -184,7 +184,7 @@ router.post("/growth-engine/:slug/search-intelligence/collect", async (req, res)
     const force = req.body?.force === true || req.body?.force === "true" || req.query.force === "1";
     const snapshot = await collectNationalSearchIntelligence(slug, { force });
     res.json({
-      ok: snapshot.status === "collected" || snapshot.status === "empty",
+      ok: snapshot.status === "collected" || snapshot.status === "empty" || snapshot.status === "partial",
       snapshot,
       reusedExistingSnapshot: snapshot.reusedExistingSnapshot,
       keywordCount: snapshot.customerKeywords.length,

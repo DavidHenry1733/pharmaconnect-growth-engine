@@ -9,7 +9,7 @@ import {
   DATAFORSEO_LABS_ENDPOINTS,
   getDomainRankedKeywordsWithCost,
 } from "./dataForSeoRankedKeywordIntelligenceService.ts";
-import { searchNationalGoogleOrganic } from "./dataForSeoNationalSearchAdapter.ts";
+import { DATAFORSEO_SERP_ENDPOINT, executeNationalGoogleOrganic } from "./dataForSeoNationalSearchAdapter.ts";
 import { buildNationalCompetitorDiscoveryQueries } from "./nationalCompetitorDiscoveryQueryService.ts";
 import { qualifyNationalCompetitorV2 } from "./nationalCompetitorQualificationV2Service.ts";
 import { resolveNationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
@@ -29,6 +29,8 @@ import {
 import {
   NI03B_LIMITS,
   NATIONAL_SEARCH_INTELLIGENCE_VERSION,
+  PARTIAL_COLLECTION_CUSTOMER_MESSAGE,
+  isUsableNationalSearchIntelligenceStatus,
   type NationalCustomerRankingKeyword,
   type NationalOrganicSearchCompetitor,
   type NationalSearchIntelligenceSnapshot,
@@ -37,7 +39,7 @@ import { writeNationalCompetitorDiscovery } from "./nationalCompetitorDiscoveryS
 import { emptyNationalCompetitorDiscoveryResult } from "./nationalCompetitorDiscoveryModel.ts";
 import { resolveDataForSeoSearchLocationFromSubject } from "./dataForSeoSearchLocationResolver.ts";
 
-const SERP_ENDPOINT = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
+const SERP_ENDPOINT = DATAFORSEO_SERP_ENDPOINT;
 
 const inFlight = new Map<string, Promise<NationalSearchIntelligenceSnapshot>>();
 
@@ -102,6 +104,7 @@ function snapshotShell(input: {
   keywords: NationalCustomerRankingKeyword[];
   competitors: NationalOrganicSearchCompetitor[];
   endpoints: NationalSearchIntelligenceSnapshot["endpoints"];
+  serpAttempts?: NationalSearchIntelligenceSnapshot["serpAttempts"];
 }): NationalSearchIntelligenceSnapshot {
   const subject = resolveNationalIntelligenceSubject(input.slug);
   const capturedAt = input.capturedAt || new Date().toISOString();
@@ -188,6 +191,7 @@ function snapshotShell(input: {
       }),
     customerKeywords: input.keywords,
     organicCompetitors: input.competitors,
+    serpAttempts: input.serpAttempts || [],
     summary: summarise(input.keywords, input.competitors),
     nextStage: nextStage(),
   };
@@ -242,6 +246,7 @@ function persistSnapshot(snapshot: NationalSearchIntelligenceSnapshot): void {
     tasks: snapshot.costs.tasks,
     totalCost: snapshot.costs.totalCost,
     serpLocation: snapshot.serpLocation,
+    serpAttempts: snapshot.serpAttempts,
   });
 }
 
@@ -289,6 +294,7 @@ export function readNationalSearchIntelligence(slug: string): NationalSearchInte
   snapshot.reusedExistingSnapshot = false;
   if (!snapshot.subjectDomain) snapshot.subjectDomain = subject.subjectDomain;
   if (!snapshot.businessName) snapshot.businessName = subject.businessName;
+  if (!Array.isArray(snapshot.serpAttempts)) snapshot.serpAttempts = [];
   if (fixture) {
     snapshot.liveExecution = false;
     snapshot.authority = "FIXTURE_ONLY";
@@ -372,7 +378,7 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
   if (!force && fs.existsSync(dataFile)) {
     const existing = json<NationalSearchIntelligenceSnapshot>(dataFile);
     const source = existing.provenance?.evidenceSource;
-    if (existing.status === "collected" || existing.status === "empty") {
+    if (isUsableNationalSearchIntelligenceStatus(existing.status)) {
       if (source === "DATAFORSEO_LIVE" || source === "DATAFORSEO_PERSISTED" || existing.liveExecution) {
         return { ...existing, reusedExistingSnapshot: true, liveExecution: false };
       }
@@ -391,29 +397,41 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
     { endpoint: SERP_ENDPOINT, requests: 0, tasks: 0, cost: 0 },
   ];
   const ownDomains = [subject.subjectDomain].filter(Boolean);
+  const serpAttempts: NationalSearchIntelligenceSnapshot["serpAttempts"] = [];
 
-  const ranked = await getDomainRankedKeywordsWithCost({
-    domain: subject.subjectDomain,
-    locationName: "United Kingdom",
-    languageCode: subject.languageCode || "en",
-    limit: NI03B_LIMITS.customerRankedKeywords,
-    orderBy: ["keyword_data.keyword_info.search_volume,desc"],
-  });
-  endpoints[0].requests = 1;
-  endpoints[0].tasks = ranked.tasks;
-  endpoints[0].cost = ranked.cost;
-  const keywords: NationalCustomerRankingKeyword[] = ranked.rows.slice(0, NI03B_LIMITS.customerRankedKeywords).map((row) => ({
-    keyword: row.keyword,
-    position: row.position,
-    rankingUrl: row.url,
-    searchVolume: row.searchVolume,
-    cpc: row.cpc,
-    competition: row.competition,
-    capturedAt,
-    sourceEndpoint: ranked.endpoint,
-    evidenceSource: "DATAFORSEO_LIVE",
-    calculated: false,
-  }));
+  let keywords: NationalCustomerRankingKeyword[] = [];
+  try {
+    const ranked = await getDomainRankedKeywordsWithCost({
+      domain: subject.subjectDomain,
+      locationName: "United Kingdom",
+      languageCode: subject.languageCode || "en",
+      limit: NI03B_LIMITS.customerRankedKeywords,
+      orderBy: ["keyword_data.keyword_info.search_volume,desc"],
+    });
+    endpoints[0].requests = 1;
+    endpoints[0].tasks = ranked.tasks;
+    endpoints[0].cost = ranked.cost;
+    keywords = ranked.rows.slice(0, NI03B_LIMITS.customerRankedKeywords).map((row) => ({
+      keyword: row.keyword,
+      position: row.position,
+      rankingUrl: row.url,
+      searchVolume: row.searchVolume,
+      cpc: row.cpc,
+      competition: row.competition,
+      capturedAt,
+      sourceEndpoint: ranked.endpoint,
+      evidenceSource: "DATAFORSEO_LIVE",
+      calculated: false,
+    }));
+  } catch (err) {
+    const failed = emptySnapshot(
+      slug,
+      "error",
+      err instanceof Error ? err.message : "DataForSEO ranked keyword collection failed.",
+    );
+    persistSnapshot(failed);
+    return failed;
+  }
 
   const queries = buildNationalCompetitorDiscoveryQueries({
     businessName: subject.businessName,
@@ -431,18 +449,40 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
     sourceQueries: string[];
   }>();
 
+  let serpQueryFailed = false;
   for (const query of queries) {
-    const serp = await searchNationalGoogleOrganic({
+    const executed = await executeNationalGoogleOrganic({
       query: query.query,
       marketCountry: subject.country,
       locationCode: serpLocation.locationCode,
       languageCode: subject.languageCode || "en",
       depth: NI03B_LIMITS.serpDepth,
     });
-    endpoints[1].requests += 1;
-    endpoints[1].tasks += 1;
-    endpoints[1].cost += typeof serp.cost === "number" ? serp.cost : 0;
-    for (const row of serp.results) {
+    for (const attempt of executed.attempts) {
+      endpoints[1].requests += 1;
+      endpoints[1].tasks += 1;
+      endpoints[1].cost += typeof attempt.cost === "number" ? attempt.cost : 0;
+      serpAttempts.push({
+        query: attempt.query,
+        endpoint: attempt.endpoint,
+        taskId: attempt.taskId,
+        taskStatusCode: attempt.taskStatusCode,
+        taskStatusMessage: attempt.taskStatusMessage,
+        cost: attempt.cost,
+        successful: attempt.successful,
+        attemptNumber: attempt.attemptNumber,
+        capturedAt: attempt.capturedAt,
+      });
+    }
+    if (executed.fatal) {
+      serpQueryFailed = true;
+      break;
+    }
+    if (!executed.successful) {
+      serpQueryFailed = true;
+      continue;
+    }
+    for (const row of executed.results) {
       const domain = String(row.domain || "").replace(/^www\./, "").toLowerCase();
       if (!domain || ownDomains.includes(domain) || (subject.subjectDomain && domain.endsWith(`.${subject.subjectDomain}`))) continue;
       const previous = byDomain.get(domain);
@@ -479,23 +519,36 @@ async function collectInner(slug: string, force: boolean): Promise<NationalSearc
     }))
     .filter((row): row is NationalOrganicSearchCompetitor => Boolean(row));
 
-  const status: NationalSearchIntelligenceSnapshot["status"] =
-    keywords.length || competitors.length ? "collected" : "empty";
+  const usable = keywords.length > 0 || competitors.length > 0;
+  let status: NationalSearchIntelligenceSnapshot["status"];
+  let lastError: string | null = null;
+  if (!usable && serpQueryFailed) {
+    status = "error";
+    lastError = "Search intelligence collection could not complete. No usable live evidence was returned.";
+  } else if (!usable) {
+    status = "empty";
+  } else if (serpQueryFailed) {
+    status = "partial";
+    lastError = PARTIAL_COLLECTION_CUSTOMER_MESSAGE;
+  } else {
+    status = "collected";
+  }
   const snapshot = snapshotShell({
     slug,
     liveExecution: true,
     fixture: false,
     recovered: false,
     status,
-    lastError: null,
+    lastError,
     reusedExistingSnapshot: false,
     capturedAt,
     keywords,
     competitors,
     endpoints,
+    serpAttempts,
   });
   persistSnapshot(snapshot);
-  persistCompetitorDiscovery(snapshot);
+  if (status !== "error") persistCompetitorDiscovery(snapshot);
   return snapshot;
 }
 

@@ -22,8 +22,18 @@ export type NationalSearchIntelligenceStatus =
   | "not_collected"
   | "collecting"
   | "collected"
+  | "partial"
   | "empty"
   | "error";
+
+export const PARTIAL_COLLECTION_CUSTOMER_MESSAGE =
+  "Search intelligence was collected, but one or more search-engine requests could not be completed. Available evidence is shown below.";
+
+export function isUsableNationalSearchIntelligenceStatus(
+  status: NationalSearchIntelligenceStatus,
+): boolean {
+  return status === "collected" || status === "partial" || status === "empty";
+}
 
 export interface NationalCustomerRankingKeyword {
   keyword: string;
@@ -79,6 +89,17 @@ export interface NationalSearchIntelligenceSnapshot {
   authority: NationalEvidenceAuthority;
   customerKeywords: NationalCustomerRankingKeyword[];
   organicCompetitors: NationalOrganicSearchCompetitor[];
+  serpAttempts: Array<{
+    query: string;
+    endpoint: string;
+    taskId: string | null;
+    taskStatusCode: number | null;
+    taskStatusMessage: string | null;
+    cost: number | null;
+    successful: boolean;
+    attemptNumber: number;
+    capturedAt: string;
+  }>;
   summary: {
     rankingKeywordCount: number;
     top10Count: number;

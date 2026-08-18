@@ -40,3 +40,35 @@ export interface NationalSearchProvider {
   id: string;
   search(request: NationalSearchRequest): Promise<NationalSearchResponse>;
 }
+
+export const DATAFORSEO_TASK_OK = 20000;
+export const DATAFORSEO_TASK_INTERNAL_SE_ERROR = 40101;
+export const MAX_DATAFORSEO_INTERNAL_SE_RETRIES = 1;
+
+export interface NationalSearchTaskAttempt {
+  query: string;
+  endpoint: string;
+  taskId: string | null;
+  taskStatusCode: number | null;
+  taskStatusMessage: string | null;
+  cost: number | null;
+  successful: boolean;
+  retryable: boolean;
+  attemptNumber: number;
+  capturedAt: string;
+}
+
+export interface NationalSearchExecutionResult {
+  provider: string;
+  query: string;
+  marketCountry: string;
+  locationCode: number;
+  capturedAt: string;
+  successful: boolean;
+  fatal: boolean;
+  fatalMessage: string | null;
+  organicResultCount: number;
+  results: NationalSearchEvidence[];
+  attempts: NationalSearchTaskAttempt[];
+  cost: number;
+}

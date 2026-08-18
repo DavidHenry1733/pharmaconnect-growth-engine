@@ -11,6 +11,7 @@ import {
   readNationalSearchIntelligence,
 } from "./nationalSearchIntelligenceV1Service.ts";
 import type { NationalSearchIntelligenceSnapshot } from "./nationalSearchIntelligenceV1Model.ts";
+import { PARTIAL_COLLECTION_CUSTOMER_MESSAGE } from "./nationalSearchIntelligenceV1Model.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -37,6 +38,7 @@ function authorityLabel(snapshot: NationalSearchIntelligenceSnapshot): string {
 
 function statusLabel(snapshot: NationalSearchIntelligenceSnapshot): string {
   if (snapshot.status === "collected") return "Intelligence collected";
+  if (snapshot.status === "partial") return "Intelligence collected with incomplete search-engine results";
   if (snapshot.status === "empty") return "Collected — no ranking keywords or search competitors returned";
   if (snapshot.status === "error") return "Collection failed";
   if (snapshot.status === "collecting") return "Collecting";
@@ -59,7 +61,7 @@ export function renderNationalSearchIntelligencePage(
   }
 
   const snapshot = readNationalSearchIntelligence(slug);
-  const collected = snapshot.status === "collected" || snapshot.status === "empty";
+  const collected = snapshot.status === "collected" || snapshot.status === "empty" || snapshot.status === "partial";
   const sourceLabel = authorityLabel(snapshot);
   const keywords = snapshot.customerKeywords.slice(0, 25);
   const competitors = snapshot.organicCompetitors.slice(0, 12);
@@ -115,7 +117,7 @@ export function renderNationalSearchIntelligencePage(
 <div class="ge-card" data-ni03b-section="provenance"><h3>Source / provenance</h3><p>${esc(sourceLabel)}</p><p class="ge-meta">${esc(snapshot.provenance.evidenceSource)} · ${esc(snapshot.authority)}</p></div>
 <div class="ge-card" data-ni03b-section="cost"><h3>Collection cost</h3><p>DataForSEO ${money(snapshot.costs.totalCost)}</p><p class="ge-meta">${snapshot.costs.requests} request(s) · ${snapshot.costs.tasks} task(s)</p></div>
 </div>
-${snapshot.lastError ? `<p class="ge-lead" style="color:#b45309" data-ni03b-section="error">${esc(snapshot.lastError)}</p>` : ""}
+${snapshot.status === "partial" ? `<p class="ge-lead" style="color:#b45309" data-ni03b-section="partial">${esc(PARTIAL_COLLECTION_CUSTOMER_MESSAGE)}</p>` : snapshot.lastError && snapshot.status !== "partial" ? `<p class="ge-lead" style="color:#b45309" data-ni03b-section="error">${esc(snapshot.lastError)}</p>` : ""}
 <p style="margin-top:16px" data-ni03b-section="explicit-refresh">
 <button class="ge-btn ge-btn-primary" type="button" id="ni03bCollect">${collected ? "Refresh Search Intelligence" : "Collect Search Intelligence"}</button>
 <span id="ni03bCollectStatus" class="ge-meta" style="margin-left:10px"></span>

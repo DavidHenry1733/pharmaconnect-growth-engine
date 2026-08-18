@@ -19,6 +19,7 @@ import * as pageRenderersMod from "../src/pharmacy/growthEnginePageRenderers.ts"
 import * as frameworkMod from "../src/pharmacy/growthEngineFrameworkService.ts";
 import * as localMarketPageMod from "../src/pharmacy/growthEngineLocalMarketPage.ts";
 import * as locationResolverMod from "../src/pharmacy/dataForSeoSearchLocationResolver.ts";
+import * as searchProviderMod from "../src/pharmacy/nationalSearchProviderModel.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -39,6 +40,7 @@ const pageRenderers = exported(pageRenderersMod);
 const framework = exported(frameworkMod);
 const localMarketPage = exported(localMarketPageMod);
 const locationResolver = exported(locationResolverMod);
+const searchProvider = exported(searchProviderMod);
 
 let pass = 0;
 let fail = 0;
@@ -683,8 +685,9 @@ check(
   "collect-persists-organic-competitors",
   liveCollect.organicCompetitors.length >= 1
     && liveCollect.organicCompetitors[0]?.whyIdentified.length > 0
-    && liveCollect.organicCompetitors[0]?.verified === false,
-  `${liveCollect.organicCompetitors.length} competitors`,
+    && liveCollect.organicCompetitors[0]?.verified === false
+    && liveCollect.status === "collected",
+  `${liveCollect.status} competitors=${liveCollect.organicCompetitors.length}`,
 );
 
 const persistedRead = searchService.readNationalSearchIntelligence(tenantBSlug);
@@ -694,6 +697,211 @@ check(
     && persistedRead.provenance.evidenceSource === "DATAFORSEO_PERSISTED"
     && persistedRead.customerKeywords.length === 2,
   `${persistedRead.authority}/${persistedRead.provenance.evidenceSource}`,
+);
+
+check(
+  "max-40101-retries-is-one",
+  searchProvider.MAX_DATAFORSEO_INTERNAL_SE_RETRIES === 1
+    && searchProvider.DATAFORSEO_TASK_INTERNAL_SE_ERROR === 40101,
+  String(searchProvider.MAX_DATAFORSEO_INTERNAL_SE_RETRIES),
+);
+
+function rankedOkPayload() {
+  return {
+    status_code: 20000,
+    tasks: [{
+      status_code: 20000,
+      cost: 0.0123,
+      result: [{
+        items: [{
+          keyword_data: {
+            keyword: "pharmacy website design uk",
+            keyword_info: { search_volume: 210, cpc: 4.2, competition: 0.51 },
+          },
+          ranked_serp_element: {
+            serp_item: {
+              rank_absolute: 7,
+              url: "https://example-national-search-b.co.uk/websites",
+            },
+          },
+        }],
+      }],
+    }],
+  };
+}
+
+function serpOkPayload(domain: string, cost = 0.0015) {
+  return {
+    status_code: 20000,
+    tasks: [{
+      id: `ok-${domain}`,
+      status_code: 20000,
+      status_message: "Ok.",
+      cost,
+      result: [{
+        items: [{
+          type: "organic",
+          rank_absolute: 2,
+          domain,
+          url: `https://${domain}/pharmacy-websites`,
+          title: "Pharmacy Website Design & SEO Agency UK",
+          description: "We provide pharmacy website design, pharmacy SEO and digital marketing services for UK community pharmacies.",
+        }],
+      }],
+    }],
+  };
+}
+
+function serp40101Payload(cost = 0.002) {
+  return {
+    status_code: 20000,
+    tasks: [{
+      id: "task-40101",
+      status_code: 40101,
+      status_message: "Internal SE Server Error",
+      cost,
+    }],
+  };
+}
+
+function writeNationalTenant(slug: string, domain: string): string {
+  const file = path.join(ROOT, "config/projects", `${slug}.json`);
+  fs.writeFileSync(file, JSON.stringify({
+    clientSlug: slug,
+    businessName: "National Search Tenant",
+    domain: `https://${domain}`,
+    growthPlatform: "national",
+    primaryLocation: "United Kingdom",
+    country: "United Kingdom",
+    languageCode: "en",
+    services: ["National SEO"],
+  }, null, 2) + "\n");
+  return file;
+}
+
+async function collectWithSerpQueue(slug: string, queue: object[], rankedAuthFail = false) {
+  const remaining = [...queue];
+  let rankedCalls = 0;
+  let serpCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    fetchCalls += 1;
+    const url = String(input);
+    fetchUrls.push(url);
+    if (url.includes("ranked_keywords")) {
+      rankedCalls += 1;
+      if (rankedAuthFail) {
+        return new Response(JSON.stringify({ status_code: 40100, status_message: "You are not authorized." }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(rankedOkPayload()), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    serpCalls += 1;
+    const next = remaining.shift() || serp40101Payload();
+    return new Response(JSON.stringify(next), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const snapshot = await searchService.collectNationalSearchIntelligence(slug, { force: true });
+  return { snapshot, rankedCalls, serpCalls, unusedQueue: remaining.length };
+}
+
+const tenantRetry = "ni03b-resilience-retry";
+const tenantPartial = "ni03b-resilience-partial";
+const tenantAllFail = "ni03b-resilience-allfail";
+const tenantAuth = "ni03b-resilience-auth";
+const extraTenantFiles = [
+  writeNationalTenant(tenantRetry, "example-national-retry.co.uk"),
+  writeNationalTenant(tenantPartial, "example-national-partial.co.uk"),
+  writeNationalTenant(tenantAllFail, "example-national-allfail.co.uk"),
+  writeNationalTenant(tenantAuth, "example-national-auth.co.uk"),
+];
+
+const retryCase = await collectWithSerpQueue(tenantRetry, [
+  serp40101Payload(0.002),
+  serpOkPayload("retry-success-agency.co.uk"),
+  serpOkPayload("second-query-agency.co.uk"),
+  serpOkPayload("third-query-agency.co.uk"),
+]);
+check(
+  "resilience-40101-retry-then-collected",
+  retryCase.snapshot.status === "collected"
+    && retryCase.serpCalls === 4
+    && retryCase.snapshot.serpAttempts.filter((row) => row.taskStatusCode === 40101).length === 1
+    && retryCase.snapshot.serpAttempts.filter((row) => row.successful).length === 3
+    && Math.abs(retryCase.snapshot.costs.totalCost - (0.0123 + 0.002 + 0.0015 * 3)) < 1e-9
+    && retryCase.snapshot.customerKeywords.length === 1
+    && retryCase.snapshot.organicCompetitors.length >= 1,
+  `${retryCase.snapshot.status} serpCalls=${retryCase.serpCalls} cost=${retryCase.snapshot.costs.totalCost} attempts=${retryCase.snapshot.serpAttempts.length}`,
+);
+
+const partialCase = await collectWithSerpQueue(tenantPartial, [
+  serp40101Payload(0.002),
+  serp40101Payload(0.002),
+  serpOkPayload("partial-two-agency.co.uk"),
+  serpOkPayload("partial-three-agency.co.uk"),
+]);
+check(
+  "resilience-40101-exhausted-still-runs-remaining",
+  partialCase.snapshot.status === "partial"
+    && partialCase.serpCalls === 4
+    && partialCase.snapshot.serpAttempts.filter((row) => row.taskStatusCode === 40101).length === 2
+    && partialCase.snapshot.customerKeywords.length === 1
+    && partialCase.snapshot.organicCompetitors.length >= 1
+    && Math.abs(partialCase.snapshot.costs.totalCost - (0.0123 + 0.002 * 2 + 0.0015 * 2)) < 1e-9
+    && /one or more search-engine requests could not be completed/i.test(partialCase.snapshot.lastError || ""),
+  `${partialCase.snapshot.status} serpCalls=${partialCase.serpCalls} competitors=${partialCase.snapshot.organicCompetitors.length} cost=${partialCase.snapshot.costs.totalCost}`,
+);
+check(
+  "resilience-partial-not-labelled-collected",
+  partialCase.snapshot.status !== "collected" && searchModel.isUsableNationalSearchIntelligenceStatus(partialCase.snapshot.status),
+  partialCase.snapshot.status,
+);
+
+const allFail = await collectWithSerpQueue(tenantAllFail, [
+  serp40101Payload(0.002),
+  serp40101Payload(0.002),
+  serp40101Payload(0.002),
+  serp40101Payload(0.002),
+  serp40101Payload(0.002),
+  serp40101Payload(0.002),
+]);
+check(
+  "resilience-all-serps-fail-keeps-keywords-partial",
+  allFail.snapshot.status === "partial"
+    && allFail.serpCalls === 6
+    && allFail.snapshot.customerKeywords.length === 1
+    && allFail.snapshot.organicCompetitors.length === 0
+    && allFail.snapshot.serpAttempts.every((row) => row.successful === false)
+    && Math.abs(allFail.snapshot.costs.totalCost - (0.0123 + 0.002 * 6)) < 1e-9,
+  `${allFail.snapshot.status} keywords=${allFail.snapshot.customerKeywords.length} competitors=${allFail.snapshot.organicCompetitors.length} serpCalls=${allFail.serpCalls}`,
+);
+
+const authCase = await collectWithSerpQueue(tenantAuth, [], true);
+check(
+  "resilience-fatal-auth-no-serp-retry",
+  authCase.snapshot.status === "error"
+    && authCase.rankedCalls === 1
+    && authCase.serpCalls === 0
+    && authCase.snapshot.customerKeywords.length === 0
+    && authCase.snapshot.organicCompetitors.length === 0,
+  `${authCase.snapshot.status} ranked=${authCase.rankedCalls} serp=${authCase.serpCalls}`,
+);
+
+const fetchBeforePartialRead = fetchCalls;
+searchService.readNationalSearchIntelligence(tenantPartial);
+pageRenderers.renderSearchIntelligencePage(tenantPartial);
+const partialHtml = pageRenderers.renderSearchIntelligencePage(tenantPartial);
+check(
+  "resilience-dashboard-get-zero-dataforseo",
+  fetchCalls === fetchBeforePartialRead,
+  `fetchCallsDelta=${fetchCalls - fetchBeforePartialRead}`,
+);
+check(
+  "resilience-partial-ui-copy",
+  partialHtml.includes('data-ni03b-section="partial"')
+    && /one or more search-engine requests could not be completed/i.test(partialHtml)
+    && !partialHtml.includes("Internal SE Server Error"),
+  "customer-facing partial copy without task stack traces",
 );
 
 let localCollectError = "";
@@ -713,18 +921,23 @@ else process.env.DATAFORSEO_LOGIN = previousLogin;
 if (previousPassword === undefined) delete process.env.DATAFORSEO_PASSWORD;
 else process.env.DATAFORSEO_PASSWORD = previousPassword;
 
-for (const artifact of [
-  "search-intelligence-v1",
-  "ranked-keywords-customer",
-  "cost-ledger-v1",
-  "refresh-metadata-v1",
-  "competitor-discovery",
-] as const) {
-  const dataFile = storage.nationalIntelligenceDataPath(tenantBSlug, artifact);
-  if (fs.existsSync(dataFile)) fs.unlinkSync(dataFile);
+for (const slug of [tenantBSlug, tenantRetry, tenantPartial, tenantAllFail, tenantAuth]) {
+  for (const artifact of [
+    "search-intelligence-v1",
+    "ranked-keywords-customer",
+    "cost-ledger-v1",
+    "refresh-metadata-v1",
+    "competitor-discovery",
+  ] as const) {
+    const dataFile = storage.nationalIntelligenceDataPath(slug, artifact);
+    if (fs.existsSync(dataFile)) fs.unlinkSync(dataFile);
+  }
 }
 if (fs.existsSync(fixtureFile)) fs.unlinkSync(fixtureFile);
 if (fs.existsSync(tenantBFile)) fs.unlinkSync(tenantBFile);
+for (const file of extraTenantFiles) {
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+}
 
 globalThis.fetch = originalFetch;
 

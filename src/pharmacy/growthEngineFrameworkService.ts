@@ -248,7 +248,7 @@ export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework 
   const bizPct = businessIntelligencePct(data);
   const bizComplete = national ? true : isRequiredProfileComplete(data);
   const localComplete = national
-    ? searchIntel?.status === "collected" || searchIntel?.status === "empty"
+    ? searchIntel?.status === "collected" || searchIntel?.status === "empty" || searchIntel?.status === "partial"
     : competitors?.analysis?.dataSource === "google-places-live" && (competitors.competitors.length || 0) >= 5;
   const websiteSnapshot = resolveWebsiteIntelligenceSnapshot(slug);
   const websiteComplete = websiteSnapshot?.analysis?.understandingComplete === true;
@@ -296,7 +296,7 @@ export function buildGrowthEngineFramework(slug: string): GrowthEngineFramework 
           status: localComplete ? "complete" : competitors?.competitors.length ? "in_progress" : "not_started",
           completionPct: localComplete ? 100 : Math.min(99, (competitors?.competitors.length || 0) * 10),
           summary: national
-            ? searchIntel?.status === "collected" || searchIntel?.status === "empty"
+            ? searchIntel?.status === "collected" || searchIntel?.status === "empty" || searchIntel?.status === "partial"
               ? `Search intelligence collected · ${searchIntel?.customerKeywords.length || 0} ranking keywords`
               : searchIntel?.status === "error"
                 ? "Search intelligence collection failed"
