@@ -1,5 +1,5 @@
 /**
- * NI-03B — Customer-facing National Search Intelligence page.
+ * NI-03C — Customer-facing National Search Intelligence page.
  * Read-only render. Collection is an explicit POST.
  */
 import { buildGrowthEngineFramework } from "./growthEngineFrameworkService.ts";
@@ -10,7 +10,11 @@ import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 import {
   readNationalSearchIntelligence,
 } from "./nationalSearchIntelligenceV1Service.ts";
-import type { NationalSearchIntelligenceSnapshot } from "./nationalSearchIntelligenceV1Model.ts";
+import type {
+  NationalCompetitorKeywordUniverse,
+  NationalOrganicSearchCompetitor,
+  NationalSearchIntelligenceSnapshot,
+} from "./nationalSearchIntelligenceV1Model.ts";
 import { PARTIAL_COLLECTION_CUSTOMER_MESSAGE } from "./nationalSearchIntelligenceV1Model.ts";
 
 function esc(v: unknown): string {
@@ -45,12 +49,70 @@ function statusLabel(snapshot: NationalSearchIntelligenceSnapshot): string {
   return "Intelligence not collected";
 }
 
+function keywordTable(
+  rows: Array<{
+    keyword: string;
+    position: number | null;
+    searchVolume: number | null;
+    cpc: number | null;
+    rankingUrl: string | null;
+  }>,
+  emptyMessage: string,
+): string {
+  if (!rows.length) {
+    return `<tr><td colspan="5">${esc(emptyMessage)}</td></tr>`;
+  }
+  return rows.map((row) => `<tr>
+<td>${esc(row.keyword)}</td>
+<td>${fmt(row.position)}</td>
+<td>${fmt(row.searchVolume)}</td>
+<td>${row.cpc == null ? "—" : row.cpc.toFixed(2)}</td>
+<td>${row.rankingUrl ? `<a href="${esc(row.rankingUrl)}" rel="noreferrer">${esc(row.rankingUrl)}</a>` : "—"}</td>
+</tr>`).join("");
+}
+
+function competitorCard(row: NationalOrganicSearchCompetitor): string {
+  const overlap = row.sharedKeywordCount != null
+    ? `${row.sharedKeywordCount} shared ranking keywords`
+    : "Shared keyword overlap recorded";
+  const traffic = row.organicEtv != null ? `Estimated organic traffic ${row.organicEtv}` : "Traffic estimate not returned";
+  return `<article class="ge-competitor" data-ni03b-competitor="${esc(row.domain)}" data-ni03c-competitor="${esc(row.domain)}">
+<div class="ge-competitor-head">
+<div>
+<p class="ge-competitor-name">${esc(row.name)}</p>
+<p class="ge-meta">${esc(row.domain)} · ${esc(row.classification.replace(/_/g, " "))} · ${esc(row.qualification)}${row.analysed ? " · keywords analysed" : ""}</p>
+</div>
+<span class="ge-pill">${esc(row.evidenceStatus.replace(/_/g, " "))}</span>
+</div>
+<p style="font-size:13px;color:#334155;margin:0 0 8px">${esc(row.whyIdentified[0] || "Identified from organic search-market overlap.")}</p>
+<p class="ge-meta">${esc(overlap)} · ${esc(traffic)}</p>
+<p class="ge-meta">Why this is a competitor: ${esc(row.whyIdentified.join(" "))}</p>
+<p class="ge-meta">Evidence status: ${esc(row.evidenceSource)} · Verified: no · Source: Labs competitors domain</p>
+</article>`;
+}
+
+function competitorKeywordSection(universe: NationalCompetitorKeywordUniverse): string {
+  const rows = universe.keywords.slice(0, 100);
+  const empty = universe.status === "error"
+    ? universe.lastError || "Competitor keyword collection failed."
+    : "No ranking keywords were returned for this competitor.";
+  return `<details class="ni03c-competitor-keywords" data-ni03c-competitor-keywords="${esc(universe.domain)}" ${universe.status === "collected" ? "open" : ""}>
+<summary><strong>${esc(universe.domain)}</strong> · ${universe.keywords.length} keywords · ${esc(universe.status)}</summary>
+<div style="overflow:auto;margin-top:12px">
+<table class="ni03b-table">
+<thead><tr><th>Keyword</th><th>Position</th><th>Search volume</th><th>CPC</th><th>Ranking page</th></tr></thead>
+<tbody>${keywordTable(rows, empty)}</tbody>
+</table>
+</div>
+${universe.keywords.length > rows.length ? `<p class="ge-meta">Showing ${rows.length} of ${universe.keywords.length} collected keywords.</p>` : ""}
+</details>`;
+}
+
 export function renderNationalSearchIntelligencePage(
   slug: string,
   nav: { prevUrl?: string; nextUrl?: string } = {},
 ): string {
   const copy = growthEnginePlatformCopy(slug);
-  const framework = buildGrowthEngineFramework(slug);
   if (!isNationalGrowthPlatform(slug)) {
     const body = `<div class="ge-panel" data-ni03b-section="local-blocked">
 <h2>National Search Intelligence</h2>
@@ -63,47 +125,48 @@ export function renderNationalSearchIntelligencePage(
   const snapshot = readNationalSearchIntelligence(slug);
   const collected = snapshot.status === "collected" || snapshot.status === "empty" || snapshot.status === "partial";
   const sourceLabel = authorityLabel(snapshot);
-  const keywords = snapshot.customerKeywords.slice(0, 25);
+  const keywords = snapshot.customerKeywords.slice(0, 100);
   const competitors = snapshot.organicCompetitors.slice(0, 12);
   const collectUrl = `/api/growth-engine/${encodeURIComponent(slug)}/search-intelligence/collect`;
+  const strongestPages = snapshot.summary.strongestRankingPages || [];
 
   const cards = collected
-    ? `<div class="ge-grid-3" data-ni03b-section="summary-cards">
-<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Ranking keywords</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.rankingKeywordCount}</p></div>
-<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Top 10 rankings</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.top10Count}</p></div>
-<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Top 20 rankings</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.top20Count}</p></div>
+    ? `<div class="ge-grid-3" data-ni03b-section="summary-cards" data-ni03c-section="visibility">
+<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Total ranking keywords</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.rankingKeywordCount}</p></div>
+<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Keywords Top 3</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.top3Count || 0}</p></div>
+<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Keywords Top 10</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.top10Count}</p></div>
+<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Keywords Top 20</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.top20Count}</p></div>
+<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Keywords Top 100</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.top100Count || 0}</p></div>
+<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Estimated search demand</h3><p style="font-size:28px;font-weight:900;margin:0">${fmt(snapshot.summary.availableSearchDemand)}</p></div>
+</div>
+<div class="ge-grid-3" style="margin-top:12px">
 <div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Ranking pages</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.rankingPageCount}</p></div>
-<div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Available search demand</h3><p style="font-size:28px;font-weight:900;margin:0">${fmt(snapshot.summary.availableSearchDemand)}</p></div>
-<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Search competitors</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.organicCompetitorCount}</p></div>
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Organic search competitors</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.organicCompetitorCount}</p></div>
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Latest collection</h3><p style="font-size:16px;font-weight:700;margin:0">${snapshot.status === "not_collected" ? "Not collected" : esc(snapshot.capturedAt)}</p><p class="ge-meta">${esc(sourceLabel)}</p></div>
 </div>`
     : `<p class="ge-lead" data-ni03b-section="empty-metrics">No collection has been performed yet. Metrics will appear from persisted DataForSEO evidence only.</p>`;
 
-  const keywordRows = keywords.length
-    ? keywords.map((row) => `<tr>
-<td>${esc(row.keyword)}</td>
-<td>${fmt(row.position)}</td>
-<td>${fmt(row.searchVolume)}</td>
-<td>${row.cpc == null ? "—" : row.cpc.toFixed(2)}</td>
-<td>${row.competition == null ? "—" : row.competition.toFixed(2)}</td>
-<td>${row.rankingUrl ? `<a href="${esc(row.rankingUrl)}" rel="noreferrer">${esc(row.rankingUrl)}</a>` : "—"}</td>
-<td>${esc(row.evidenceSource)}</td>
+  const pageRows = strongestPages.length
+    ? strongestPages.map((row) => `<tr>
+<td>${row.url ? `<a href="${esc(row.url)}" rel="noreferrer">${esc(row.url)}</a>` : "—"}</td>
+<td>${fmt(row.keywordCount)}</td>
+<td>${fmt(row.searchDemand)}</td>
+<td>${fmt(row.bestPosition)}</td>
 </tr>`).join("")
-    : `<tr><td colspan="7">${snapshot.status === "not_collected" ? "No ranking keywords collected yet." : "No ranking keywords were returned."}</td></tr>`;
+    : `<tr><td colspan="4">${snapshot.status === "not_collected" ? "Strongest ranking pages will appear after collection." : "No ranking page URLs were returned."}</td></tr>`;
+
+  const keywordRows = keywordTable(
+    keywords,
+    snapshot.status === "not_collected" ? "No ranking keywords collected yet." : "No ranking keywords were returned.",
+  );
 
   const competitorCards = competitors.length
-    ? competitors.map((row) => `<article class="ge-competitor" data-ni03b-competitor="${esc(row.domain)}">
-<div class="ge-competitor-head">
-<div>
-<p class="ge-competitor-name">${esc(row.name)}</p>
-<p class="ge-meta">${esc(row.domain)} · ${esc(row.classification.replace(/_/g, " "))} · ${esc(row.qualification)}</p>
-</div>
-<span class="ge-pill">${esc(row.evidenceStatus.replace(/_/g, " "))}</span>
-</div>
-<p style="font-size:13px;color:#334155;margin:0 0 8px">${esc(row.whyIdentified[0] || "Identified from organic Google search results.")}</p>
-<p class="ge-meta">Overlap/signals: ${esc(row.sourceQueries.join(" · ") || "Organic SERP")}</p>
-<p class="ge-meta">Evidence status: ${esc(row.evidenceSource)} · Verified: no · Best SERP position: ${fmt(row.bestSerpPosition)}</p>
-</article>`).join("")
+    ? competitors.map(competitorCard).join("")
     : `<p class="ge-lead">${snapshot.status === "not_collected" ? "No organic search competitors collected yet." : "No organic search competitors were identified from the bounded collection."}</p>`;
+
+  const competitorKeywordHtml = snapshot.competitorKeywordUniverses.length
+    ? snapshot.competitorKeywordUniverses.map(competitorKeywordSection).join("")
+    : `<p class="ge-lead">${snapshot.status === "not_collected" ? "Competitor keyword universes will appear after collection." : "No competitor keyword universes were collected."}</p>`;
 
   const body = `<div class="ge-panel" data-ni03b-section="search-intelligence">
 <h2>Search Intelligence</h2>
@@ -125,22 +188,38 @@ ${snapshot.status === "partial" ? `<p class="ge-lead" style="color:#b45309" data
 <p class="ge-lead">Collection is explicit. Opening this page does not call DataForSEO.</p>
 </div>
 
-<div class="ge-panel" data-ni03b-section="keywords">
+<div class="ge-panel" data-ni03b-section="keywords" data-ni03c-section="customer-keywords">
 <h2>Your organic search visibility</h2>
 <p class="ge-lead">Keywords this domain currently ranks for in Google, from DataForSEO Labs ranked keywords. Null values are shown as dashes — they are not converted to zero.</p>
 ${cards}
-<div style="overflow:auto;margin-top:16px">
+<div style="overflow:auto;margin-top:16px" data-ni03c-section="strongest-pages">
+<h3>Strongest ranking pages</h3>
 <table class="ni03b-table">
-<thead><tr><th>Keyword</th><th>Position</th><th>Search volume</th><th>CPC</th><th>Competition</th><th>Ranking page</th><th>Evidence</th></tr></thead>
+<thead><tr><th>Page</th><th>Keywords</th><th>Search demand</th><th>Best position</th></tr></thead>
+<tbody>${pageRows}</tbody>
+</table>
+</div>
+<h3 style="margin-top:20px">Customer keywords</h3>
+<p class="ge-meta">Sorted by current position, then search volume. Showing ${keywords.length} of ${snapshot.customerKeywords.length} collected keywords.</p>
+<div style="overflow:auto;margin-top:12px">
+<table class="ni03b-table">
+<thead><tr><th>Keyword</th><th>Position</th><th>Search volume</th><th>CPC</th><th>Ranking page</th></tr></thead>
 <tbody>${keywordRows}</tbody>
 </table>
 </div>
 </div>
 
-<div class="ge-panel" data-ni03b-section="competitors">
+<div class="ge-panel" data-ni03b-section="competitors" data-ni03c-section="organic-competitors">
 <h2>Your organic competitors</h2>
-<p class="ge-lead">These are websites competing with you in organic Google search results. They are not selected based on physical proximity.</p>
+<p class="ge-lead">These are businesses competing with you in organic search. They are identified from search-market evidence, not physical proximity.</p>
+<p class="ge-lead">They are not selected based on physical proximity.</p>
 ${competitorCards}
+</div>
+
+<div class="ge-panel" data-ni03c-section="competitor-keywords">
+<h2>Competitor keywords</h2>
+<p class="ge-lead">Ranking keyword universes collected for the strongest qualified organic competitors. This screen does not score gaps or recommend content.</p>
+${competitorKeywordHtml}
 </div>
 
 <div class="ge-panel" data-ni03b-section="next-stage">
@@ -206,6 +285,8 @@ ${growthEngineWorkflowCss()}
 .ni03b-table th,.ni03b-table td{border-bottom:1px solid #e2e8f0;padding:8px 10px;text-align:left;vertical-align:top}
 .ni03b-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b}
 .ni03b-table a{color:#1d4ed8;word-break:break-all}
+.ni03c-competitor-keywords{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin:0 0 12px}
+.ni03c-competitor-keywords summary{cursor:pointer}
 </style>
 </head>
 <body data-slug="${esc(slug)}" data-growth-platform="${platform}" data-ni03b-page="search-intelligence">

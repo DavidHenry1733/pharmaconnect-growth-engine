@@ -1,5 +1,5 @@
 /**
- * NI-03B — Explicit National Search Intelligence collection and persisted reads.
+ * NI-03C — Explicit National Search Intelligence collection and persisted reads.
  * GET/render paths must call readNationalSearchIntelligence only.
  * Live DataForSEO runs only from collectNationalSearchIntelligence.
  */
@@ -7,11 +7,13 @@ import fs from "node:fs";
 
 import {
   DATAFORSEO_LABS_ENDPOINTS,
-  getDomainRankedKeywordsWithCost,
+  executeDomainCompetitors,
+  executeDomainRankedKeywords,
+  normaliseLabsDomain,
+  type DataForSeoDomainCompetitor,
+  type DataForSeoLabsKeywordRow,
+  type DataForSeoLabsTaskAttempt,
 } from "./dataForSeoRankedKeywordIntelligenceService.ts";
-import { DATAFORSEO_SERP_ENDPOINT, executeNationalGoogleOrganic } from "./dataForSeoNationalSearchAdapter.ts";
-import { isDataForSeoTransportTimeout } from "./dataForSeoHttp.ts";
-import { buildNationalCompetitorDiscoveryQueries } from "./nationalCompetitorDiscoveryQueryService.ts";
 import { qualifyNationalCompetitorV2 } from "./nationalCompetitorQualificationV2Service.ts";
 import { resolveNationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
 import {
@@ -28,30 +30,42 @@ import {
   resolveNationalIntelligenceArtifactPath,
 } from "./nationalIntelligenceStorageService.ts";
 import {
-  NI03B_LIMITS,
   NATIONAL_SEARCH_INTELLIGENCE_VERSION,
   PARTIAL_COLLECTION_CUSTOMER_MESSAGE,
   isUsableNationalSearchIntelligenceStatus,
+  type NationalCompetitorKeywordUniverse,
+  type NationalCompetitorRankingKeyword,
   type NationalCustomerRankingKeyword,
   type NationalOrganicSearchCompetitor,
+  type NationalSearchCollectionPlan,
   type NationalSearchIntelligenceSnapshot,
+  type NationalSearchLabsAttempt,
 } from "./nationalSearchIntelligenceV1Model.ts";
+import {
+  planNationalSearchIntelligenceTasks,
+  resolveNationalSearchIntelligenceLimits,
+  type NationalSearchIntelligenceLimits,
+} from "./nationalSearchIntelligenceLimits.ts";
 import { writeNationalCompetitorDiscovery } from "./nationalCompetitorDiscoveryStorageService.ts";
 import { emptyNationalCompetitorDiscoveryResult } from "./nationalCompetitorDiscoveryModel.ts";
 import { resolveDataForSeoSearchLocationFromSubject } from "./dataForSeoSearchLocationResolver.ts";
 
-const SERP_ENDPOINT = DATAFORSEO_SERP_ENDPOINT;
-
 const inFlight = new Map<string, Promise<NationalSearchIntelligenceSnapshot>>();
 
 export type NationalSearchIntelligenceProgressEvent =
+  | { type: "plan"; plan: NationalSearchCollectionPlan }
   | { type: "ranked_start" }
   | { type: "ranked_complete"; rows: number; cost: number }
   | { type: "ranked_failed"; timedOut: boolean; message: string }
-  | { type: "serp_start"; index: number; total: number; query: string }
-  | { type: "serp_retry"; index: number; total: number; query: string; statusCode: number | null }
-  | { type: "serp_complete"; index: number; total: number; query: string; results: number; cost: number; retried: boolean }
-  | { type: "serp_failed"; index: number; total: number; query: string; timedOut: boolean; statusCode: number | null; retried: boolean; cost: number };
+  | { type: "ranked_retry"; statusCode: number | null }
+  | { type: "competitors_domain_start" }
+  | { type: "competitors_domain_complete"; rows: number; cost: number }
+  | { type: "competitors_domain_failed"; timedOut: boolean; message: string }
+  | { type: "competitors_domain_retry"; statusCode: number | null }
+  | { type: "competitor_keywords_start"; index: number; total: number; domain: string }
+  | { type: "competitor_keywords_complete"; index: number; total: number; domain: string; rows: number; cost: number }
+  | { type: "competitor_keywords_failed"; index: number; total: number; domain: string; timedOut: boolean; message: string }
+  | { type: "competitor_keywords_retry"; index: number; total: number; domain: string; statusCode: number | null };
 
 export type NationalSearchIntelligenceProgress = (event: NationalSearchIntelligenceProgressEvent) => void;
 
@@ -74,23 +88,75 @@ export function nationalSearchIntelligencePath(slug: string): string {
   return nationalIntelligenceDataPath(slug, "search-intelligence-v1");
 }
 
+function isOwnDomain(domain: string, ownDomains: string[]): boolean {
+  return ownDomains.some((own) => domain === own || domain.endsWith(`.${own}`));
+}
+
+function sortKeywordsCommercially<T extends { position: number | null; searchVolume: number | null; cpc: number | null }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const posA = a.position == null ? 9999 : a.position;
+    const posB = b.position == null ? 9999 : b.position;
+    if (posA !== posB) return posA - posB;
+    const volA = a.searchVolume == null ? -1 : a.searchVolume;
+    const volB = b.searchVolume == null ? -1 : b.searchVolume;
+    if (volA !== volB) return volB - volA;
+    const cpcA = a.cpc == null ? -1 : a.cpc;
+    const cpcB = b.cpc == null ? -1 : b.cpc;
+    return cpcB - cpcA;
+  });
+}
+
+function strongestRankingPages(keywords: NationalCustomerRankingKeyword[]): NationalSearchIntelligenceSnapshot["summary"]["strongestRankingPages"] {
+  const byUrl = new Map<string, { url: string; keywordCount: number; demandValues: number[]; bestPosition: number | null }>();
+  for (const row of keywords) {
+    const url = String(row.rankingUrl || "").trim();
+    if (!url) continue;
+    const current = byUrl.get(url) || { url, keywordCount: 0, demandValues: [], bestPosition: null };
+    current.keywordCount += 1;
+    if (typeof row.searchVolume === "number") current.demandValues.push(row.searchVolume);
+    if (row.position != null && (current.bestPosition == null || row.position < current.bestPosition)) {
+      current.bestPosition = row.position;
+    }
+    byUrl.set(url, current);
+  }
+  return [...byUrl.values()]
+    .sort((a, b) => b.keywordCount - a.keywordCount || (b.demandValues.reduce((s, n) => s + n, 0) - a.demandValues.reduce((s, n) => s + n, 0)))
+    .slice(0, 8)
+    .map((row) => ({
+      url: row.url,
+      keywordCount: row.keywordCount,
+      searchDemand: row.demandValues.length ? row.demandValues.reduce((sum, value) => sum + value, 0) : null,
+      bestPosition: row.bestPosition,
+    }));
+}
+
 function summarise(
   keywords: NationalCustomerRankingKeyword[],
   competitors: NationalOrganicSearchCompetitor[],
+  excluded: NationalOrganicSearchCompetitor[],
+  universes: NationalCompetitorKeywordUniverse[],
 ): NationalSearchIntelligenceSnapshot["summary"] {
   const pages = new Set(keywords.map((row) => row.rankingUrl).filter(Boolean));
   const demandValues = keywords.map((row) => row.searchVolume).filter((value): value is number => typeof value === "number");
   return {
     rankingKeywordCount: keywords.length,
+    top3Count: keywords.filter((row) => row.position != null && row.position <= 3).length,
     top10Count: keywords.filter((row) => row.position != null && row.position <= 10).length,
     top20Count: keywords.filter((row) => row.position != null && row.position <= 20).length,
+    top100Count: keywords.filter((row) => row.position != null && row.position <= 100).length,
     rankingPageCount: pages.size,
     availableSearchDemand: demandValues.length ? demandValues.reduce((sum, value) => sum + value, 0) : null,
     organicCompetitorCount: competitors.length,
+    analysedCompetitorCount: universes.filter((row) => row.status === "collected").length,
+    excludedCompetitorCount: excluded.length,
+    competitorKeywordCount: universes.reduce((sum, row) => sum + row.keywords.length, 0),
     directCompetitorCount: competitors.filter((row) => row.classification === "direct_competitor").length,
     adjacentCompetitorCount: competitors.filter((row) => row.classification === "adjacent_competitor").length,
+    strongestRankingPages: strongestRankingPages(keywords),
+    top3CountCalculated: true,
     top10CountCalculated: true,
     top20CountCalculated: true,
+    top100CountCalculated: true,
     rankingPageCountCalculated: true,
     availableSearchDemandCalculated: true,
   };
@@ -101,6 +167,29 @@ function nextStage(): NationalSearchIntelligenceSnapshot["nextStage"] {
     title: "Compare competitor keyword universes",
     detail: "Next: compare competitor keyword universes and identify commercial search gaps. That work is not part of this screen.",
     implemented: false,
+  };
+}
+
+function emptyEndpoints(): NationalSearchIntelligenceSnapshot["endpoints"] {
+  return [
+    { endpoint: DATAFORSEO_LABS_ENDPOINTS.rankedKeywords, requests: 0, tasks: 0, cost: 0 },
+    { endpoint: DATAFORSEO_LABS_ENDPOINTS.competitorsDomain, requests: 0, tasks: 0, cost: 0 },
+  ];
+}
+
+export function planNationalSearchIntelligenceCollection(
+  slug: string,
+  overrides: Partial<NationalSearchIntelligenceLimits> = {},
+): NationalSearchCollectionPlan {
+  const limits = resolveNationalSearchIntelligenceLimits(overrides);
+  const tasks = planNationalSearchIntelligenceTasks(limits);
+  return {
+    ...tasks,
+    limits,
+    endpoints: [
+      DATAFORSEO_LABS_ENDPOINTS.rankedKeywords,
+      DATAFORSEO_LABS_ENDPOINTS.competitorsDomain,
+    ],
   };
 }
 
@@ -115,11 +204,18 @@ function snapshotShell(input: {
   capturedAt?: string;
   keywords: NationalCustomerRankingKeyword[];
   competitors: NationalOrganicSearchCompetitor[];
+  excludedCompetitors?: NationalOrganicSearchCompetitor[];
+  competitorKeywordUniverses?: NationalCompetitorKeywordUniverse[];
   endpoints: NationalSearchIntelligenceSnapshot["endpoints"];
+  labsAttempts?: NationalSearchLabsAttempt[];
   serpAttempts?: NationalSearchIntelligenceSnapshot["serpAttempts"];
+  limits?: NationalSearchIntelligenceLimits;
+  collectionPlan?: NationalSearchCollectionPlan;
 }): NationalSearchIntelligenceSnapshot {
   const subject = resolveNationalIntelligenceSubject(input.slug);
   const capturedAt = input.capturedAt || new Date().toISOString();
+  const limits = input.limits || resolveNationalSearchIntelligenceLimits();
+  const collectionPlan = input.collectionPlan || planNationalSearchIntelligenceCollection(subject.slug, limits);
   const uncollected =
     input.status === "not_collected"
     || (input.status === "error" && !input.liveExecution && !input.fixture && !input.recovered);
@@ -163,6 +259,8 @@ function snapshotShell(input: {
           : "persisted-snapshot",
     costContribution: costLedger.totalCost,
   });
+  const excluded = input.excludedCompetitors || [];
+  const universes = input.competitorKeywordUniverses || [];
   return {
     version: NATIONAL_SEARCH_INTELLIGENCE_VERSION,
     tenantSlug: subject.slug,
@@ -184,7 +282,8 @@ function snapshotShell(input: {
         return null;
       }
     })(),
-    limits: NI03B_LIMITS,
+    limits,
+    collectionPlan,
     endpoints: input.endpoints,
     costs: {
       requests: costLedger.requestCount,
@@ -203,8 +302,11 @@ function snapshotShell(input: {
       }),
     customerKeywords: input.keywords,
     organicCompetitors: input.competitors,
+    excludedCompetitors: excluded,
+    competitorKeywordUniverses: universes,
+    labsAttempts: input.labsAttempts || [],
     serpAttempts: input.serpAttempts || [],
-    summary: summarise(input.keywords, input.competitors),
+    summary: summarise(input.keywords, input.competitors, excluded, universes),
     nextStage: nextStage(),
   };
 }
@@ -213,6 +315,7 @@ function emptySnapshot(
   slug: string,
   status: NationalSearchIntelligenceSnapshot["status"] = "not_collected",
   lastError: string | null = null,
+  limits?: NationalSearchIntelligenceLimits,
 ): NationalSearchIntelligenceSnapshot {
   return snapshotShell({
     slug,
@@ -224,10 +327,9 @@ function emptySnapshot(
     reusedExistingSnapshot: false,
     keywords: [],
     competitors: [],
-    endpoints: [
-      { endpoint: DATAFORSEO_LABS_ENDPOINTS.rankedKeywords, requests: 0, tasks: 0, cost: 0 },
-      { endpoint: SERP_ENDPOINT, requests: 0, tasks: 0, cost: 0 },
-    ],
+    endpoints: emptyEndpoints(),
+    limits,
+    collectionPlan: planNationalSearchIntelligenceCollection(slug, limits || {}),
   });
 }
 
@@ -240,8 +342,17 @@ function persistSnapshot(snapshot: NationalSearchIntelligenceSnapshot): void {
     liveExecution: snapshot.liveExecution,
     evidenceSource: snapshot.provenance.evidenceSource,
     sourceEndpoint: DATAFORSEO_LABS_ENDPOINTS.rankedKeywords,
-    cost: snapshot.endpoints[0]?.cost ?? 0,
+    cost: snapshot.endpoints.find((row) => row.endpoint === DATAFORSEO_LABS_ENDPOINTS.rankedKeywords)?.cost ?? 0,
     keywords: snapshot.customerKeywords,
+  });
+  writeJson(nationalIntelligenceDataPath(snapshot.tenantSlug, "ranked-keywords-competitors"), {
+    tenantSlug: snapshot.tenantSlug,
+    subjectDomain: snapshot.subjectDomain,
+    capturedAt: snapshot.capturedAt,
+    liveExecution: snapshot.liveExecution,
+    evidenceSource: snapshot.provenance.evidenceSource,
+    sourceEndpoint: DATAFORSEO_LABS_ENDPOINTS.rankedKeywords,
+    universes: snapshot.competitorKeywordUniverses,
   });
   writeJson(nationalIntelligenceDataPath(snapshot.tenantSlug, "cost-ledger-v1"), snapshot.costLedger);
   writeJson(nationalIntelligenceDataPath(snapshot.tenantSlug, "refresh-metadata-v1"), {
@@ -258,6 +369,8 @@ function persistSnapshot(snapshot: NationalSearchIntelligenceSnapshot): void {
     tasks: snapshot.costs.tasks,
     totalCost: snapshot.costs.totalCost,
     serpLocation: snapshot.serpLocation,
+    collectionPlan: snapshot.collectionPlan,
+    labsAttempts: snapshot.labsAttempts,
     serpAttempts: snapshot.serpAttempts,
   });
 }
@@ -271,7 +384,7 @@ function persistCompetitorDiscovery(snapshot: NationalSearchIntelligenceSnapshot
   result.generatedAt = snapshot.capturedAt;
   result.status = snapshot.organicCompetitors.length ? "complete" : snapshot.status === "error" ? "failed" : "draft";
   result.qualifiedCompetitors = snapshot.organicCompetitors
-    .filter((row) => row.qualification === "qualified" || row.classification === "direct_competitor")
+    .filter((row) => row.qualification === "qualified" || row.qualification === "candidate" || row.classification === "direct_competitor")
     .map((row) => ({
       id: `national-${row.domain.replace(/[^a-z0-9]+/g, "-")}`,
       name: row.name,
@@ -280,10 +393,10 @@ function persistCompetitorDiscovery(snapshot: NationalSearchIntelligenceSnapshot
       marketCountry: snapshot.country,
       targetCustomerMarket: snapshot.primaryMarket,
       source: "search-engine" as const,
-      sourceQuery: row.sourceQueries[0] || null,
+      sourceQuery: row.sourceQueries[0] || "dataforseo_labs_competitors_domain",
       qualification: row.qualification,
       qualificationReasons: row.whyIdentified,
-      rejectionReasons: [],
+      rejectionReasons: row.exclusionReasons,
       serviceEvidence: [],
       title: row.name,
       description: row.whyIdentified.join(" "),
@@ -294,6 +407,49 @@ function persistCompetitorDiscovery(snapshot: NationalSearchIntelligenceSnapshot
   writeNationalCompetitorDiscovery(result);
 }
 
+function hydrateSnapshot(snapshot: NationalSearchIntelligenceSnapshot, subjectDomain: string, businessName: string): NationalSearchIntelligenceSnapshot {
+  if (!snapshot.subjectDomain) snapshot.subjectDomain = subjectDomain;
+  if (!snapshot.businessName) snapshot.businessName = businessName;
+  if (!Array.isArray(snapshot.serpAttempts)) snapshot.serpAttempts = [];
+  if (!Array.isArray(snapshot.labsAttempts)) snapshot.labsAttempts = [];
+  if (!Array.isArray(snapshot.excludedCompetitors)) snapshot.excludedCompetitors = [];
+  if (!Array.isArray(snapshot.competitorKeywordUniverses)) snapshot.competitorKeywordUniverses = [];
+  if (!Array.isArray(snapshot.customerKeywords)) snapshot.customerKeywords = [];
+  if (!Array.isArray(snapshot.organicCompetitors)) snapshot.organicCompetitors = [];
+  if (!snapshot.limits) snapshot.limits = resolveNationalSearchIntelligenceLimits();
+  if (!snapshot.collectionPlan) snapshot.collectionPlan = planNationalSearchIntelligenceCollection(snapshot.tenantSlug, snapshot.limits);
+  snapshot.organicCompetitors = snapshot.organicCompetitors.map((row) => ({
+    ...row,
+    discoverySource: row.discoverySource || "dataforseo_labs_competitors_domain",
+    sharedKeywordCount: row.sharedKeywordCount ?? null,
+    averagePosition: row.averagePosition ?? null,
+    organicEtv: row.organicEtv ?? null,
+    organicKeywordCount: row.organicKeywordCount ?? null,
+    sharedKeywordEtv: row.sharedKeywordEtv ?? null,
+    exclusionReasons: Array.isArray(row.exclusionReasons) ? row.exclusionReasons : [],
+    analysed: Boolean(row.analysed),
+  }));
+  if (!snapshot.summary) {
+    snapshot.summary = summarise(
+      snapshot.customerKeywords,
+      snapshot.organicCompetitors,
+      snapshot.excludedCompetitors,
+      snapshot.competitorKeywordUniverses,
+    );
+  } else {
+    snapshot.summary.top3Count = snapshot.summary.top3Count ?? snapshot.customerKeywords.filter((row) => row.position != null && row.position <= 3).length;
+    snapshot.summary.top100Count = snapshot.summary.top100Count ?? snapshot.customerKeywords.filter((row) => row.position != null && row.position <= 100).length;
+    snapshot.summary.analysedCompetitorCount = snapshot.summary.analysedCompetitorCount ?? snapshot.competitorKeywordUniverses.filter((row) => row.status === "collected").length;
+    snapshot.summary.excludedCompetitorCount = snapshot.summary.excludedCompetitorCount ?? snapshot.excludedCompetitors.length;
+    snapshot.summary.competitorKeywordCount = snapshot.summary.competitorKeywordCount
+      ?? snapshot.competitorKeywordUniverses.reduce((sum, row) => sum + row.keywords.length, 0);
+    snapshot.summary.strongestRankingPages = snapshot.summary.strongestRankingPages || strongestRankingPages(snapshot.customerKeywords);
+    snapshot.summary.top3CountCalculated = true;
+    snapshot.summary.top100CountCalculated = true;
+  }
+  return snapshot;
+}
+
 export function readNationalSearchIntelligence(slug: string): NationalSearchIntelligenceSnapshot {
   const subject = resolveNationalIntelligenceSubject(slug);
   if (!subject.eligibleForNationalIntelligence) {
@@ -301,12 +457,9 @@ export function readNationalSearchIntelligence(slug: string): NationalSearchInte
   }
   const file = resolveNationalIntelligenceArtifactPath(slug, "search-intelligence-v1");
   if (!file) return emptySnapshot(slug);
-  const snapshot = json<NationalSearchIntelligenceSnapshot>(file);
+  const snapshot = hydrateSnapshot(json<NationalSearchIntelligenceSnapshot>(file), subject.subjectDomain, subject.businessName);
   const fixture = isNationalIntelligenceFixturePath(file);
   snapshot.reusedExistingSnapshot = false;
-  if (!snapshot.subjectDomain) snapshot.subjectDomain = subject.subjectDomain;
-  if (!snapshot.businessName) snapshot.businessName = subject.businessName;
-  if (!Array.isArray(snapshot.serpAttempts)) snapshot.serpAttempts = [];
   if (fixture) {
     snapshot.liveExecution = false;
     snapshot.authority = "FIXTURE_ONLY";
@@ -333,254 +486,341 @@ export function readNationalSearchIntelligence(slug: string): NationalSearchInte
   return snapshot;
 }
 
-function mapCompetitor(input: {
-  domain: string;
-  name: string;
-  url: string;
-  title: string;
-  description: string;
-  bestPosition: number | null;
-  sourceQueries: string[];
+function mapCustomerKeyword(row: DataForSeoLabsKeywordRow, capturedAt: string, sourceEndpoint: string): NationalCustomerRankingKeyword {
+  return {
+    keyword: row.keyword,
+    position: row.position,
+    rankingUrl: row.url,
+    searchVolume: row.searchVolume,
+    cpc: row.cpc,
+    competition: row.competition,
+    estimatedTraffic: row.etv ?? null,
+    searchIntent: row.searchIntent ?? null,
+    serpType: row.serpType ?? null,
+    rankGroup: row.rankGroup ?? null,
+    seResultsCount: row.seResultsCount ?? null,
+    capturedAt,
+    sourceEndpoint,
+    evidenceSource: "DATAFORSEO_LIVE",
+    calculated: false,
+  };
+}
+
+function mapCompetitorKeyword(domain: string, row: DataForSeoLabsKeywordRow, capturedAt: string, sourceEndpoint: string): NationalCompetitorRankingKeyword {
+  return {
+    domain,
+    keyword: row.keyword,
+    position: row.position,
+    rankingUrl: row.url,
+    searchVolume: row.searchVolume,
+    cpc: row.cpc,
+    competition: row.competition,
+    estimatedTraffic: row.etv ?? null,
+    searchIntent: row.searchIntent ?? null,
+    capturedAt,
+    sourceEndpoint,
+    evidenceSource: "DATAFORSEO_LIVE",
+    calculated: false,
+  };
+}
+
+function mapLabsCompetitor(input: {
+  row: DataForSeoDomainCompetitor;
   capturedAt: string;
-  evidenceSource: NationalEvidenceSourceType;
   ownDomains: string[];
-}): NationalOrganicSearchCompetitor | null {
+  analysed: boolean;
+}): NationalOrganicSearchCompetitor {
+  const domain = normaliseLabsDomain(input.row.domain);
   const qualification = qualifyNationalCompetitorV2({
-    domain: input.domain,
-    title: input.title,
-    snippet: input.description,
-    url: input.url,
-    websiteText: `${input.title} ${input.description}`,
-    matchedQueries: input.sourceQueries,
+    domain,
+    title: domain,
+    snippet: null,
+    url: `https://${domain}`,
+    matchedQueries: input.row.sharedKeywordCount != null
+      ? [`organic keyword overlap ${input.row.sharedKeywordCount}`]
+      : ["organic keyword overlap"],
     ownDomains: input.ownDomains,
   });
-  if (qualification.classification === "excluded" || qualification.classification === "insufficient_evidence") {
-    return null;
+  const excluded = qualification.classification === "excluded" || qualification.exclusionReasons.length > 0;
+  const why: string[] = [];
+  if (input.row.sharedKeywordCount != null) {
+    why.push(`Shares ${input.row.sharedKeywordCount} ranking keywords with this domain in organic search.`);
   }
-  const qualificationLabel =
-    qualification.classification === "direct_competitor" ? "qualified" : "candidate";
-  const why = [
-    ...input.sourceQueries.map((query) => `Appeared in organic Google results for “${query}”.`),
-    ...qualification.reasons,
-    input.bestPosition != null ? `Best observed SERP position ${input.bestPosition}.` : "SERP position not available.",
-  ];
+  if (input.row.organicEtv != null) {
+    why.push(`Estimated organic traffic ${input.row.organicEtv}.`);
+  }
+  if (input.row.averagePosition != null) {
+    why.push(`Average overlapping position ${input.row.averagePosition}.`);
+  }
+  why.push("Identified from this domain's real search-market overlap, not physical proximity.");
+  why.push(...qualification.reasons);
+  const commercial = qualification.classification === "direct_competitor" || qualification.classification === "adjacent_competitor";
   return {
-    domain: input.domain,
-    name: input.name,
-    websiteUrl: `https://${input.domain}`,
+    domain,
+    name: domain,
+    websiteUrl: `https://${domain}`,
     whyIdentified: why,
-    sourceQueries: input.sourceQueries,
-    bestSerpPosition: input.bestPosition,
-    classification: qualification.classification,
-    qualification: qualificationLabel,
-    evidenceStatus: qualification.classification,
-    evidenceUrls: [input.url, `https://${input.domain}`].filter((value, index, arr) => value && arr.indexOf(value) === index),
+    sourceQueries: ["dataforseo_labs_competitors_domain"],
+    discoverySource: "dataforseo_labs_competitors_domain",
+    sharedKeywordCount: input.row.sharedKeywordCount,
+    averagePosition: input.row.averagePosition,
+    organicEtv: input.row.organicEtv,
+    organicKeywordCount: input.row.organicKeywordCount,
+    sharedKeywordEtv: input.row.sharedKeywordEtv,
+    bestSerpPosition: input.row.averagePosition != null ? Math.round(input.row.averagePosition) : null,
+    classification: excluded
+      ? "excluded"
+      : commercial
+        ? qualification.classification
+        : "adjacent_competitor",
+    qualification: excluded
+      ? "rejected"
+      : commercial && qualification.qualified
+        ? "qualified"
+        : "candidate",
+    evidenceStatus: excluded ? "excluded" : commercial ? qualification.classification : "organic_search_overlap",
+    evidenceUrls: [`https://${domain}`],
+    exclusionReasons: qualification.exclusionReasons,
+    analysed: input.analysed,
     capturedAt: input.capturedAt,
-    evidenceSource: input.evidenceSource,
+    evidenceSource: "DATAFORSEO_LIVE",
     verified: false,
   };
+}
+
+function toLabsAttempts(
+  role: NationalSearchLabsAttempt["role"],
+  domain: string | null,
+  attempts: DataForSeoLabsTaskAttempt[],
+): NationalSearchLabsAttempt[] {
+  return attempts.map((attempt) => ({
+    role,
+    domain,
+    endpoint: attempt.endpoint,
+    taskId: attempt.taskId,
+    taskStatusCode: attempt.taskStatusCode,
+    taskStatusMessage: attempt.taskStatusMessage,
+    cost: attempt.cost,
+    successful: attempt.successful,
+    timedOut: attempt.timedOut,
+    attemptNumber: attempt.attemptNumber,
+    capturedAt: attempt.capturedAt,
+  }));
+}
+
+function addEndpointUsage(
+  endpoints: NationalSearchIntelligenceSnapshot["endpoints"],
+  endpoint: string,
+  attempts: DataForSeoLabsTaskAttempt[],
+  cost: number,
+): void {
+  const row = endpoints.find((item) => item.endpoint === endpoint);
+  if (!row) return;
+  row.requests += attempts.length;
+  row.tasks += attempts.length;
+  row.cost += cost;
 }
 
 async function collectInner(
   slug: string,
   force: boolean,
   onProgress?: NationalSearchIntelligenceProgress,
+  limitOverrides: Partial<NationalSearchIntelligenceLimits> = {},
 ): Promise<NationalSearchIntelligenceSnapshot> {
   const subject = resolveNationalIntelligenceSubject(slug);
   if (!subject.eligibleForNationalIntelligence) {
     throw new Error(`National Search Intelligence is not eligible for ${slug}`);
   }
+  const limits = resolveNationalSearchIntelligenceLimits(limitOverrides);
+  const collectionPlan = planNationalSearchIntelligenceCollection(slug, limits);
   const dataFile = nationalSearchIntelligencePath(slug);
   if (!force && fs.existsSync(dataFile)) {
     const existing = json<NationalSearchIntelligenceSnapshot>(dataFile);
     const source = existing.provenance?.evidenceSource;
     if (isUsableNationalSearchIntelligenceStatus(existing.status)) {
       if (source === "DATAFORSEO_LIVE" || source === "DATAFORSEO_PERSISTED" || existing.liveExecution) {
-        return { ...existing, reusedExistingSnapshot: true, liveExecution: false };
+        return { ...hydrateSnapshot(existing, subject.subjectDomain, subject.businessName), reusedExistingSnapshot: true, liveExecution: false };
       }
     }
   }
   if (!hasDataForSeoCredentials()) {
-    const missing = emptySnapshot(slug, "error", "DataForSEO credentials are not configured. Collection was not executed.");
+    const missing = emptySnapshot(slug, "error", "DataForSEO credentials are not configured. Collection was not executed.", limits);
     persistSnapshot(missing);
     return missing;
   }
 
   const capturedAt = new Date().toISOString();
   const serpLocation = resolveDataForSeoSearchLocationFromSubject(subject);
-  const endpoints = [
-    { endpoint: DATAFORSEO_LABS_ENDPOINTS.rankedKeywords, requests: 0, tasks: 0, cost: 0 },
-    { endpoint: SERP_ENDPOINT, requests: 0, tasks: 0, cost: 0 },
-  ];
-  const ownDomains = [subject.subjectDomain].filter(Boolean);
-  const serpAttempts: NationalSearchIntelligenceSnapshot["serpAttempts"] = [];
+  const endpoints = emptyEndpoints();
+  const ownDomains = [normaliseLabsDomain(subject.subjectDomain)].filter(Boolean);
+  const labsAttempts: NationalSearchLabsAttempt[] = [];
+  onProgress?.({ type: "plan", plan: collectionPlan });
 
   let keywords: NationalCustomerRankingKeyword[] = [];
   let rankedIncomplete = false;
   onProgress?.({ type: "ranked_start" });
-  try {
-    const ranked = await getDomainRankedKeywordsWithCost({
-      domain: subject.subjectDomain,
-      locationName: "United Kingdom",
-      languageCode: subject.languageCode || "en",
-      limit: NI03B_LIMITS.customerRankedKeywords,
-      orderBy: ["keyword_data.keyword_info.search_volume,desc"],
-    });
-    endpoints[0].requests = 1;
-    endpoints[0].tasks = ranked.tasks;
-    endpoints[0].cost = ranked.cost;
-    keywords = ranked.rows.slice(0, NI03B_LIMITS.customerRankedKeywords).map((row) => ({
-      keyword: row.keyword,
-      position: row.position,
-      rankingUrl: row.url,
-      searchVolume: row.searchVolume,
-      cpc: row.cpc,
-      competition: row.competition,
-      capturedAt,
-      sourceEndpoint: ranked.endpoint,
-      evidenceSource: "DATAFORSEO_LIVE",
-      calculated: false,
-    }));
+  const ranked = await executeDomainRankedKeywords({
+    domain: subject.subjectDomain,
+    locationCode: serpLocation.locationCode,
+    languageCode: subject.languageCode || "en",
+    limit: limits.customerKeywordUniverse,
+    orderBy: ["keyword_data.keyword_info.search_volume,desc"],
+  });
+  const rankedRetry = ranked.attempts.find((attempt) => attempt.attemptNumber > 1);
+  if (rankedRetry) {
+    onProgress?.({ type: "ranked_retry", statusCode: ranked.attempts[0]?.taskStatusCode ?? null });
+  }
+  addEndpointUsage(endpoints, DATAFORSEO_LABS_ENDPOINTS.rankedKeywords, ranked.attempts, ranked.cost);
+  labsAttempts.push(...toLabsAttempts("customer_ranked_keywords", subject.subjectDomain, ranked.attempts));
+  if (ranked.successful && ranked.result) {
+    keywords = sortKeywordsCommercially(
+      ranked.result.rows.slice(0, limits.customerKeywordUniverse).map((row) => mapCustomerKeyword(row, capturedAt, ranked.endpoint)),
+    );
     onProgress?.({ type: "ranked_complete", rows: keywords.length, cost: ranked.cost });
-  } catch (err) {
-    const timedOut = isDataForSeoTransportTimeout(err);
-    const message = err instanceof Error ? err.message : "DataForSEO ranked keyword collection failed.";
-    onProgress?.({ type: "ranked_failed", timedOut, message });
-    if (!timedOut) {
-      const failed = emptySnapshot(slug, "error", message);
+  } else {
+    rankedIncomplete = true;
+    const last = ranked.attempts[ranked.attempts.length - 1];
+    onProgress?.({
+      type: "ranked_failed",
+      timedOut: ranked.timedOut,
+      message: ranked.fatalMessage || last?.taskStatusMessage || "DataForSEO ranked keyword collection failed.",
+    });
+    if (ranked.fatal) {
+      const failed = snapshotShell({
+        slug,
+        liveExecution: true,
+        fixture: false,
+        recovered: false,
+        status: "error",
+        lastError: ranked.fatalMessage || last?.taskStatusMessage || "DataForSEO ranked keyword collection failed.",
+        reusedExistingSnapshot: false,
+        capturedAt,
+        keywords: [],
+        competitors: [],
+        endpoints,
+        labsAttempts,
+        limits,
+        collectionPlan,
+      });
       persistSnapshot(failed);
       return failed;
     }
-    endpoints[0].requests = 1;
-    endpoints[0].tasks = 1;
-    rankedIncomplete = true;
   }
 
-  const queries = buildNationalCompetitorDiscoveryQueries({
-    businessName: subject.businessName,
-    marketCountry: subject.country || "United Kingdom",
-    targetCustomerMarket: subject.primaryMarket,
-    services: [],
-  }).slice(0, NI03B_LIMITS.serpQueries);
+  let organicCompetitors: NationalOrganicSearchCompetitor[] = [];
+  let excludedCompetitors: NationalOrganicSearchCompetitor[] = [];
+  let competitorDiscoveryIncomplete = false;
+  onProgress?.({ type: "competitors_domain_start" });
+  const discovered = await executeDomainCompetitors({
+    domain: subject.subjectDomain,
+    locationCode: serpLocation.locationCode,
+    languageCode: subject.languageCode || "en",
+    limit: limits.competitorDiscoveryCandidates,
+    excludeTopDomains: true,
+    excludeDomains: ownDomains,
+  });
+  if (discovered.attempts.some((attempt) => attempt.attemptNumber > 1)) {
+    onProgress?.({ type: "competitors_domain_retry", statusCode: discovered.attempts[0]?.taskStatusCode ?? null });
+  }
+  addEndpointUsage(endpoints, DATAFORSEO_LABS_ENDPOINTS.competitorsDomain, discovered.attempts, discovered.cost);
+  labsAttempts.push(...toLabsAttempts("competitors_domain", subject.subjectDomain, discovered.attempts));
+  if (discovered.successful && discovered.result) {
+    const mapped = discovered.result.rows
+      .filter((row) => row.domain && !isOwnDomain(row.domain, ownDomains))
+      .slice(0, limits.competitorDiscoveryCandidates)
+      .map((row) => mapLabsCompetitor({ row, capturedAt, ownDomains, analysed: false }));
+    excludedCompetitors = mapped.filter((row) => row.qualification === "rejected" || row.classification === "excluded");
+    organicCompetitors = mapped
+      .filter((row) => row.qualification !== "rejected" && row.classification !== "excluded")
+      .sort((a, b) => (b.sharedKeywordCount || 0) - (a.sharedKeywordCount || 0) || (b.organicEtv || 0) - (a.organicEtv || 0));
+    onProgress?.({ type: "competitors_domain_complete", rows: organicCompetitors.length, cost: discovered.cost });
+  } else {
+    competitorDiscoveryIncomplete = true;
+    const last = discovered.attempts[discovered.attempts.length - 1];
+    onProgress?.({
+      type: "competitors_domain_failed",
+      timedOut: discovered.timedOut,
+      message: discovered.fatalMessage || last?.taskStatusMessage || "DataForSEO competitors domain collection failed.",
+    });
+  }
 
-  const byDomain = new Map<string, {
-    domain: string;
-    url: string;
-    title: string;
-    description: string;
-    bestPosition: number | null;
-    sourceQueries: string[];
-  }>();
+  const toAnalyse = [
+    ...organicCompetitors.filter((row) => row.qualification === "qualified"),
+    ...organicCompetitors.filter((row) => row.qualification === "candidate"),
+  ].slice(0, limits.qualifiedCompetitorsAnalysed);
 
-  let serpQueryFailed = false;
-  for (let index = 0; index < queries.length; index += 1) {
-    const query = queries[index];
-    onProgress?.({ type: "serp_start", index: index + 1, total: queries.length, query: query.query });
-    const executed = await executeNationalGoogleOrganic({
-      query: query.query,
-      marketCountry: subject.country,
+  const competitorKeywordUniverses: NationalCompetitorKeywordUniverse[] = [];
+  let competitorKeywordsIncomplete = false;
+  for (let index = 0; index < toAnalyse.length; index += 1) {
+    const competitor = toAnalyse[index];
+    onProgress?.({ type: "competitor_keywords_start", index: index + 1, total: toAnalyse.length, domain: competitor.domain });
+    const competitorRanked = await executeDomainRankedKeywords({
+      domain: competitor.domain,
       locationCode: serpLocation.locationCode,
       languageCode: subject.languageCode || "en",
-      depth: NI03B_LIMITS.serpDepth,
-    }, {
-      onRetry(attempt) {
-        onProgress?.({
-          type: "serp_retry",
-          index: index + 1,
-          total: queries.length,
-          query: query.query,
-          statusCode: attempt.taskStatusCode,
-        });
-      },
+      limit: limits.competitorRankedKeywords,
+      orderBy: ["keyword_data.keyword_info.search_volume,desc"],
     });
-    for (const attempt of executed.attempts) {
-      endpoints[1].requests += 1;
-      endpoints[1].tasks += 1;
-      endpoints[1].cost += typeof attempt.cost === "number" ? attempt.cost : 0;
-      serpAttempts.push({
-        query: attempt.query,
-        endpoint: attempt.endpoint,
-        taskId: attempt.taskId,
-        taskStatusCode: attempt.taskStatusCode,
-        taskStatusMessage: attempt.taskStatusMessage,
-        cost: attempt.cost,
-        successful: attempt.successful,
-        timedOut: attempt.timedOut,
-        attemptNumber: attempt.attemptNumber,
-        capturedAt: attempt.capturedAt,
+    if (competitorRanked.attempts.some((attempt) => attempt.attemptNumber > 1)) {
+      onProgress?.({
+        type: "competitor_keywords_retry",
+        index: index + 1,
+        total: toAnalyse.length,
+        domain: competitor.domain,
+        statusCode: competitorRanked.attempts[0]?.taskStatusCode ?? null,
       });
     }
-    const retried = executed.attempts.length > 1;
-    const lastAttempt = executed.attempts[executed.attempts.length - 1];
-    if (executed.successful) {
+    addEndpointUsage(endpoints, DATAFORSEO_LABS_ENDPOINTS.rankedKeywords, competitorRanked.attempts, competitorRanked.cost);
+    labsAttempts.push(...toLabsAttempts("competitor_ranked_keywords", competitor.domain, competitorRanked.attempts));
+    if (competitorRanked.successful && competitorRanked.result) {
+      const competitorKeywords = sortKeywordsCommercially(
+        competitorRanked.result.rows
+          .slice(0, limits.competitorRankedKeywords)
+          .map((row) => mapCompetitorKeyword(competitor.domain, row, capturedAt, competitorRanked.endpoint)),
+      );
+      competitorKeywordUniverses.push({
+        domain: competitor.domain,
+        status: competitorKeywords.length ? "collected" : "empty",
+        lastError: null,
+        capturedAt,
+        sourceEndpoint: competitorRanked.endpoint,
+        cost: competitorRanked.cost,
+        keywords: competitorKeywords,
+      });
+      competitor.analysed = true;
       onProgress?.({
-        type: "serp_complete",
+        type: "competitor_keywords_complete",
         index: index + 1,
-        total: queries.length,
-        query: query.query,
-        results: executed.organicResultCount,
-        cost: executed.cost,
-        retried,
+        total: toAnalyse.length,
+        domain: competitor.domain,
+        rows: competitorKeywords.length,
+        cost: competitorRanked.cost,
       });
     } else {
-      onProgress?.({
-        type: "serp_failed",
-        index: index + 1,
-        total: queries.length,
-        query: query.query,
-        timedOut: Boolean(lastAttempt?.timedOut),
-        statusCode: lastAttempt?.taskStatusCode ?? null,
-        retried,
-        cost: executed.cost,
+      competitorKeywordsIncomplete = true;
+      const last = competitorRanked.attempts[competitorRanked.attempts.length - 1];
+      competitorKeywordUniverses.push({
+        domain: competitor.domain,
+        status: "error",
+        lastError: competitorRanked.fatalMessage || last?.taskStatusMessage || "Competitor ranked keyword collection failed.",
+        capturedAt,
+        sourceEndpoint: competitorRanked.endpoint,
+        cost: competitorRanked.cost,
+        keywords: [],
       });
-    }
-    if (executed.fatal) {
-      serpQueryFailed = true;
-      break;
-    }
-    if (!executed.successful) {
-      serpQueryFailed = true;
-      continue;
-    }
-    for (const row of executed.results) {
-      const domain = String(row.domain || "").replace(/^www\./, "").toLowerCase();
-      if (!domain || ownDomains.includes(domain) || (subject.subjectDomain && domain.endsWith(`.${subject.subjectDomain}`))) continue;
-      const previous = byDomain.get(domain);
-      if (!previous) {
-        byDomain.set(domain, {
-          domain,
-          url: row.url,
-          title: row.title,
-          description: row.description,
-          bestPosition: row.position || null,
-          sourceQueries: [query.query],
-        });
-      } else {
-        if (row.position > 0 && (previous.bestPosition == null || row.position < previous.bestPosition)) {
-          previous.bestPosition = row.position;
-          previous.url = row.url;
-          previous.title = row.title || previous.title;
-          previous.description = row.description || previous.description;
-        }
-        if (!previous.sourceQueries.includes(query.query)) previous.sourceQueries.push(query.query);
-      }
+      onProgress?.({
+        type: "competitor_keywords_failed",
+        index: index + 1,
+        total: toAnalyse.length,
+        domain: competitor.domain,
+        timedOut: competitorRanked.timedOut,
+        message: competitorRanked.fatalMessage || last?.taskStatusMessage || "Competitor ranked keyword collection failed.",
+      });
     }
   }
 
-  const competitors = [...byDomain.values()]
-    .sort((a, b) => (a.bestPosition || 999) - (b.bestPosition || 999))
-    .slice(0, NI03B_LIMITS.competitorCandidates)
-    .map((row) => mapCompetitor({
-      ...row,
-      name: row.title.split(/\s+[|\-–—]\s+/)[0] || row.domain,
-      capturedAt,
-      evidenceSource: "DATAFORSEO_LIVE",
-      ownDomains,
-    }))
-    .filter((row): row is NationalOrganicSearchCompetitor => Boolean(row));
-
-  const usable = keywords.length > 0 || competitors.length > 0;
-  const collectionIncomplete = rankedIncomplete || serpQueryFailed;
+  const usable = keywords.length > 0 || organicCompetitors.length > 0 || competitorKeywordUniverses.some((row) => row.keywords.length > 0);
+  const collectionIncomplete = rankedIncomplete || competitorDiscoveryIncomplete || competitorKeywordsIncomplete;
   let status: NationalSearchIntelligenceSnapshot["status"];
   let lastError: string | null = null;
   if (!usable && collectionIncomplete) {
@@ -604,9 +844,13 @@ async function collectInner(
     reusedExistingSnapshot: false,
     capturedAt,
     keywords,
-    competitors,
+    competitors: organicCompetitors,
+    excludedCompetitors,
+    competitorKeywordUniverses,
     endpoints,
-    serpAttempts,
+    labsAttempts,
+    limits,
+    collectionPlan,
   });
   persistSnapshot(snapshot);
   if (status !== "error") persistCompetitorDiscovery(snapshot);
@@ -615,7 +859,11 @@ async function collectInner(
 
 export async function collectNationalSearchIntelligence(
   slug: string,
-  options: { force?: boolean; onProgress?: NationalSearchIntelligenceProgress } = {},
+  options: {
+    force?: boolean;
+    onProgress?: NationalSearchIntelligenceProgress;
+    limits?: Partial<NationalSearchIntelligenceLimits>;
+  } = {},
 ): Promise<NationalSearchIntelligenceSnapshot> {
   const subject = resolveNationalIntelligenceSubject(slug);
   if (!subject.eligibleForNationalIntelligence) {
@@ -626,7 +874,7 @@ export async function collectNationalSearchIntelligence(
     const snapshot = await existing;
     return { ...snapshot, reusedExistingSnapshot: true };
   }
-  const pending = collectInner(subject.slug, Boolean(options.force), options.onProgress);
+  const pending = collectInner(subject.slug, Boolean(options.force), options.onProgress, options.limits || {});
   inFlight.set(subject.slug, pending);
   try {
     return await pending;

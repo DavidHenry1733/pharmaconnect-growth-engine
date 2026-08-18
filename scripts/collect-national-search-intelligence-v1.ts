@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 /**
- * NI-03B — Explicit National Search Intelligence collection.
- * Does not run on page render. Bounded DataForSEO Labs + SERP only.
+ * NI-03C — Explicit National Search Intelligence collection.
+ * Does not run on page render. Bounded DataForSEO Labs only.
  */
 import * as serviceMod from "../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
 import type { NationalSearchIntelligenceProgressEvent } from "../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
@@ -11,7 +11,11 @@ function exported<T extends object>(mod: T | { default: T }): T {
   return maybe.default ?? (mod as T);
 }
 
-const { collectNationalSearchIntelligence, nationalSearchIntelligencePath } = exported(serviceMod);
+const {
+  collectNationalSearchIntelligence,
+  nationalSearchIntelligencePath,
+  planNationalSearchIntelligenceCollection,
+} = exported(serviceMod);
 
 const slug = String(process.argv[2] || "").trim();
 const force = process.argv.includes("--force");
@@ -25,8 +29,15 @@ function money(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? `$${value}` : "$0";
 }
 
+const planned = planNationalSearchIntelligenceCollection(slug);
+console.log(
+  `PLAN customerKeywordTasks=${planned.customerKeywordTasks} competitorDiscoveryTasks=${planned.competitorDiscoveryTasks} competitorKeywordTasks=${planned.competitorKeywordTasks} maximumPaidRequests=${planned.maximumPaidRequests}`,
+);
+
 function printProgress(event: NationalSearchIntelligenceProgressEvent): void {
   switch (event.type) {
+    case "plan":
+      return;
     case "ranked_start":
       console.log("COLLECTING ranked_keywords...");
       return;
@@ -36,25 +47,32 @@ function printProgress(event: NationalSearchIntelligenceProgressEvent): void {
     case "ranked_failed":
       console.log(`RANKED_KEYWORDS FAILED — ${event.timedOut ? "TIMEOUT" : event.message}`);
       return;
-    case "serp_start":
-      console.log(`COLLECTING SERP ${event.index}/${event.total} — ${event.query}`);
+    case "ranked_retry":
+      console.log(`RANKED_KEYWORDS FAILED — ${event.statusCode ?? "unknown"} — retrying once`);
       return;
-    case "serp_retry":
-      console.log(`SERP ${event.index} FAILED — ${event.statusCode ?? "unknown"} — retrying once`);
+    case "competitors_domain_start":
+      console.log("COLLECTING competitors_domain...");
       return;
-    case "serp_complete":
-      console.log(
-        event.retried
-          ? `SERP ${event.index} RETRY COMPLETE — results=${event.results} cost=${money(event.cost)}`
-          : `SERP ${event.index} COMPLETE — results=${event.results} cost=${money(event.cost)}`,
-      );
+    case "competitors_domain_complete":
+      console.log(`COMPETITORS_DOMAIN COMPLETE — rows=${event.rows} cost=${money(event.cost)}`);
       return;
-    case "serp_failed":
-      if (event.retried) {
-        console.log(`SERP ${event.index} RETRY FAILED — ${event.timedOut ? "TIMEOUT" : event.statusCode ?? "unknown"}`);
-        return;
-      }
-      console.log(`SERP ${event.index} FAILED — ${event.timedOut ? "TIMEOUT" : event.statusCode ?? "unknown"}`);
+    case "competitors_domain_failed":
+      console.log(`COMPETITORS_DOMAIN FAILED — ${event.timedOut ? "TIMEOUT" : event.message}`);
+      return;
+    case "competitors_domain_retry":
+      console.log(`COMPETITORS_DOMAIN FAILED — ${event.statusCode ?? "unknown"} — retrying once`);
+      return;
+    case "competitor_keywords_start":
+      console.log(`COLLECTING competitor ranked_keywords ${event.index}/${event.total} — ${event.domain}`);
+      return;
+    case "competitor_keywords_complete":
+      console.log(`COMPETITOR KEYWORDS COMPLETE — ${event.domain} rows=${event.rows} cost=${money(event.cost)}`);
+      return;
+    case "competitor_keywords_failed":
+      console.log(`COMPETITOR KEYWORDS FAILED — ${event.domain} ${event.timedOut ? "TIMEOUT" : event.message}`);
+      return;
+    case "competitor_keywords_retry":
+      console.log(`COMPETITOR KEYWORDS FAILED — ${event.domain} ${event.statusCode ?? "unknown"} — retrying once`);
       return;
   }
 }
@@ -75,6 +93,8 @@ console.log(JSON.stringify({
   evidenceSource: snapshot.provenance.evidenceSource,
   keywordCount: snapshot.customerKeywords.length,
   competitorCount: snapshot.organicCompetitors.length,
+  competitorKeywordCount: snapshot.summary.competitorKeywordCount,
+  collectionPlan: snapshot.collectionPlan,
   requests: snapshot.costs.requests,
   tasks: snapshot.costs.tasks,
   totalCost: snapshot.costs.totalCost,

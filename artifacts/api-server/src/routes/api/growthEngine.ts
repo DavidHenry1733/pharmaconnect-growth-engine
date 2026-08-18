@@ -28,6 +28,7 @@ import { resolveTenantProfileSlug } from "../../../../../src/pharmacy/pharmacyTe
 import { isNationalGrowthPlatform } from "../../../../../src/pharmacy/growthPlatformResolverService.ts";
 import {
   collectNationalSearchIntelligence,
+  planNationalSearchIntelligenceCollection,
   readNationalSearchIntelligence,
 } from "../../../../../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
 import {
@@ -171,6 +172,19 @@ router.get("/growth-engine/:slug/search-intelligence", (req, res) => {
   res.json({ ok: true, snapshot: readNationalSearchIntelligence(slug) });
 });
 
+router.get("/growth-engine/:slug/search-intelligence/plan", (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      error: "National Search Intelligence is available for NATIONAL Growth Platform tenants only.",
+    });
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true, plan: planNationalSearchIntelligenceCollection(slug) });
+});
+
 router.post("/growth-engine/:slug/search-intelligence/collect", async (req, res) => {
   const slug = resolveSlug(req.params.slug);
   if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
@@ -189,6 +203,8 @@ router.post("/growth-engine/:slug/search-intelligence/collect", async (req, res)
       reusedExistingSnapshot: snapshot.reusedExistingSnapshot,
       keywordCount: snapshot.customerKeywords.length,
       competitorCount: snapshot.organicCompetitors.length,
+      competitorKeywordCount: snapshot.summary.competitorKeywordCount,
+      collectionPlan: snapshot.collectionPlan,
       cost: snapshot.costs.totalCost,
     });
   } catch (err: unknown) {

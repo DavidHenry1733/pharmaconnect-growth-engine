@@ -68,6 +68,14 @@ const EXCLUDED_DOMAIN_PATTERNS = [
   /(^|\.)gov\.uk$/i,
   /(^|\.)nhs\.uk$/i,
   /(^|\.)bmj\.com$/i,
+  /(^|\.)google\.(com|co\.\w{2}|com?\.\w{2})$/i,
+  /(^|\.)bing\.com$/i,
+  /(^|\.)yahoo\.com$/i,
+  /(^|\.)duckduckgo\.com$/i,
+  /(^|\.)yandex\.(com|ru)$/i,
+  /(^|\.)baidu\.com$/i,
+  /(^|\.)yell\.com$/i,
+  /(^|\.)yellowpages\./i,
 ];
 
 const EXCLUDED_ORGANISATION_SIGNALS = [

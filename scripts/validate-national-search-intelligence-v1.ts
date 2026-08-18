@@ -1,8 +1,8 @@
 #!/usr/bin/env npx tsx
 /**
- * NI-03B — National Search Intelligence V1
- * Customer ranking keywords + organic competitor discovery + dashboard contract.
- * Does not build keyword intersection/gap intelligence.
+ * NI-03B/C — National Search Intelligence V1
+ * Customer keyword universe + organic competitor intelligence + dashboard contract.
+ * Does not build keyword intersection/gap recommendations.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -21,6 +21,7 @@ import * as localMarketPageMod from "../src/pharmacy/growthEngineLocalMarketPage
 import * as locationResolverMod from "../src/pharmacy/dataForSeoSearchLocationResolver.ts";
 import * as searchProviderMod from "../src/pharmacy/nationalSearchProviderModel.ts";
 import * as dataForSeoHttpMod from "../src/pharmacy/dataForSeoHttp.ts";
+import * as searchLimitsMod from "../src/pharmacy/nationalSearchIntelligenceLimits.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -43,6 +44,7 @@ const localMarketPage = exported(localMarketPageMod);
 const locationResolver = exported(locationResolverMod);
 const searchProvider = exported(searchProviderMod);
 const dataForSeoHttp = exported(dataForSeoHttpMod);
+const searchLimits = exported(searchLimitsMod);
 
 let pass = 0;
 let fail = 0;
@@ -91,6 +93,7 @@ const adapterSource = read("src/pharmacy/dataForSeoNationalSearchAdapter.ts");
 const locationResolverSource = read("src/pharmacy/dataForSeoSearchLocationResolver.ts");
 const httpSource = read("src/pharmacy/dataForSeoHttp.ts");
 const collectScriptSource = read("scripts/collect-national-search-intelligence-v1.ts");
+const limitsSource = read("src/pharmacy/nationalSearchIntelligenceLimits.ts");
 
 check(
   "platform-national-eligible",
@@ -178,7 +181,15 @@ check(
     && !serviceSource.includes("marketCountry: query.marketCountry")
     && serviceSource.includes("locationCode: serpLocation.locationCode")
     && serviceSource.includes("resolveDataForSeoSearchLocationFromSubject(subject)"),
-  "SERP uses subject country location_code, not primaryMarket as location_name",
+  "collection uses subject country location_code, not primaryMarket as location_name",
+);
+check(
+  "labs-uses-subject-location-code",
+  labsSource.includes("location_code: Number(input.locationCode)")
+    && serviceSource.includes("executeDomainRankedKeywords")
+    && serviceSource.includes("executeDomainCompetitors")
+    && serviceSource.includes("locationCode: serpLocation.locationCode"),
+  "Labs ranked keywords and competitors_domain use subject country location_code",
 );
 check(
   "location-resolver-no-pharmaconnect",
@@ -197,17 +208,19 @@ check(
   "transport-timeout-is-not-retryable",
   httpSource.includes("retryable = false")
     && adapterSource.includes("!first.attempt.timedOut")
-    && serviceSource.includes("isDataForSeoTransportTimeout"),
+    && labsSource.includes("!first.attempt.timedOut")
+    && labsSource.includes("MAX_DATAFORSEO_INTERNAL_SE_RETRIES"),
   "timeout failures are typed and not retried",
 );
 check(
   "cli-progress-is-concise",
   collectScriptSource.includes("COLLECTING ranked_keywords...")
-    && collectScriptSource.includes("COLLECTING SERP")
+    && collectScriptSource.includes("COLLECTING competitors_domain...")
     && collectScriptSource.includes("retrying once")
     && collectScriptSource.includes("PERSISTED snapshot=")
     && collectScriptSource.includes("STATUS=")
     && collectScriptSource.includes("TOTAL_COST=")
+    && collectScriptSource.includes("PLAN customerKeywordTasks=")
     && !/DATAFORSEO_(LOGIN|PASSWORD)/.test(collectScriptSource),
   "collector CLI prints bounded progress without credentials",
 );
@@ -215,8 +228,21 @@ check(
 check(
   "collection-explicit-function",
   typeof searchService.collectNationalSearchIntelligence === "function"
-    && typeof searchService.readNationalSearchIntelligence === "function",
-  "collect vs read are separate functions",
+    && typeof searchService.readNationalSearchIntelligence === "function"
+    && typeof searchService.planNationalSearchIntelligenceCollection === "function",
+  "collect vs read vs plan are separate functions",
+);
+const defaultPlan = searchService.planNationalSearchIntelligenceCollection("pharmaconnect");
+check(
+  "collection-plan-defaults",
+  defaultPlan.customerKeywordTasks === 1
+    && defaultPlan.competitorDiscoveryTasks === 1
+    && defaultPlan.competitorKeywordTasks === 5
+    && defaultPlan.maximumPaidRequests === 7
+    && defaultPlan.limits.customerKeywordUniverse === 500
+    && defaultPlan.limits.qualifiedCompetitorsAnalysed === 5
+    && defaultPlan.limits.competitorRankedKeywords === 300,
+  JSON.stringify(defaultPlan),
 );
 check(
   "page-render-reads-only",
@@ -235,23 +261,36 @@ check(
 check(
   "json-get-does-not-collect",
   /router\.get\("\/growth-engine\/:slug\/search-intelligence"[\s\S]*?readNationalSearchIntelligence\(slug\)/.test(apiSource)
+    && /router\.get\("\/growth-engine\/:slug\/search-intelligence\/plan"[\s\S]*?planNationalSearchIntelligenceCollection\(slug\)/.test(apiSource)
     && /router\.post\("\/growth-engine\/:slug\/search-intelligence\/collect"[\s\S]*?collectNationalSearchIntelligence/.test(apiSource),
-  "JSON GET reads persisted snapshot; POST collect is explicit",
+  "JSON GET reads persisted snapshot; plan is local; POST collect is explicit",
 );
 check(
-  "bounded-limits",
-  searchModel.NI03B_LIMITS.customerRankedKeywords === 40
-    && searchModel.NI03B_LIMITS.serpQueries === 3
-    && searchModel.NI03B_LIMITS.serpDepth === 10
-    && searchModel.NI03B_LIMITS.competitorCandidates === 15,
-  JSON.stringify(searchModel.NI03B_LIMITS),
+  "bounded-limits-defaults",
+  searchLimits.NI03C_DEFAULT_LIMITS.customerKeywordUniverse === 500
+    && searchLimits.NI03C_DEFAULT_LIMITS.qualifiedCompetitorsAnalysed === 5
+    && searchLimits.NI03C_DEFAULT_LIMITS.competitorRankedKeywords === 300
+    && searchModel.NI03C_LIMITS.customerKeywordUniverse === 500,
+  JSON.stringify(searchLimits.NI03C_DEFAULT_LIMITS),
 );
 check(
-  "service-uses-bounded-limits",
-  serviceSource.includes("NI03B_LIMITS.customerRankedKeywords")
-    && serviceSource.includes("NI03B_LIMITS.serpQueries")
-    && serviceSource.includes("NI03B_LIMITS.serpDepth"),
-  "collection uses NI-03B limits",
+  "limits-are-configuration",
+  limitsSource.includes("NATIONAL_SEARCH_CUSTOMER_KEYWORD_LIMIT")
+    && limitsSource.includes("NATIONAL_SEARCH_COMPETITOR_ANALYSIS_LIMIT")
+    && limitsSource.includes("NATIONAL_SEARCH_COMPETITOR_KEYWORD_LIMIT")
+    && !/pharmaconnect/i.test(limitsSource)
+    && typeof searchLimits.resolveNationalSearchIntelligenceLimits === "function",
+  "limits resolve from env with commercial defaults, no tenant hardcode",
+);
+check(
+  "service-uses-resolved-limits",
+  serviceSource.includes("resolveNationalSearchIntelligenceLimits")
+    && serviceSource.includes("limits.customerKeywordUniverse")
+    && serviceSource.includes("limits.qualifiedCompetitorsAnalysed")
+    && serviceSource.includes("limits.competitorRankedKeywords")
+    && serviceSource.includes("executeDomainCompetitors")
+    && !serviceSource.includes("buildNationalCompetitorDiscoveryQueries"),
+  "collection uses configurable NI-03C limits and Labs competitors_domain",
 );
 check(
   "in-flight-dedupe",
@@ -284,9 +323,12 @@ check(
     && modelSource.includes("searchVolume")
     && modelSource.includes("cpc")
     && modelSource.includes("competition")
+    && modelSource.includes("estimatedTraffic")
+    && modelSource.includes("searchIntent")
     && modelSource.includes("evidenceSource")
-    && modelSource.includes("calculated: false"),
-  "ranked keyword model retains evidence fields",
+    && modelSource.includes("calculated: false")
+    && !modelSource.includes("keywordDifficulty"),
+  "ranked keyword model retains evidence fields without fabricated difficulty",
 );
 check(
   "null-not-fabricated-in-service",
@@ -295,21 +337,25 @@ check(
 );
 check(
   "labs-canonical-client",
-  serviceSource.includes("getDomainRankedKeywordsWithCost")
+  serviceSource.includes("executeDomainRankedKeywords")
     && labsSource.includes("DATAFORSEO_LABS_ENDPOINTS")
-    && labsSource.includes("ranked_keywords"),
-  "uses NI-03A canonical ranked_keywords client",
+    && labsSource.includes("ranked_keywords")
+    && labsSource.includes("competitors_domain"),
+  "uses NI-03A canonical Labs ranked_keywords + competitors_domain client",
 );
 
 check(
   "competitors-organic-evidence",
   modelSource.includes("whyIdentified")
-    && modelSource.includes("sourceQueries")
+    && modelSource.includes("sharedKeywordCount")
     && modelSource.includes("qualification")
+    && modelSource.includes("excludedCompetitors")
+    && modelSource.includes("competitorKeywordUniverses")
     && serviceSource.includes("qualifyNationalCompetitorV2")
-    && serviceSource.includes("executeNationalGoogleOrganic")
+    && serviceSource.includes("executeDomainCompetitors")
+    && !serviceSource.includes("executeNationalGoogleOrganic")
     && !serviceSource.includes("searchNationalGoogleOrganic"),
-  "organic competitor evidence + qualification retained",
+  "organic competitor evidence from Labs competitors_domain + qualification retained",
 );
 check(
   "competitors-no-google-places",
@@ -330,6 +376,7 @@ check(
     && storageSource.includes("search-intelligence-v1")
     && serviceSource.includes("nationalIntelligenceDataPath")
     && serviceSource.includes("ranked-keywords-customer")
+    && serviceSource.includes("ranked-keywords-competitors")
     && serviceSource.includes("cost-ledger-v1")
     && serviceSource.includes("refresh-metadata-v1"),
   "canonical tenant-scoped WORKSPACE_ROOT storage",
@@ -498,12 +545,24 @@ check(
   nationalHtml.includes('data-ni03b-section="keywords"')
     && nationalHtml.includes("<th>Keyword</th>")
     && nationalHtml.includes("<th>Position</th>")
+    && nationalHtml.includes("<th>Search volume</th>")
+    && nationalHtml.includes("<th>CPC</th>")
     && nationalHtml.includes("<th>Ranking page</th>"),
   "customer keyword table renders",
 );
 check(
+  "ui-visibility-and-competitor-keywords",
+  pageSource.includes("Your organic search visibility")
+    && pageSource.includes("Keywords Top 3")
+    && pageSource.includes("Keywords Top 100")
+    && pageSource.includes("Competitor keywords")
+    && pageSource.includes("These are businesses competing with you in organic search"),
+  "visibility metrics and competitor keyword inspection render",
+);
+check(
   "ui-organic-competitor-section",
   nationalHtml.includes('data-ni03b-section="competitors"')
+    && nationalHtml.includes("These are businesses competing with you in organic search")
     && nationalHtml.includes("not selected based on physical proximity"),
   "organic competitor section renders",
 );
@@ -609,71 +668,159 @@ check(
   "NATIONAL local-market action remains Places-blocked",
 );
 
+
 const previousLogin = process.env.DATAFORSEO_LOGIN;
 const previousPassword = process.env.DATAFORSEO_PASSWORD;
 process.env.DATAFORSEO_LOGIN = "ni03b-validator";
 process.env.DATAFORSEO_PASSWORD = "ni03b-validator";
 let mockedRequests = 0;
-const serpRequestBodies: unknown[] = [];
+const labsRequestBodies: Array<{ url: string; task: Record<string, unknown> }> = [];
+
+function customerRankedPayload() {
+  return {
+    status_code: 20000,
+    tasks: [{
+      status_code: 20000,
+      cost: 0.0123,
+      result: [{
+        items: [{
+          keyword_data: {
+            keyword: "pharmacy website design uk",
+            keyword_info: { search_volume: 210, cpc: 4.2, competition: 0.51 },
+            search_intent_info: { main_intent: "commercial" },
+          },
+          ranked_serp_element: {
+            serp_item: {
+              type: "organic",
+              rank_absolute: 7,
+              rank_group: 7,
+              etv: 18.4,
+              url: "https://example-national-search-b.co.uk/websites",
+            },
+          },
+        }, {
+          keyword_data: {
+            keyword: "pharmacy seo agency",
+            keyword_info: { search_volume: null, cpc: null, competition: null },
+          },
+          ranked_serp_element: {
+            serp_item: {
+              type: "organic",
+              rank_absolute: 12,
+              url: "https://example-national-search-b.co.uk/seo",
+            },
+          },
+        }],
+      }],
+    }],
+  };
+}
+
+function competitorRankedPayload(domain: string, cost = 0.008) {
+  return {
+    status_code: 20000,
+    tasks: [{
+      status_code: 20000,
+      cost,
+      result: [{
+        items: [{
+          keyword_data: {
+            keyword: "pharmacy website design",
+            keyword_info: { search_volume: 480, cpc: 5.1, competition: 0.62 },
+          },
+          ranked_serp_element: {
+            serp_item: {
+              rank_absolute: 3,
+              etv: 42,
+              url: `https://${domain}/websites`,
+            },
+          },
+        }],
+      }],
+    }],
+  };
+}
+
+function competitorsDomainPayload(subjectDomain: string, extras: Array<Record<string, unknown>> = []) {
+  return {
+    status_code: 20000,
+    tasks: [{
+      status_code: 20000,
+      cost: 0.0108,
+      result: [{
+        items: [
+          {
+            domain: subjectDomain,
+            intersections: 40,
+            avg_position: 8.2,
+            full_domain_metrics: { organic: { etv: 90, count: 40 } },
+          },
+          {
+            domain: "example-search-competitor.co.uk",
+            intersections: 22,
+            avg_position: 6.1,
+            full_domain_metrics: { organic: { etv: 540, count: 80 } },
+            competitor_metrics: { organic: { etv: 120 } },
+          },
+          {
+            domain: "google.com",
+            intersections: 18,
+            avg_position: 1.4,
+            full_domain_metrics: { organic: { etv: 99999, count: 1000 } },
+          },
+          {
+            domain: "pharmaceutical-journal.com",
+            intersections: 11,
+            avg_position: 4.8,
+            full_domain_metrics: { organic: { etv: 2100, count: 200 } },
+          },
+          {
+            domain: "second-agency.co.uk",
+            intersections: 9,
+            avg_position: 11.2,
+            full_domain_metrics: { organic: { etv: 200, count: 30 } },
+          },
+          ...extras,
+        ],
+      }],
+    }],
+  };
+}
+
+function labs40101Payload(cost = 0.002) {
+  return {
+    status_code: 20000,
+    tasks: [{
+      id: "task-40101",
+      status_code: 40101,
+      status_message: "Internal SE Server Error",
+      cost,
+    }],
+  };
+}
+
+function taskFromInit(init?: RequestInit): Record<string, unknown> {
+  const payload = JSON.parse(String(init?.body || "[]"));
+  return Array.isArray(payload) ? (payload[0] || {}) : {};
+}
+
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   mockedRequests += 1;
   fetchCalls += 1;
   const url = String(input);
   fetchUrls.push(url);
-  const labs = url.includes("ranked_keywords");
-  if (!labs && init?.body) {
-    serpRequestBodies.push(JSON.parse(String(init.body)));
+  const task = taskFromInit(init);
+  labsRequestBodies.push({ url, task });
+  if (url.includes("competitors_domain")) {
+    return new Response(JSON.stringify(competitorsDomainPayload("example-national-search-b.co.uk")), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }
-  const body = labs
-    ? {
-      status_code: 20000,
-      tasks: [{
-        status_code: 20000,
-        cost: 0.0123,
-        result: [{
-          items: [{
-            keyword_data: {
-              keyword: "pharmacy website design uk",
-              keyword_info: { search_volume: 210, cpc: 4.2, competition: 0.51 },
-            },
-            ranked_serp_element: {
-              serp_item: {
-                rank_absolute: 7,
-                url: "https://example-national-search-b.co.uk/websites",
-              },
-            },
-          }, {
-            keyword_data: {
-              keyword: "pharmacy seo agency",
-              keyword_info: { search_volume: null, cpc: null, competition: null },
-            },
-            ranked_serp_element: {
-              serp_item: {
-                rank_absolute: 12,
-                url: "https://example-national-search-b.co.uk/seo",
-              },
-            },
-          }],
-        }],
-      }],
-    }
-    : {
-      status_code: 20000,
-      tasks: [{
-        status_code: 20000,
-        cost: 0.0015,
-        result: [{
-          items: [{
-            type: "organic",
-            rank_absolute: 2,
-            domain: "example-search-competitor.co.uk",
-            url: "https://example-search-competitor.co.uk/pharmacy-websites",
-            title: "Pharmacy Website Design & SEO Agency UK",
-            description: "We provide pharmacy website design, pharmacy SEO and digital marketing services for UK community pharmacies.",
-          }],
-        }],
-      }],
-    };
+  const target = String(task.target || "");
+  const body = target === "example-national-search-b.co.uk" || !target
+    ? customerRankedPayload()
+    : competitorRankedPayload(target);
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 }) as typeof fetch;
 
@@ -687,15 +834,16 @@ check(
   `requests=${mockedRequests} reused=${firstCollect.reusedExistingSnapshot}/${secondCollect.reusedExistingSnapshot}`,
 );
 check(
-  "live-serp-requests-use-location-code-2826",
-  serpRequestBodies.length === 3
-    && serpRequestBodies.every((payload) => {
-      const task = Array.isArray(payload) ? payload[0] as Record<string, unknown> : null;
-      return Boolean(task)
-        && task.location_code === 2826
-        && !("location_name" in task);
-    }),
-  JSON.stringify(serpRequestBodies),
+  "live-labs-requests-use-location-code-2826",
+  labsRequestBodies.length >= 4
+    && labsRequestBodies.every((row) => row.task.location_code === 2826 && !("location_name" in row.task)),
+  JSON.stringify(labsRequestBodies.map((row) => row.task)),
+);
+check(
+  "no-places-or-gsc-in-collect",
+  labsRequestBodies.every((row) => /dataforseo\.com/.test(row.url))
+    && !labsRequestBodies.some((row) => /places|googleapis|searchconsole/i.test(row.url)),
+  labsRequestBodies.map((row) => row.url).join(" "),
 );
 const liveCollect = firstCollect.liveExecution ? firstCollect : secondCollect.liveExecution ? secondCollect : firstCollect;
 check(
@@ -703,22 +851,44 @@ check(
   liveCollect.customerKeywords.length === 2
     && liveCollect.customerKeywords[0]?.position === 7
     && liveCollect.customerKeywords[0]?.rankingUrl?.includes("example-national-search-b.co.uk") === true
+    && liveCollect.customerKeywords[0]?.estimatedTraffic === 18.4
+    && liveCollect.customerKeywords[0]?.searchIntent === "commercial"
     && liveCollect.customerKeywords[1]?.searchVolume === null
     && liveCollect.customerKeywords[1]?.cpc === null
     && liveCollect.costLedger.totalCost > 0
     && Math.abs(liveCollect.costLedger.totalCost - liveCollect.costs.totalCost) < 1e-9
     && fs.existsSync(storage.nationalIntelligenceDataPath(tenantBSlug, "search-intelligence-v1"))
     && fs.existsSync(storage.nationalIntelligenceDataPath(tenantBSlug, "ranked-keywords-customer"))
+    && fs.existsSync(storage.nationalIntelligenceDataPath(tenantBSlug, "ranked-keywords-competitors"))
     && fs.existsSync(storage.nationalIntelligenceDataPath(tenantBSlug, "cost-ledger-v1")),
   `keywords=${liveCollect.customerKeywords.length} cost=${liveCollect.costs.totalCost}`,
 );
 check(
   "collect-persists-organic-competitors",
-  liveCollect.organicCompetitors.length >= 1
+  liveCollect.organicCompetitors.length === 2
+    && liveCollect.organicCompetitors.every((row) => row.domain !== "example-national-search-b.co.uk")
+    && liveCollect.organicCompetitors.every((row) => row.domain !== "google.com")
+    && liveCollect.organicCompetitors[0]?.sharedKeywordCount === 22
     && liveCollect.organicCompetitors[0]?.whyIdentified.length > 0
     && liveCollect.organicCompetitors[0]?.verified === false
+    && liveCollect.organicCompetitors[0]?.discoverySource === "dataforseo_labs_competitors_domain"
     && liveCollect.status === "collected",
-  `${liveCollect.status} competitors=${liveCollect.organicCompetitors.length}`,
+  `${liveCollect.status} competitors=${liveCollect.organicCompetitors.map((row) => row.domain).join(",")}`,
+);
+check(
+  "self-and-non-commercial-excluded-with-reason",
+  liveCollect.excludedCompetitors.some((row) => row.domain === "google.com" && row.exclusionReasons.length > 0)
+    && liveCollect.excludedCompetitors.some((row) => row.domain === "pharmaceutical-journal.com")
+    && !liveCollect.organicCompetitors.some((row) => row.domain === "example-national-search-b.co.uk"),
+  liveCollect.excludedCompetitors.map((row) => `${row.domain}:${row.exclusionReasons[0] || ""}`).join(" | "),
+);
+check(
+  "competitor-keywords-persisted",
+  liveCollect.competitorKeywordUniverses.length === 2
+    && liveCollect.competitorKeywordUniverses.every((row) => row.keywords.length === 1 && row.keywords[0]?.domain === row.domain)
+    && liveCollect.summary.competitorKeywordCount === 2
+    && liveCollect.organicCompetitors.filter((row) => row.analysed).length === 2,
+  `universes=${liveCollect.competitorKeywordUniverses.length} keywords=${liveCollect.summary.competitorKeywordCount}`,
 );
 
 const persistedRead = searchService.readNationalSearchIntelligence(tenantBSlug);
@@ -726,74 +896,27 @@ check(
   "later-read-is-persisted-not-live",
   persistedRead.liveExecution === false
     && persistedRead.provenance.evidenceSource === "DATAFORSEO_PERSISTED"
-    && persistedRead.customerKeywords.length === 2,
+    && persistedRead.customerKeywords.length === 2
+    && persistedRead.competitorKeywordUniverses.length === 2,
   `${persistedRead.authority}/${persistedRead.provenance.evidenceSource}`,
+);
+
+const collectedHtml = pageRenderers.renderSearchIntelligencePage(tenantBSlug);
+check(
+  "ui-shows-collected-competitor-keywords",
+  collectedHtml.includes('data-ni03c-section="competitor-keywords"')
+    && collectedHtml.includes("example-search-competitor.co.uk")
+    && collectedHtml.includes("pharmacy website design"),
+  "collected competitor keyword table renders from persisted evidence",
 );
 
 check(
   "max-40101-retries-is-one",
   searchProvider.MAX_DATAFORSEO_INTERNAL_SE_RETRIES === 1
-    && searchProvider.DATAFORSEO_TASK_INTERNAL_SE_ERROR === 40101,
+    && searchProvider.DATAFORSEO_TASK_INTERNAL_SE_ERROR === 40101
+    && labsSource.includes("MAX_DATAFORSEO_INTERNAL_SE_RETRIES"),
   String(searchProvider.MAX_DATAFORSEO_INTERNAL_SE_RETRIES),
 );
-
-function rankedOkPayload() {
-  return {
-    status_code: 20000,
-    tasks: [{
-      status_code: 20000,
-      cost: 0.0123,
-      result: [{
-        items: [{
-          keyword_data: {
-            keyword: "pharmacy website design uk",
-            keyword_info: { search_volume: 210, cpc: 4.2, competition: 0.51 },
-          },
-          ranked_serp_element: {
-            serp_item: {
-              rank_absolute: 7,
-              url: "https://example-national-search-b.co.uk/websites",
-            },
-          },
-        }],
-      }],
-    }],
-  };
-}
-
-function serpOkPayload(domain: string, cost = 0.0015) {
-  return {
-    status_code: 20000,
-    tasks: [{
-      id: `ok-${domain}`,
-      status_code: 20000,
-      status_message: "Ok.",
-      cost,
-      result: [{
-        items: [{
-          type: "organic",
-          rank_absolute: 2,
-          domain,
-          url: `https://${domain}/pharmacy-websites`,
-          title: "Pharmacy Website Design & SEO Agency UK",
-          description: "We provide pharmacy website design, pharmacy SEO and digital marketing services for UK community pharmacies.",
-        }],
-      }],
-    }],
-  };
-}
-
-function serp40101Payload(cost = 0.002) {
-  return {
-    status_code: 20000,
-    tasks: [{
-      id: "task-40101",
-      status_code: 40101,
-      status_message: "Internal SE Server Error",
-      cost,
-    }],
-  };
-}
 
 function writeNationalTenant(slug: string, domain: string): string {
   const file = path.join(ROOT, "config/projects", `${slug}.json`);
@@ -810,16 +933,25 @@ function writeNationalTenant(slug: string, domain: string): string {
   return file;
 }
 
-async function collectWithSerpQueue(
+async function collectWithLabsQueue(
   slug: string,
-  queue: object[],
-  options: { rankedAuthFail?: boolean; hangRanked?: boolean; hangFirstSerp?: boolean } = {},
+  options: {
+    rankedAuthFail?: boolean;
+    hangRanked?: boolean;
+    hangCompetitors?: boolean;
+    competitorDomainQueue?: object[];
+    competitorKeywordQueue?: object[];
+    subjectDomain?: string;
+  } = {},
 ) {
-  const remaining = [...queue];
+  const competitorDomainQueue = [...(options.competitorDomainQueue || [])];
+  const competitorKeywordQueue = [...(options.competitorKeywordQueue || [])];
   let rankedCalls = 0;
-  let serpCalls = 0;
+  let competitorDomainCalls = 0;
+  let competitorKeywordCalls = 0;
   let fetchesWithSignal = 0;
   let fetchesMissingSignal = 0;
+  const subjectDomain = options.subjectDomain || `${slug.replace(/ni03[bc]-/, "example-")}.co.uk`;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     fetchCalls += 1;
     const url = String(input);
@@ -834,77 +966,86 @@ async function collectWithSerpQueue(
       };
       if (init?.signal?.aborted) return fail();
       init?.signal?.addEventListener("abort", fail, { once: true });
-      setTimeout(() => reject(new Error("NI-03B validator hang mock was not aborted")), 5000);
+      setTimeout(() => reject(new Error("NI-03C validator hang mock was not aborted")), 5000);
     });
-    if (url.includes("ranked_keywords")) {
-      rankedCalls += 1;
-      if (options.hangRanked) return hang();
-      if (options.rankedAuthFail) {
-        return new Response(JSON.stringify({ status_code: 40100, status_message: "You are not authorized." }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify(rankedOkPayload()), { status: 200, headers: { "content-type": "application/json" } });
+    const task = taskFromInit(init);
+    if (url.includes("competitors_domain")) {
+      competitorDomainCalls += 1;
+      if (options.hangCompetitors) return hang();
+      const next = competitorDomainQueue.shift() || competitorsDomainPayload(subjectDomain);
+      return new Response(JSON.stringify(next), { status: 200, headers: { "content-type": "application/json" } });
     }
-    serpCalls += 1;
-    if (options.hangFirstSerp && serpCalls === 1) return hang();
-    const next = remaining.shift() || serp40101Payload();
-    return new Response(JSON.stringify(next), { status: 200, headers: { "content-type": "application/json" } });
+    if (url.includes("ranked_keywords")) {
+      const target = String(task.target || "");
+      if (target === subjectDomain || rankedCalls === 0 && !target) {
+        rankedCalls += 1;
+        if (options.hangRanked) return hang();
+        if (options.rankedAuthFail) {
+          return new Response(JSON.stringify({ status_code: 40100, status_message: "You are not authorized." }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify(customerRankedPayload()), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      competitorKeywordCalls += 1;
+      const next = competitorKeywordQueue.shift() || competitorRankedPayload(target);
+      return new Response(JSON.stringify(next), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    throw new Error(`Unexpected DataForSEO URL ${url}`);
   }) as typeof fetch;
   const snapshot = await searchService.collectNationalSearchIntelligence(slug, { force: true });
-  return { snapshot, rankedCalls, serpCalls, fetchesWithSignal, fetchesMissingSignal, unusedQueue: remaining.length };
+  return { snapshot, rankedCalls, competitorDomainCalls, competitorKeywordCalls, fetchesWithSignal, fetchesMissingSignal };
 }
 
-const tenantRetry = "ni03b-resilience-retry";
-const tenantPartial = "ni03b-resilience-partial";
-const tenantAllFail = "ni03b-resilience-allfail";
-const tenantAuth = "ni03b-resilience-auth";
-const tenantTimeoutSerp = "ni03b-timeout-serp";
-const tenantTimeoutRanked = "ni03b-timeout-ranked";
+const tenantRetry = "ni03c-resilience-retry";
+const tenantPartial = "ni03c-resilience-partial";
+const tenantAllFail = "ni03c-resilience-allfail";
+const tenantAuth = "ni03c-resilience-auth";
+const tenantTimeoutCompetitors = "ni03c-timeout-competitors";
+const tenantTimeoutRanked = "ni03c-timeout-ranked";
+const tenantLimit = "ni03c-limit-config";
 const extraTenantFiles = [
   writeNationalTenant(tenantRetry, "example-national-retry.co.uk"),
   writeNationalTenant(tenantPartial, "example-national-partial.co.uk"),
   writeNationalTenant(tenantAllFail, "example-national-allfail.co.uk"),
   writeNationalTenant(tenantAuth, "example-national-auth.co.uk"),
-  writeNationalTenant(tenantTimeoutSerp, "example-national-timeout-serp.co.uk"),
+  writeNationalTenant(tenantTimeoutCompetitors, "example-national-timeout-competitors.co.uk"),
   writeNationalTenant(tenantTimeoutRanked, "example-national-timeout-ranked.co.uk"),
+  writeNationalTenant(tenantLimit, "example-national-limit.co.uk"),
 ];
 
-const retryCase = await collectWithSerpQueue(tenantRetry, [
-  serp40101Payload(0.002),
-  serpOkPayload("retry-success-agency.co.uk"),
-  serpOkPayload("second-query-agency.co.uk"),
-  serpOkPayload("third-query-agency.co.uk"),
-]);
+const retryCase = await collectWithLabsQueue(tenantRetry, {
+  subjectDomain: "example-national-retry.co.uk",
+  competitorDomainQueue: [labs40101Payload(0.002), competitorsDomainPayload("example-national-retry.co.uk")],
+});
 check(
   "resilience-40101-retry-then-collected",
   retryCase.snapshot.status === "collected"
-    && retryCase.serpCalls === 4
-    && retryCase.snapshot.serpAttempts.filter((row) => row.taskStatusCode === 40101).length === 1
-    && retryCase.snapshot.serpAttempts.filter((row) => row.successful).length === 3
-    && Math.abs(retryCase.snapshot.costs.totalCost - (0.0123 + 0.002 + 0.0015 * 3)) < 1e-9
-    && retryCase.snapshot.customerKeywords.length === 1
-    && retryCase.snapshot.organicCompetitors.length >= 1,
-  `${retryCase.snapshot.status} serpCalls=${retryCase.serpCalls} cost=${retryCase.snapshot.costs.totalCost} attempts=${retryCase.snapshot.serpAttempts.length}`,
+    && retryCase.competitorDomainCalls === 2
+    && retryCase.snapshot.labsAttempts.filter((row) => row.taskStatusCode === 40101).length === 1
+    && retryCase.snapshot.customerKeywords.length === 2
+    && retryCase.snapshot.organicCompetitors.length >= 1
+    && retryCase.snapshot.competitorKeywordUniverses.length >= 1
+    && Math.abs(retryCase.snapshot.costs.totalCost - (0.0123 + 0.002 + 0.0108 + 0.008 * retryCase.snapshot.competitorKeywordUniverses.length)) < 1e-9,
+  `${retryCase.snapshot.status} competitorDomainCalls=${retryCase.competitorDomainCalls} cost=${retryCase.snapshot.costs.totalCost} attempts=${retryCase.snapshot.labsAttempts.length}`,
 );
 
-const partialCase = await collectWithSerpQueue(tenantPartial, [
-  serp40101Payload(0.002),
-  serp40101Payload(0.002),
-  serpOkPayload("partial-two-agency.co.uk"),
-  serpOkPayload("partial-three-agency.co.uk"),
-]);
+const partialCase = await collectWithLabsQueue(tenantPartial, {
+  subjectDomain: "example-national-partial.co.uk",
+  competitorDomainQueue: [labs40101Payload(0.002), labs40101Payload(0.002)],
+});
 check(
-  "resilience-40101-exhausted-still-runs-remaining",
+  "resilience-40101-exhausted-keeps-keywords-partial",
   partialCase.snapshot.status === "partial"
-    && partialCase.serpCalls === 4
-    && partialCase.snapshot.serpAttempts.filter((row) => row.taskStatusCode === 40101).length === 2
-    && partialCase.snapshot.customerKeywords.length === 1
-    && partialCase.snapshot.organicCompetitors.length >= 1
-    && Math.abs(partialCase.snapshot.costs.totalCost - (0.0123 + 0.002 * 2 + 0.0015 * 2)) < 1e-9
+    && partialCase.competitorDomainCalls === 2
+    && partialCase.competitorKeywordCalls === 0
+    && partialCase.snapshot.labsAttempts.filter((row) => row.taskStatusCode === 40101).length === 2
+    && partialCase.snapshot.customerKeywords.length === 2
+    && partialCase.snapshot.organicCompetitors.length === 0
+    && Math.abs(partialCase.snapshot.costs.totalCost - (0.0123 + 0.002 * 2)) < 1e-9
     && /one or more search-engine requests could not be completed/i.test(partialCase.snapshot.lastError || ""),
-  `${partialCase.snapshot.status} serpCalls=${partialCase.serpCalls} competitors=${partialCase.snapshot.organicCompetitors.length} cost=${partialCase.snapshot.costs.totalCost}`,
+  `${partialCase.snapshot.status} competitorDomainCalls=${partialCase.competitorDomainCalls} competitors=${partialCase.snapshot.organicCompetitors.length} cost=${partialCase.snapshot.costs.totalCost}`,
 );
 check(
   "resilience-partial-not-labelled-collected",
@@ -912,71 +1053,102 @@ check(
   partialCase.snapshot.status,
 );
 
-const allFail = await collectWithSerpQueue(tenantAllFail, [
-  serp40101Payload(0.002),
-  serp40101Payload(0.002),
-  serp40101Payload(0.002),
-  serp40101Payload(0.002),
-  serp40101Payload(0.002),
-  serp40101Payload(0.002),
-]);
+const allFail = await collectWithLabsQueue(tenantAllFail, {
+  subjectDomain: "example-national-allfail.co.uk",
+  competitorKeywordQueue: [labs40101Payload(0.002), labs40101Payload(0.002), labs40101Payload(0.002), labs40101Payload(0.002)],
+});
 check(
-  "resilience-all-serps-fail-keeps-keywords-partial",
+  "resilience-competitor-keywords-fail-keeps-partial",
   allFail.snapshot.status === "partial"
-    && allFail.serpCalls === 6
-    && allFail.snapshot.customerKeywords.length === 1
-    && allFail.snapshot.organicCompetitors.length === 0
-    && allFail.snapshot.serpAttempts.every((row) => row.successful === false)
-    && Math.abs(allFail.snapshot.costs.totalCost - (0.0123 + 0.002 * 6)) < 1e-9,
-  `${allFail.snapshot.status} keywords=${allFail.snapshot.customerKeywords.length} competitors=${allFail.snapshot.organicCompetitors.length} serpCalls=${allFail.serpCalls}`,
+    && allFail.snapshot.customerKeywords.length === 2
+    && allFail.snapshot.organicCompetitors.length === 2
+    && allFail.snapshot.competitorKeywordUniverses.every((row) => row.status === "error")
+    && allFail.competitorKeywordCalls === 4
+    && allFail.snapshot.competitorKeywordUniverses.every((row) => row.keywords.length === 0),
+  `${allFail.snapshot.status} keywords=${allFail.snapshot.customerKeywords.length} competitors=${allFail.snapshot.organicCompetitors.length} competitorKeywordCalls=${allFail.competitorKeywordCalls}`,
 );
 
-const authCase = await collectWithSerpQueue(tenantAuth, [], { rankedAuthFail: true });
+const authCase = await collectWithLabsQueue(tenantAuth, {
+  subjectDomain: "example-national-auth.co.uk",
+  rankedAuthFail: true,
+});
 check(
-  "resilience-fatal-auth-no-serp-retry",
+  "resilience-fatal-auth-no-further-paid-calls",
   authCase.snapshot.status === "error"
     && authCase.rankedCalls === 1
-    && authCase.serpCalls === 0
+    && authCase.competitorDomainCalls === 0
     && authCase.snapshot.customerKeywords.length === 0
     && authCase.snapshot.organicCompetitors.length === 0,
-  `${authCase.snapshot.status} ranked=${authCase.rankedCalls} serp=${authCase.serpCalls}`,
+  `${authCase.snapshot.status} ranked=${authCase.rankedCalls} competitorsDomain=${authCase.competitorDomainCalls}`,
 );
 
 dataForSeoHttp.setDataForSeoHttpTimeoutMsForTests(80);
 try {
-  const timeoutSerp = await collectWithSerpQueue(tenantTimeoutSerp, [
-    serpOkPayload("timeout-two-agency.co.uk"),
-    serpOkPayload("timeout-three-agency.co.uk"),
-  ], { hangFirstSerp: true });
+  const timeoutCompetitors = await collectWithLabsQueue(tenantTimeoutCompetitors, {
+    subjectDomain: "example-national-timeout-competitors.co.uk",
+    hangCompetitors: true,
+  });
   check(
-    "http-timeout-does-not-retry-serp",
-    timeoutSerp.snapshot.status === "partial"
-      && timeoutSerp.serpCalls === 3
-      && timeoutSerp.snapshot.customerKeywords.length === 1
-      && timeoutSerp.snapshot.organicCompetitors.length >= 1
-      && timeoutSerp.snapshot.serpAttempts.filter((row) => row.timedOut).length === 1
-      && timeoutSerp.snapshot.serpAttempts.filter((row) => row.timedOut).every((row) => row.successful === false)
-      && timeoutSerp.fetchesMissingSignal === 0,
-    `${timeoutSerp.snapshot.status} serpCalls=${timeoutSerp.serpCalls} timedOut=${timeoutSerp.snapshot.serpAttempts.filter((row) => row.timedOut).length} keywords=${timeoutSerp.snapshot.customerKeywords.length}`,
+    "http-timeout-does-not-retry-competitors-domain",
+    timeoutCompetitors.snapshot.status === "partial"
+      && timeoutCompetitors.competitorDomainCalls === 1
+      && timeoutCompetitors.competitorKeywordCalls === 0
+      && timeoutCompetitors.snapshot.customerKeywords.length === 2
+      && timeoutCompetitors.snapshot.organicCompetitors.length === 0
+      && timeoutCompetitors.snapshot.labsAttempts.filter((row) => row.timedOut).length === 1
+      && timeoutCompetitors.snapshot.labsAttempts.filter((row) => row.timedOut).every((row) => row.successful === false)
+      && timeoutCompetitors.fetchesMissingSignal === 0,
+    `${timeoutCompetitors.snapshot.status} competitorDomainCalls=${timeoutCompetitors.competitorDomainCalls} timedOut=${timeoutCompetitors.snapshot.labsAttempts.filter((row) => row.timedOut).length} keywords=${timeoutCompetitors.snapshot.customerKeywords.length}`,
   );
 
-  const timeoutRanked = await collectWithSerpQueue(tenantTimeoutRanked, [
-    serpOkPayload("ranked-timeout-one-agency.co.uk"),
-    serpOkPayload("ranked-timeout-two-agency.co.uk"),
-    serpOkPayload("ranked-timeout-three-agency.co.uk"),
-  ], { hangRanked: true });
+  const timeoutRanked = await collectWithLabsQueue(tenantTimeoutRanked, {
+    subjectDomain: "example-national-timeout-ranked.co.uk",
+    hangRanked: true,
+  });
   check(
-    "ranked-timeout-continues-serps-partial",
+    "ranked-timeout-continues-competitors-partial",
     timeoutRanked.snapshot.status === "partial"
       && timeoutRanked.rankedCalls === 1
-      && timeoutRanked.serpCalls === 3
+      && timeoutRanked.competitorDomainCalls === 1
       && timeoutRanked.snapshot.customerKeywords.length === 0
       && timeoutRanked.snapshot.organicCompetitors.length >= 1,
-    `${timeoutRanked.snapshot.status} ranked=${timeoutRanked.rankedCalls} serp=${timeoutRanked.serpCalls} keywords=${timeoutRanked.snapshot.customerKeywords.length} competitors=${timeoutRanked.snapshot.organicCompetitors.length}`,
+    `${timeoutRanked.snapshot.status} ranked=${timeoutRanked.rankedCalls} competitorsDomain=${timeoutRanked.competitorDomainCalls} keywords=${timeoutRanked.snapshot.customerKeywords.length} competitors=${timeoutRanked.snapshot.organicCompetitors.length}`,
   );
 } finally {
   dataForSeoHttp.setDataForSeoHttpTimeoutMsForTests(null);
 }
+
+await collectWithLabsQueue(tenantLimit, {
+  subjectDomain: "example-national-limit.co.uk",
+});
+// Re-collect with explicit tighter limits after clearing in-flight by using force and option overrides.
+const limited = await searchService.collectNationalSearchIntelligence(tenantLimit, {
+  force: true,
+  limits: { customerKeywordUniverse: 1, qualifiedCompetitorsAnalysed: 1, competitorRankedKeywords: 1 },
+});
+check(
+  "limits-override-without-tenant-hardcode",
+  limited.limits.customerKeywordUniverse === 1
+    && limited.limits.qualifiedCompetitorsAnalysed === 1
+    && limited.limits.competitorRankedKeywords === 1
+    && limited.customerKeywords.length === 1
+    && limited.competitorKeywordUniverses.length === 1
+    && limited.competitorKeywordUniverses[0]?.keywords.length === 1
+    && !limited.tenantSlug.includes("pharmaconnect"),
+  `limits=${JSON.stringify(limited.limits)} keywords=${limited.customerKeywords.length} universes=${limited.competitorKeywordUniverses.length}`,
+);
+
+const previousCustomerEnv = process.env.NATIONAL_SEARCH_CUSTOMER_KEYWORD_LIMIT;
+process.env.NATIONAL_SEARCH_CUSTOMER_KEYWORD_LIMIT = "12";
+const envLimits = searchLimits.resolveNationalSearchIntelligenceLimits();
+check(
+  "customer-keyword-limit-env-configurable",
+  envLimits.customerKeywordUniverse === 12
+    && searchLimits.resolveNationalSearchIntelligenceLimits().qualifiedCompetitorsAnalysed === 5,
+  JSON.stringify(envLimits),
+);
+if (previousCustomerEnv === undefined) delete process.env.NATIONAL_SEARCH_CUSTOMER_KEYWORD_LIMIT;
+else process.env.NATIONAL_SEARCH_CUSTOMER_KEYWORD_LIMIT = previousCustomerEnv;
 
 const fetchBeforePartialRead = fetchCalls;
 searchService.readNationalSearchIntelligence(tenantPartial);
@@ -1012,10 +1184,11 @@ else process.env.DATAFORSEO_LOGIN = previousLogin;
 if (previousPassword === undefined) delete process.env.DATAFORSEO_PASSWORD;
 else process.env.DATAFORSEO_PASSWORD = previousPassword;
 
-for (const slug of [tenantBSlug, tenantRetry, tenantPartial, tenantAllFail, tenantAuth, tenantTimeoutSerp, tenantTimeoutRanked]) {
+for (const slug of [tenantBSlug, tenantRetry, tenantPartial, tenantAllFail, tenantAuth, tenantTimeoutCompetitors, tenantTimeoutRanked, tenantLimit]) {
   for (const artifact of [
     "search-intelligence-v1",
     "ranked-keywords-customer",
+    "ranked-keywords-competitors",
     "cost-ledger-v1",
     "refresh-metadata-v1",
     "competitor-discovery",
