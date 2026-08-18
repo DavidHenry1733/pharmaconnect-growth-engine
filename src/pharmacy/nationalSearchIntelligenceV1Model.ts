@@ -10,6 +10,7 @@ import type {
 import type { NationalIntelligenceCostLedger } from "./nationalIntelligenceCostLedger.ts";
 import type { NationalSearchIntelligenceLimits } from "./nationalSearchIntelligenceLimits.ts";
 import { NI03C_DEFAULT_LIMITS } from "./nationalSearchIntelligenceLimits.ts";
+import type { NationalSearchCompetitorRole } from "./nationalSearchCommercialCompetitorGate.ts";
 
 export const NATIONAL_SEARCH_INTELLIGENCE_VERSION = 1 as const;
 
@@ -72,11 +73,24 @@ export interface NationalOrganicSearchCompetitor {
   organicKeywordCount: number | null;
   sharedKeywordEtv: number | null;
   bestSerpPosition: number | null;
+  role: NationalSearchCompetitorRole;
   classification: "direct_competitor" | "adjacent_competitor" | "insufficient_evidence" | "excluded";
   qualification: "qualified" | "candidate" | "rejected";
   evidenceStatus: string;
   evidenceUrls: string[];
   exclusionReasons: string[];
+  qualificationScore: number;
+  qualificationEvidence: string[];
+  eligibleForKeywordExpansion: boolean;
+  nonSelectionReason: string | null;
+  commercialGate: {
+    targetMarketRelevance: boolean;
+    commercialProvider: boolean;
+    serviceOverlap: boolean;
+    marketRelevance: boolean;
+    matchedServices: string[];
+    organicOverlapSupportingOnly: true;
+  };
   analysed: boolean;
   capturedAt: string;
   evidenceSource: NationalEvidenceSourceType;
@@ -151,6 +165,13 @@ export interface NationalSearchIntelligenceSnapshot {
   } | null;
   limits: NationalSearchIntelligenceLimits;
   collectionPlan: NationalSearchCollectionPlan;
+  customerOrganicFootprint: {
+    keywordCount: number;
+    sparse: boolean;
+    threshold: number;
+    sufficientForHighConfidenceCommercialDiscovery: boolean;
+    note: string;
+  };
   endpoints: Array<{ endpoint: string; requests: number; tasks: number; cost: number }>;
   costs: { requests: number; tasks: number; totalCost: number };
   costLedger: NationalIntelligenceCostLedger;
@@ -182,6 +203,8 @@ export interface NationalSearchIntelligenceSnapshot {
     rankingPageCount: number;
     availableSearchDemand: number | null;
     organicCompetitorCount: number;
+    commercialCompetitorCount: number;
+    serpCompetitorCount: number;
     analysedCompetitorCount: number;
     excludedCompetitorCount: number;
     competitorKeywordCount: number;

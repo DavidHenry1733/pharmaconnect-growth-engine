@@ -8,6 +8,7 @@ export const NI03C_DEFAULT_LIMITS = {
   competitorDiscoveryCandidates: 20,
   qualifiedCompetitorsAnalysed: 5,
   competitorRankedKeywords: 300,
+  sparseCustomerKeywordThreshold: 10,
 } as const;
 
 export type NationalSearchIntelligenceLimits = {
@@ -15,6 +16,7 @@ export type NationalSearchIntelligenceLimits = {
   competitorDiscoveryCandidates: number;
   qualifiedCompetitorsAnalysed: number;
   competitorRankedKeywords: number;
+  sparseCustomerKeywordThreshold: number;
 };
 
 const ENV_KEYS = {
@@ -22,6 +24,7 @@ const ENV_KEYS = {
   competitorDiscoveryCandidates: "NATIONAL_SEARCH_COMPETITOR_DISCOVERY_LIMIT",
   qualifiedCompetitorsAnalysed: "NATIONAL_SEARCH_COMPETITOR_ANALYSIS_LIMIT",
   competitorRankedKeywords: "NATIONAL_SEARCH_COMPETITOR_KEYWORD_LIMIT",
+  sparseCustomerKeywordThreshold: "NATIONAL_SEARCH_SPARSE_FOOTPRINT_THRESHOLD",
 } as const;
 
 const BOUNDS: Record<keyof NationalSearchIntelligenceLimits, { min: number; max: number }> = {
@@ -29,6 +32,7 @@ const BOUNDS: Record<keyof NationalSearchIntelligenceLimits, { min: number; max:
   competitorDiscoveryCandidates: { min: 1, max: 100 },
   qualifiedCompetitorsAnalysed: { min: 1, max: 20 },
   competitorRankedKeywords: { min: 1, max: 1000 },
+  sparseCustomerKeywordThreshold: { min: 1, max: 100 },
 };
 
 function envInt(name: string): number | undefined {
@@ -74,6 +78,41 @@ export function resolveNationalSearchIntelligenceLimits(
         ?? fromEnv.competitorRankedKeywords
         ?? NI03C_DEFAULT_LIMITS.competitorRankedKeywords,
     ),
+    sparseCustomerKeywordThreshold: clampLimit(
+      "sparseCustomerKeywordThreshold",
+      overrides.sparseCustomerKeywordThreshold
+        ?? fromEnv.sparseCustomerKeywordThreshold
+        ?? NI03C_DEFAULT_LIMITS.sparseCustomerKeywordThreshold,
+    ),
+  };
+}
+
+export function isSparseCustomerKeywordUniverse(
+  keywordCount: number,
+  threshold: number = resolveNationalSearchIntelligenceLimits().sparseCustomerKeywordThreshold,
+): boolean {
+  return Number(keywordCount || 0) < threshold;
+}
+
+export function describeCustomerOrganicFootprint(
+  keywordCount: number,
+  limits: NationalSearchIntelligenceLimits = resolveNationalSearchIntelligenceLimits(),
+): {
+  keywordCount: number;
+  sparse: boolean;
+  threshold: number;
+  sufficientForHighConfidenceCommercialDiscovery: boolean;
+  note: string;
+} {
+  const sparse = isSparseCustomerKeywordUniverse(keywordCount, limits.sparseCustomerKeywordThreshold);
+  return {
+    keywordCount: Number(keywordCount || 0),
+    sparse,
+    threshold: limits.sparseCustomerKeywordThreshold,
+    sufficientForHighConfidenceCommercialDiscovery: !sparse,
+    note: sparse
+      ? "Customer organic footprint is sparse. Competitors Domain overlap is retained as SERP evidence and is not commercial competitor proof."
+      : "Customer organic footprint is sufficient for high-confidence commercial competitor discovery.",
   };
 }
 

@@ -154,6 +154,14 @@ export function parseLabsKeywordItems(payload: unknown, sourceDomain: string): {
   };
 }
 
+/**
+ * Official DataForSEO Labs Google Competitors Domain live fields:
+ * https://docs.dataforseo.com/v3/dataforseo_labs-google-competitors_domain-live/
+ * - intersections: number of intersecting keywords with the target domain
+ * - full_domain_metrics: metrics for ALL keywords of the returned domain
+ * - competitor_metrics: metrics for intersecting keywords only
+ * Organic overlap is SERP competition, not commercial/business equivalence.
+ */
 export function parseLabsCompetitorItems(payload: unknown): { rows: DataForSeoDomainCompetitor[]; cost: number; tasks: number } {
   const json = payload as { tasks?: Array<{ cost?: number; result?: Array<{ items?: unknown[] }> }> };
   const task = json?.tasks?.[0] || {};

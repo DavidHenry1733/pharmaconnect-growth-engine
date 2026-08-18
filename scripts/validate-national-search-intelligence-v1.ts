@@ -94,6 +94,7 @@ const locationResolverSource = read("src/pharmacy/dataForSeoSearchLocationResolv
 const httpSource = read("src/pharmacy/dataForSeoHttp.ts");
 const collectScriptSource = read("scripts/collect-national-search-intelligence-v1.ts");
 const limitsSource = read("src/pharmacy/nationalSearchIntelligenceLimits.ts");
+const gateSource = read("src/pharmacy/nationalSearchCommercialCompetitorGate.ts");
 
 check(
   "platform-national-eligible",
@@ -241,7 +242,8 @@ check(
     && defaultPlan.maximumPaidRequests === 7
     && defaultPlan.limits.customerKeywordUniverse === 500
     && defaultPlan.limits.qualifiedCompetitorsAnalysed === 5
-    && defaultPlan.limits.competitorRankedKeywords === 300,
+    && defaultPlan.limits.competitorRankedKeywords === 300
+    && defaultPlan.limits.sparseCustomerKeywordThreshold === 10,
   JSON.stringify(defaultPlan),
 );
 check(
@@ -270,6 +272,7 @@ check(
   searchLimits.NI03C_DEFAULT_LIMITS.customerKeywordUniverse === 500
     && searchLimits.NI03C_DEFAULT_LIMITS.qualifiedCompetitorsAnalysed === 5
     && searchLimits.NI03C_DEFAULT_LIMITS.competitorRankedKeywords === 300
+    && searchLimits.NI03C_DEFAULT_LIMITS.sparseCustomerKeywordThreshold === 10
     && searchModel.NI03C_LIMITS.customerKeywordUniverse === 500,
   JSON.stringify(searchLimits.NI03C_DEFAULT_LIMITS),
 );
@@ -289,6 +292,10 @@ check(
     && serviceSource.includes("limits.qualifiedCompetitorsAnalysed")
     && serviceSource.includes("limits.competitorRankedKeywords")
     && serviceSource.includes("executeDomainCompetitors")
+    && serviceSource.includes("assessNationalSearchCommercialCompetitor")
+    && serviceSource.includes("selectCompetitorsForKeywordExpansion")
+    && serviceSource.includes("enrichNationalCompetitorEvidence")
+    && serviceSource.includes("eligibleForKeywordExpansion")
     && !serviceSource.includes("buildNationalCompetitorDiscoveryQueries"),
   "collection uses configurable NI-03C limits and Labs competitors_domain",
 );
@@ -351,11 +358,24 @@ check(
     && modelSource.includes("qualification")
     && modelSource.includes("excludedCompetitors")
     && modelSource.includes("competitorKeywordUniverses")
-    && serviceSource.includes("qualifyNationalCompetitorV2")
+    && modelSource.includes("eligibleForKeywordExpansion")
+    && gateSource.includes("qualifyNationalCompetitorV2")
+    && gateSource.includes("qualifyNationalCompetitor(")
+    && serviceSource.includes("assessNationalSearchCommercialCompetitor")
     && serviceSource.includes("executeDomainCompetitors")
     && !serviceSource.includes("executeNationalGoogleOrganic")
     && !serviceSource.includes("searchNationalGoogleOrganic"),
-  "organic competitor evidence from Labs competitors_domain + qualification retained",
+  "organic competitor evidence from Labs competitors_domain + reused qualification gate",
+);
+check(
+  "commercial-gate-no-overlap-promotion",
+  !serviceSource.includes('commercial ? qualification.classification : "adjacent_competitor"')
+    && serviceSource.includes("selectCompetitorsForKeywordExpansion")
+    && gateSource.includes("eligibleForKeywordExpansion: false")
+    && !/boots\.com|sciencedirect\.com|brainly\.com|rcpharm\.org|pharmacymagazine\.co\.uk/.test(gateSource + serviceSource)
+    && labsSource.includes("docs.dataforseo.com/v3/dataforseo_labs-google-competitors_domain-live")
+    && labsSource.includes("full_domain_metrics"),
+  "insufficient_evidence is not auto-promoted; no PharmaConnect domain blacklist",
 );
 check(
   "competitors-no-google-places",
@@ -556,13 +576,15 @@ check(
     && pageSource.includes("Keywords Top 3")
     && pageSource.includes("Keywords Top 100")
     && pageSource.includes("Competitor keywords")
-    && pageSource.includes("These are businesses competing with you in organic search"),
+    && pageSource.includes("These domains compete with you in Google search results")
+    && pageSource.includes("This business competes for your customers")
+    && pageSource.includes("This domain competes in search"),
   "visibility metrics and competitor keyword inspection render",
 );
 check(
   "ui-organic-competitor-section",
   nationalHtml.includes('data-ni03b-section="competitors"')
-    && nationalHtml.includes("These are businesses competing with you in organic search")
+    && nationalHtml.includes("These domains compete with you in Google search results")
     && nationalHtml.includes("not selected based on physical proximity"),
   "organic competitor section renders",
 );
@@ -824,9 +846,20 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 }) as typeof fetch;
 
+const AGENCY_WEBSITE_EVIDENCE = {
+  "example-search-competitor.co.uk": {
+    title: "Example Search Competitor",
+    websiteText: "We are a UK digital marketing agency. We provide National SEO, website design and hosting for our clients. Contact us to get started.",
+  },
+  "second-agency.co.uk": {
+    title: "Second Agency",
+    websiteText: "We are a UK digital marketing agency. We provide National SEO and website design for our clients. Book a call to get started.",
+  },
+};
+
 const [firstCollect, secondCollect] = await Promise.all([
-  searchService.collectNationalSearchIntelligence(tenantBSlug, { force: true }),
-  searchService.collectNationalSearchIntelligence(tenantBSlug, { force: true }),
+  searchService.collectNationalSearchIntelligence(tenantBSlug, { force: true, websiteEvidenceByDomain: AGENCY_WEBSITE_EVIDENCE }),
+  searchService.collectNationalSearchIntelligence(tenantBSlug, { force: true, websiteEvidenceByDomain: AGENCY_WEBSITE_EVIDENCE }),
 ]);
 check(
   "duplicate-collect-does-not-double-paid-calls",
@@ -865,20 +898,20 @@ check(
 );
 check(
   "collect-persists-organic-competitors",
-  liveCollect.organicCompetitors.length === 2
+  liveCollect.organicCompetitors.length === 3
     && liveCollect.organicCompetitors.every((row) => row.domain !== "example-national-search-b.co.uk")
     && liveCollect.organicCompetitors.every((row) => row.domain !== "google.com")
-    && liveCollect.organicCompetitors[0]?.sharedKeywordCount === 22
-    && liveCollect.organicCompetitors[0]?.whyIdentified.length > 0
-    && liveCollect.organicCompetitors[0]?.verified === false
-    && liveCollect.organicCompetitors[0]?.discoverySource === "dataforseo_labs_competitors_domain"
+    && liveCollect.organicCompetitors.some((row) => row.domain === "example-search-competitor.co.uk" && row.sharedKeywordCount === 22)
+    && liveCollect.organicCompetitors.every((row) => row.whyIdentified.length > 0)
+    && liveCollect.organicCompetitors.every((row) => row.verified === false)
+    && liveCollect.organicCompetitors.every((row) => row.discoverySource === "dataforseo_labs_competitors_domain")
     && liveCollect.status === "collected",
   `${liveCollect.status} competitors=${liveCollect.organicCompetitors.map((row) => row.domain).join(",")}`,
 );
 check(
   "self-and-non-commercial-excluded-with-reason",
   liveCollect.excludedCompetitors.some((row) => row.domain === "google.com" && row.exclusionReasons.length > 0)
-    && liveCollect.excludedCompetitors.some((row) => row.domain === "pharmaceutical-journal.com")
+    && liveCollect.organicCompetitors.some((row) => row.domain === "pharmaceutical-journal.com" && row.eligibleForKeywordExpansion === false)
     && !liveCollect.organicCompetitors.some((row) => row.domain === "example-national-search-b.co.uk"),
   liveCollect.excludedCompetitors.map((row) => `${row.domain}:${row.exclusionReasons[0] || ""}`).join(" | "),
 );
@@ -887,7 +920,9 @@ check(
   liveCollect.competitorKeywordUniverses.length === 2
     && liveCollect.competitorKeywordUniverses.every((row) => row.keywords.length === 1 && row.keywords[0]?.domain === row.domain)
     && liveCollect.summary.competitorKeywordCount === 2
-    && liveCollect.organicCompetitors.filter((row) => row.analysed).length === 2,
+    && liveCollect.organicCompetitors.filter((row) => row.analysed).length === 2
+    && liveCollect.organicCompetitors.filter((row) => row.eligibleForKeywordExpansion).every((row) => row.analysed)
+    && liveCollect.organicCompetitors.filter((row) => !row.eligibleForKeywordExpansion).every((row) => !row.analysed),
   `universes=${liveCollect.competitorKeywordUniverses.length} keywords=${liveCollect.summary.competitorKeywordCount}`,
 );
 
@@ -942,6 +977,7 @@ async function collectWithLabsQueue(
     competitorDomainQueue?: object[];
     competitorKeywordQueue?: object[];
     subjectDomain?: string;
+    websiteEvidenceByDomain?: Record<string, { title?: string; websiteText: string }>;
   } = {},
 ) {
   const competitorDomainQueue = [...(options.competitorDomainQueue || [])];
@@ -994,7 +1030,10 @@ async function collectWithLabsQueue(
     }
     throw new Error(`Unexpected DataForSEO URL ${url}`);
   }) as typeof fetch;
-  const snapshot = await searchService.collectNationalSearchIntelligence(slug, { force: true });
+  const snapshot = await searchService.collectNationalSearchIntelligence(slug, {
+    force: true,
+    websiteEvidenceByDomain: options.websiteEvidenceByDomain || AGENCY_WEBSITE_EVIDENCE,
+  });
   return { snapshot, rankedCalls, competitorDomainCalls, competitorKeywordCalls, fetchesWithSignal, fetchesMissingSignal };
 }
 
@@ -1061,7 +1100,7 @@ check(
   "resilience-competitor-keywords-fail-keeps-partial",
   allFail.snapshot.status === "partial"
     && allFail.snapshot.customerKeywords.length === 2
-    && allFail.snapshot.organicCompetitors.length === 2
+    && allFail.snapshot.organicCompetitors.length === 3
     && allFail.snapshot.competitorKeywordUniverses.every((row) => row.status === "error")
     && allFail.competitorKeywordCalls === 4
     && allFail.snapshot.competitorKeywordUniverses.every((row) => row.keywords.length === 0),
@@ -1125,6 +1164,7 @@ await collectWithLabsQueue(tenantLimit, {
 const limited = await searchService.collectNationalSearchIntelligence(tenantLimit, {
   force: true,
   limits: { customerKeywordUniverse: 1, qualifiedCompetitorsAnalysed: 1, competitorRankedKeywords: 1 },
+  websiteEvidenceByDomain: AGENCY_WEBSITE_EVIDENCE,
 });
 check(
   "limits-override-without-tenant-hardcode",

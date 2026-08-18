@@ -14,8 +14,12 @@ import {
   type DataForSeoLabsKeywordRow,
   type DataForSeoLabsTaskAttempt,
 } from "./dataForSeoRankedKeywordIntelligenceService.ts";
-import { qualifyNationalCompetitorV2 } from "./nationalCompetitorQualificationV2Service.ts";
-import { resolveNationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
+import { enrichNationalCompetitorEvidence } from "./nationalCompetitorEvidenceEnrichmentService.ts";
+import {
+  assessNationalSearchCommercialCompetitor,
+  selectCompetitorsForKeywordExpansion,
+} from "./nationalSearchCommercialCompetitorGate.ts";
+import { resolveNationalIntelligenceSubject, type NationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
 import {
   authorityFromProvenance,
   buildProvenance,
@@ -42,6 +46,7 @@ import {
   type NationalSearchLabsAttempt,
 } from "./nationalSearchIntelligenceV1Model.ts";
 import {
+  describeCustomerOrganicFootprint,
   planNationalSearchIntelligenceTasks,
   resolveNationalSearchIntelligenceLimits,
   type NationalSearchIntelligenceLimits,
@@ -147,6 +152,8 @@ function summarise(
     rankingPageCount: pages.size,
     availableSearchDemand: demandValues.length ? demandValues.reduce((sum, value) => sum + value, 0) : null,
     organicCompetitorCount: competitors.length,
+    commercialCompetitorCount: competitors.filter((row) => row.role === "commercial_competitor").length,
+    serpCompetitorCount: competitors.filter((row) => row.role !== "commercial_competitor").length,
     analysedCompetitorCount: universes.filter((row) => row.status === "collected").length,
     excludedCompetitorCount: excluded.length,
     competitorKeywordCount: universes.reduce((sum, row) => sum + row.keywords.length, 0),
@@ -211,6 +218,7 @@ function snapshotShell(input: {
   serpAttempts?: NationalSearchIntelligenceSnapshot["serpAttempts"];
   limits?: NationalSearchIntelligenceLimits;
   collectionPlan?: NationalSearchCollectionPlan;
+  customerOrganicFootprint?: NationalSearchIntelligenceSnapshot["customerOrganicFootprint"];
 }): NationalSearchIntelligenceSnapshot {
   const subject = resolveNationalIntelligenceSubject(input.slug);
   const capturedAt = input.capturedAt || new Date().toISOString();
@@ -284,6 +292,8 @@ function snapshotShell(input: {
     })(),
     limits,
     collectionPlan,
+    customerOrganicFootprint: input.customerOrganicFootprint
+      || describeCustomerOrganicFootprint(input.keywords.length, limits),
     endpoints: input.endpoints,
     costs: {
       requests: costLedger.requestCount,
@@ -384,7 +394,7 @@ function persistCompetitorDiscovery(snapshot: NationalSearchIntelligenceSnapshot
   result.generatedAt = snapshot.capturedAt;
   result.status = snapshot.organicCompetitors.length ? "complete" : snapshot.status === "error" ? "failed" : "draft";
   result.qualifiedCompetitors = snapshot.organicCompetitors
-    .filter((row) => row.qualification === "qualified" || row.qualification === "candidate" || row.classification === "direct_competitor")
+    .filter((row) => row.eligibleForKeywordExpansion)
     .map((row) => ({
       id: `national-${row.domain.replace(/[^a-z0-9]+/g, "-")}`,
       name: row.name,
@@ -403,7 +413,26 @@ function persistCompetitorDiscovery(snapshot: NationalSearchIntelligenceSnapshot
       evidenceUrls: row.evidenceUrls,
       capturedAt: row.capturedAt,
     }));
-  result.candidates = result.qualifiedCompetitors;
+  result.candidates = snapshot.organicCompetitors
+    .filter((row) => !row.eligibleForKeywordExpansion)
+    .map((row) => ({
+      id: `national-serp-${row.domain.replace(/[^a-z0-9]+/g, "-")}`,
+      name: row.name,
+      domain: row.domain,
+      websiteUrl: row.websiteUrl,
+      marketCountry: snapshot.country,
+      targetCustomerMarket: snapshot.primaryMarket,
+      source: "search-engine" as const,
+      sourceQuery: row.sourceQueries[0] || "dataforseo_labs_competitors_domain",
+      qualification: row.qualification,
+      qualificationReasons: row.whyIdentified,
+      rejectionReasons: row.exclusionReasons,
+      serviceEvidence: [],
+      title: row.name,
+      description: row.whyIdentified.join(" "),
+      evidenceUrls: row.evidenceUrls,
+      capturedAt: row.capturedAt,
+    }));
   writeNationalCompetitorDiscovery(result);
 }
 
@@ -428,7 +457,26 @@ function hydrateSnapshot(snapshot: NationalSearchIntelligenceSnapshot, subjectDo
     sharedKeywordEtv: row.sharedKeywordEtv ?? null,
     exclusionReasons: Array.isArray(row.exclusionReasons) ? row.exclusionReasons : [],
     analysed: Boolean(row.analysed),
+    role: row.role || (row.eligibleForKeywordExpansion ? "commercial_competitor" : "serp_content_competitor"),
+    qualificationScore: row.qualificationScore ?? 0,
+    qualificationEvidence: Array.isArray(row.qualificationEvidence) ? row.qualificationEvidence : [],
+    eligibleForKeywordExpansion: Boolean(row.eligibleForKeywordExpansion),
+    nonSelectionReason: row.nonSelectionReason || null,
+    commercialGate: row.commercialGate || {
+      targetMarketRelevance: false,
+      commercialProvider: false,
+      serviceOverlap: false,
+      marketRelevance: false,
+      matchedServices: [],
+      organicOverlapSupportingOnly: true,
+    },
   }));
+  if (!snapshot.customerOrganicFootprint) {
+    snapshot.customerOrganicFootprint = describeCustomerOrganicFootprint(
+      snapshot.customerKeywords.length,
+      snapshot.limits,
+    );
+  }
   if (!snapshot.summary) {
     snapshot.summary = summarise(
       snapshot.customerKeywords,
@@ -443,6 +491,10 @@ function hydrateSnapshot(snapshot: NationalSearchIntelligenceSnapshot, subjectDo
     snapshot.summary.excludedCompetitorCount = snapshot.summary.excludedCompetitorCount ?? snapshot.excludedCompetitors.length;
     snapshot.summary.competitorKeywordCount = snapshot.summary.competitorKeywordCount
       ?? snapshot.competitorKeywordUniverses.reduce((sum, row) => sum + row.keywords.length, 0);
+    snapshot.summary.commercialCompetitorCount = snapshot.summary.commercialCompetitorCount
+      ?? snapshot.organicCompetitors.filter((row) => row.role === "commercial_competitor").length;
+    snapshot.summary.serpCompetitorCount = snapshot.summary.serpCompetitorCount
+      ?? snapshot.organicCompetitors.filter((row) => row.role === "serp_content_competitor").length;
     snapshot.summary.strongestRankingPages = snapshot.summary.strongestRankingPages || strongestRankingPages(snapshot.customerKeywords);
     snapshot.summary.top3CountCalculated = true;
     snapshot.summary.top100CountCalculated = true;
@@ -524,37 +576,78 @@ function mapCompetitorKeyword(domain: string, row: DataForSeoLabsKeywordRow, cap
   };
 }
 
+async function websiteEvidenceForDomain(
+  domain: string,
+  injected?: Record<string, { title?: string; websiteText: string }>,
+): Promise<{ title: string; websiteText: string; evidenceUrls: string[] }> {
+  const key = normaliseLabsDomain(domain);
+  const override = injected?.[key] || injected?.[domain];
+  if (override) {
+    return {
+      title: override.title || key,
+      websiteText: override.websiteText,
+      evidenceUrls: [`https://${key}`],
+    };
+  }
+  if (injected) {
+    return { title: key, websiteText: "", evidenceUrls: [`https://${key}`] };
+  }
+  const enriched = await enrichNationalCompetitorEvidence({ domain: key });
+  const websiteText = [
+    ...enriched.pagesChecked.map((page) => `${page.title || ""} ${page.textSample || ""}`),
+    ...enriched.pharmacyMarketEvidence,
+    ...enriched.commercialProviderEvidence,
+    ...enriched.serviceEvidence,
+    ...enriched.ukMarketEvidence,
+  ].join(" ");
+  const title = enriched.pagesChecked.find((page) => page.title)?.title || key;
+  return {
+    title,
+    websiteText,
+    evidenceUrls: enriched.evidenceUrls.length ? enriched.evidenceUrls : [`https://${key}`],
+  };
+}
+
 function mapLabsCompetitor(input: {
   row: DataForSeoDomainCompetitor;
   capturedAt: string;
   ownDomains: string[];
   analysed: boolean;
+  subject: NationalIntelligenceSubject;
+  websiteTitle?: string | null;
+  websiteText?: string | null;
+  evidenceUrls?: string[];
+  sparseCustomerFootprint: boolean;
 }): NationalOrganicSearchCompetitor {
   const domain = normaliseLabsDomain(input.row.domain);
-  const qualification = qualifyNationalCompetitorV2({
+  const gate = assessNationalSearchCommercialCompetitor({
     domain,
-    title: domain,
-    snippet: null,
+    title: input.websiteTitle || domain,
+    websiteText: input.websiteText || "",
     url: `https://${domain}`,
-    matchedQueries: input.row.sharedKeywordCount != null
-      ? [`organic keyword overlap ${input.row.sharedKeywordCount}`]
-      : ["organic keyword overlap"],
+    sharedKeywordCount: input.row.sharedKeywordCount,
+    organicEtv: input.row.organicEtv,
+    subject: input.subject,
     ownDomains: input.ownDomains,
+    sparseCustomerFootprint: input.sparseCustomerFootprint,
   });
-  const excluded = qualification.classification === "excluded" || qualification.exclusionReasons.length > 0;
   const why: string[] = [];
   if (input.row.sharedKeywordCount != null) {
-    why.push(`Shares ${input.row.sharedKeywordCount} ranking keywords with this domain in organic search.`);
+    why.push(`Shares ${input.row.sharedKeywordCount} ranking keywords in organic search (DataForSEO intersections; SERP overlap only).`);
   }
   if (input.row.organicEtv != null) {
-    why.push(`Estimated organic traffic ${input.row.organicEtv}.`);
+    why.push(`Estimated organic traffic ${input.row.organicEtv} is full-domain metrics, not proof of commercial competition.`);
   }
-  if (input.row.averagePosition != null) {
-    why.push(`Average overlapping position ${input.row.averagePosition}.`);
+  if (input.row.avgPosition != null) {
+    why.push(`Average overlapping position ${input.row.avgPosition}.`);
   }
-  why.push("Identified from this domain's real search-market overlap, not physical proximity.");
-  why.push(...qualification.reasons);
-  const commercial = qualification.classification === "direct_competitor" || qualification.classification === "adjacent_competitor";
+  why.push(
+    gate.role === "commercial_competitor"
+      ? "This business competes for the same customers and services."
+      : "This domain competes in search. Organic overlap is not commercial competitor proof.",
+  );
+  why.push(...gate.reasons);
+  const excluded = gate.classification === "excluded";
   return {
     domain,
     name: domain,
@@ -563,24 +656,29 @@ function mapLabsCompetitor(input: {
     sourceQueries: ["dataforseo_labs_competitors_domain"],
     discoverySource: "dataforseo_labs_competitors_domain",
     sharedKeywordCount: input.row.sharedKeywordCount,
-    averagePosition: input.row.averagePosition,
+    averagePosition: input.row.avgPosition,
     organicEtv: input.row.organicEtv,
     organicKeywordCount: input.row.organicKeywordCount,
     sharedKeywordEtv: input.row.sharedKeywordEtv,
-    bestSerpPosition: input.row.averagePosition != null ? Math.round(input.row.averagePosition) : null,
-    classification: excluded
-      ? "excluded"
-      : commercial
-        ? qualification.classification
-        : "adjacent_competitor",
-    qualification: excluded
-      ? "rejected"
-      : commercial && qualification.qualified
-        ? "qualified"
-        : "candidate",
-    evidenceStatus: excluded ? "excluded" : commercial ? qualification.classification : "organic_search_overlap",
-    evidenceUrls: [`https://${domain}`],
-    exclusionReasons: qualification.exclusionReasons,
+    bestSerpPosition: input.row.avgPosition != null ? Math.round(input.row.avgPosition) : null,
+    role: gate.role,
+    classification: gate.classification,
+    qualification: gate.qualification,
+    evidenceStatus: excluded ? "excluded" : gate.role,
+    evidenceUrls: input.evidenceUrls?.length ? input.evidenceUrls : [`https://${domain}`],
+    exclusionReasons: gate.exclusionReasons,
+    qualificationScore: gate.score,
+    qualificationEvidence: gate.reasons,
+    eligibleForKeywordExpansion: gate.eligibleForKeywordExpansion,
+    nonSelectionReason: gate.nonSelectionReason,
+    commercialGate: {
+      targetMarketRelevance: gate.targetMarketRelevance,
+      commercialProvider: gate.commercialProvider,
+      serviceOverlap: gate.serviceOverlap,
+      marketRelevance: gate.marketRelevance,
+      matchedServices: gate.matchedServices,
+      organicOverlapSupportingOnly: true,
+    },
     analysed: input.analysed,
     capturedAt: input.capturedAt,
     evidenceSource: "DATAFORSEO_LIVE",
@@ -626,6 +724,7 @@ async function collectInner(
   force: boolean,
   onProgress?: NationalSearchIntelligenceProgress,
   limitOverrides: Partial<NationalSearchIntelligenceLimits> = {},
+  websiteEvidenceByDomain?: Record<string, { title?: string; websiteText: string }>,
 ): Promise<NationalSearchIntelligenceSnapshot> {
   const subject = resolveNationalIntelligenceSubject(slug);
   if (!subject.eligibleForNationalIntelligence) {
@@ -725,14 +824,33 @@ async function collectInner(
   addEndpointUsage(endpoints, DATAFORSEO_LABS_ENDPOINTS.competitorsDomain, discovered.attempts, discovered.cost);
   labsAttempts.push(...toLabsAttempts("competitors_domain", subject.subjectDomain, discovered.attempts));
   if (discovered.successful && discovered.result) {
-    const mapped = discovered.result.rows
-      .filter((row) => row.domain && !isOwnDomain(row.domain, ownDomains))
-      .slice(0, limits.competitorDiscoveryCandidates)
-      .map((row) => mapLabsCompetitor({ row, capturedAt, ownDomains, analysed: false }));
+    const sparseCustomerFootprint = describeCustomerOrganicFootprint(keywords.length, limits).sparse;
+    const mapped: NationalOrganicSearchCompetitor[] = [];
+    for (const row of discovered.result.rows
+      .filter((item) => item.domain && !isOwnDomain(item.domain, ownDomains))
+      .slice(0, limits.competitorDiscoveryCandidates)) {
+      const website = await websiteEvidenceForDomain(row.domain, websiteEvidenceByDomain);
+      mapped.push(mapLabsCompetitor({
+        row,
+        capturedAt,
+        ownDomains,
+        analysed: false,
+        subject,
+        websiteTitle: website.title,
+        websiteText: website.websiteText,
+        evidenceUrls: website.evidenceUrls,
+        sparseCustomerFootprint,
+      }));
+    }
     excludedCompetitors = mapped.filter((row) => row.qualification === "rejected" || row.classification === "excluded");
     organicCompetitors = mapped
       .filter((row) => row.qualification !== "rejected" && row.classification !== "excluded")
-      .sort((a, b) => (b.sharedKeywordCount || 0) - (a.sharedKeywordCount || 0) || (b.organicEtv || 0) - (a.organicEtv || 0));
+      .sort((a, b) => (
+        Number(b.eligibleForKeywordExpansion) - Number(a.eligibleForKeywordExpansion)
+        || (b.qualificationScore || 0) - (a.qualificationScore || 0)
+        || (b.sharedKeywordCount || 0) - (a.sharedKeywordCount || 0)
+        || (b.organicEtv || 0) - (a.organicEtv || 0)
+      ));
     onProgress?.({ type: "competitors_domain_complete", rows: organicCompetitors.length, cost: discovered.cost });
   } else {
     competitorDiscoveryIncomplete = true;
@@ -744,10 +862,10 @@ async function collectInner(
     });
   }
 
-  const toAnalyse = [
-    ...organicCompetitors.filter((row) => row.qualification === "qualified"),
-    ...organicCompetitors.filter((row) => row.qualification === "candidate"),
-  ].slice(0, limits.qualifiedCompetitorsAnalysed);
+  const toAnalyse = selectCompetitorsForKeywordExpansion(
+    organicCompetitors,
+    limits.qualifiedCompetitorsAnalysed,
+  );
 
   const competitorKeywordUniverses: NationalCompetitorKeywordUniverse[] = [];
   let competitorKeywordsIncomplete = false;
@@ -851,6 +969,7 @@ async function collectInner(
     labsAttempts,
     limits,
     collectionPlan,
+    customerOrganicFootprint: describeCustomerOrganicFootprint(keywords.length, limits),
   });
   persistSnapshot(snapshot);
   if (status !== "error") persistCompetitorDiscovery(snapshot);
@@ -863,6 +982,7 @@ export async function collectNationalSearchIntelligence(
     force?: boolean;
     onProgress?: NationalSearchIntelligenceProgress;
     limits?: Partial<NationalSearchIntelligenceLimits>;
+    websiteEvidenceByDomain?: Record<string, { title?: string; websiteText: string }>;
   } = {},
 ): Promise<NationalSearchIntelligenceSnapshot> {
   const subject = resolveNationalIntelligenceSubject(slug);
@@ -874,7 +994,13 @@ export async function collectNationalSearchIntelligence(
     const snapshot = await existing;
     return { ...snapshot, reusedExistingSnapshot: true };
   }
-  const pending = collectInner(subject.slug, Boolean(options.force), options.onProgress, options.limits || {});
+  const pending = collectInner(
+    subject.slug,
+    Boolean(options.force),
+    options.onProgress,
+    options.limits || {},
+    options.websiteEvidenceByDomain,
+  );
   inFlight.set(subject.slug, pending);
   try {
     return await pending;

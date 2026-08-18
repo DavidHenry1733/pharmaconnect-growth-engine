@@ -76,17 +76,24 @@ function competitorCard(row: NationalOrganicSearchCompetitor): string {
     ? `${row.sharedKeywordCount} shared ranking keywords`
     : "Shared keyword overlap recorded";
   const traffic = row.organicEtv != null ? `Estimated organic traffic ${row.organicEtv}` : "Traffic estimate not returned";
-  return `<article class="ge-competitor" data-ni03b-competitor="${esc(row.domain)}" data-ni03c-competitor="${esc(row.domain)}">
+  const commercial = row.role === "commercial_competitor" && row.eligibleForKeywordExpansion;
+  const distinction = commercial
+    ? "This business competes for your customers."
+    : "This domain competes in search.";
+  const analysed = row.analysed ? "YES" : "NO";
+  const expansion = row.eligibleForKeywordExpansion ? "eligible" : "not eligible";
+  return `<article class="ge-competitor" data-ni03b-competitor="${esc(row.domain)}" data-ni03c-competitor="${esc(row.domain)}" data-ni03c1-role="${esc(row.role)}" data-ni03c1-eligible="${row.eligibleForKeywordExpansion ? "true" : "false"}">
 <div class="ge-competitor-head">
 <div>
 <p class="ge-competitor-name">${esc(row.name)}</p>
-<p class="ge-meta">${esc(row.domain)} · ${esc(row.classification.replace(/_/g, " "))} · ${esc(row.qualification)}${row.analysed ? " · keywords analysed" : ""}</p>
+<p class="ge-meta">${esc(row.domain)} · ${esc(row.role.replace(/_/g, " "))} · ${esc(row.classification.replace(/_/g, " "))} · ${esc(row.qualification)}</p>
 </div>
-<span class="ge-pill">${esc(row.evidenceStatus.replace(/_/g, " "))}</span>
+<span class="ge-pill">${esc(commercial ? "commercial competitor" : (row.role || "search competitor").replace(/_/g, " "))}</span>
 </div>
-<p style="font-size:13px;color:#334155;margin:0 0 8px">${esc(row.whyIdentified[0] || "Identified from organic search-market overlap.")}</p>
-<p class="ge-meta">${esc(overlap)} · ${esc(traffic)}</p>
-<p class="ge-meta">Why this is a competitor: ${esc(row.whyIdentified.join(" "))}</p>
+<p style="font-size:13px;color:#334155;margin:0 0 8px">${esc(distinction)}</p>
+<p class="ge-meta">${esc(overlap)} · ${esc(traffic)} · Organic overlap is SERP evidence only.</p>
+<p class="ge-meta">Qualification evidence: ${esc((row.qualificationEvidence || row.whyIdentified || []).join(" "))}</p>
+<p class="ge-meta">Keyword expansion: ${esc(expansion)} · Analysed: ${esc(analysed)}${row.nonSelectionReason ? ` · ${esc(row.nonSelectionReason)}` : ""}</p>
 <p class="ge-meta">Evidence status: ${esc(row.evidenceSource)} · Verified: no · Source: Labs competitors domain</p>
 </article>`;
 }
@@ -143,6 +150,11 @@ export function renderNationalSearchIntelligencePage(
 <div class="ge-card"><span class="ge-placeholder">Calculated</span><h3>Ranking pages</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.rankingPageCount}</p></div>
 <div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Organic search competitors</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.organicCompetitorCount}</p></div>
 <div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Latest collection</h3><p style="font-size:16px;font-weight:700;margin:0">${snapshot.status === "not_collected" ? "Not collected" : esc(snapshot.capturedAt)}</p><p class="ge-meta">${esc(sourceLabel)}</p></div>
+</div>
+<div class="ge-grid-3" style="margin-top:12px" data-ni03c1-section="competitor-distinction">
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Commercial competitors</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.commercialCompetitorCount || 0}</p><p class="ge-meta">Businesses that compete for your customers</p></div>
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Search competitors</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.summary.serpCompetitorCount || 0}</p><p class="ge-meta">Domains that compete in search, not for your customers</p></div>
+<div class="ge-card"><span class="ge-placeholder">Evidence</span><h3>Customer organic footprint</h3><p style="font-size:28px;font-weight:900;margin:0">${snapshot.customerOrganicFootprint?.keywordCount ?? snapshot.summary.rankingKeywordCount}</p><p class="ge-meta">${esc(snapshot.customerOrganicFootprint?.note || "Customer keyword universe used for competitor discovery.")}</p></div>
 </div>`
     : `<p class="ge-lead" data-ni03b-section="empty-metrics">No collection has been performed yet. Metrics will appear from persisted DataForSEO evidence only.</p>`;
 
@@ -211,14 +223,16 @@ ${cards}
 
 <div class="ge-panel" data-ni03b-section="competitors" data-ni03c-section="organic-competitors">
 <h2>Your organic competitors</h2>
-<p class="ge-lead">These are businesses competing with you in organic search. They are identified from search-market evidence, not physical proximity.</p>
+<p class="ge-lead">These domains compete with you in Google search results. That is not the same as competing for your customers.</p>
+<p class="ge-lead">Organic overlap is SERP evidence only. Only commercially qualified competitors are selected for paid keyword expansion.</p>
 <p class="ge-lead">They are not selected based on physical proximity.</p>
+${collected && snapshot.customerOrganicFootprint?.sparse ? `<p class="ge-lead" data-ni03c1-section="sparse-footprint">${esc(snapshot.customerOrganicFootprint.note)}</p>` : ""}
 ${competitorCards}
 </div>
 
 <div class="ge-panel" data-ni03c-section="competitor-keywords">
 <h2>Competitor keywords</h2>
-<p class="ge-lead">Ranking keyword universes collected for the strongest qualified organic competitors. This screen does not score gaps or recommend content.</p>
+<p class="ge-lead">Ranking keyword universes collected only for commercially qualified competitors. Search-only competitors are retained above and are not expanded automatically. This screen does not score gaps or recommend content.</p>
 ${competitorKeywordHtml}
 </div>
 
