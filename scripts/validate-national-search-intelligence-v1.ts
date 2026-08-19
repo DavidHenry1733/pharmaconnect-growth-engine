@@ -842,8 +842,15 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   fetchUrls.push(url);
   const task = taskFromInit(init);
   labsRequestBodies.push({ url, task });
-  if (url.includes("competitors_domain")) {
+  if (url.includes("competitors_domain") || url.includes("serp_competitors")) {
     return new Response(JSON.stringify(competitorsDomainPayload("example-national-search-b.co.uk")), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (url.includes("domain_intersection")) {
+    const target = String(task.target1 || task.target || "example-search-competitor.co.uk");
+    return new Response(JSON.stringify(competitorRankedPayload(String(target))), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -872,7 +879,7 @@ const [firstCollect, secondCollect] = await Promise.all([
 ]);
 check(
   "duplicate-collect-does-not-double-paid-calls",
-  mockedRequests === 4 && (firstCollect.reusedExistingSnapshot || secondCollect.reusedExistingSnapshot),
+  mockedRequests === 6 && (firstCollect.reusedExistingSnapshot || secondCollect.reusedExistingSnapshot),
   `requests=${mockedRequests} reused=${firstCollect.reusedExistingSnapshot}/${secondCollect.reusedExistingSnapshot}`,
 );
 check(
@@ -913,7 +920,7 @@ check(
     && liveCollect.organicCompetitors.some((row) => row.domain === "example-search-competitor.co.uk" && row.sharedKeywordCount === 22)
     && liveCollect.organicCompetitors.every((row) => row.whyIdentified.length > 0)
     && liveCollect.organicCompetitors.every((row) => row.verified === false)
-    && liveCollect.organicCompetitors.every((row) => row.discoverySource === "dataforseo_labs_competitors_domain")
+    && liveCollect.organicCompetitors.every((row) => row.discoverySource === "dataforseo_labs_serp_competitors" || row.discoverySource === "dataforseo_labs_competitors_domain")
     && liveCollect.status === "collected",
   `${liveCollect.status} competitors=${liveCollect.organicCompetitors.map((row) => row.domain).join(",")}`,
 );
@@ -1014,11 +1021,18 @@ async function collectWithLabsQueue(
       setTimeout(() => reject(new Error("NI-03C validator hang mock was not aborted")), 5000);
     });
     const task = taskFromInit(init);
-    if (url.includes("competitors_domain")) {
+    if (url.includes("competitors_domain") || url.includes("serp_competitors")) {
       competitorDomainCalls += 1;
       if (options.hangCompetitors) return hang();
       const next = competitorDomainQueue.shift() || competitorsDomainPayload(subjectDomain);
       return new Response(JSON.stringify(next), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("domain_intersection")) {
+      const target = String(task.target1 || task.target || subjectDomain);
+      return new Response(JSON.stringify(competitorKeywordQueue[0] || competitorRankedPayload(target)), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     }
     if (url.includes("ranked_keywords")) {
       const target = String(task.target || "");
@@ -1075,7 +1089,7 @@ check(
     && retryCase.snapshot.customerKeywords.length === 2
     && retryCase.snapshot.organicCompetitors.length >= 1
     && retryCase.snapshot.competitorKeywordUniverses.length >= 1
-    && Math.abs(retryCase.snapshot.costs.totalCost - (0.0123 + 0.002 + 0.0108 + 0.008 * retryCase.snapshot.competitorKeywordUniverses.length)) < 1e-9,
+    && Math.abs(retryCase.snapshot.costs.totalCost - (0.0123 + 0.002 + 0.0108 + 0.008 * retryCase.snapshot.competitorKeywordUniverses.length + 0.008 * (retryCase.snapshot.competitorKeywordGaps || []).length)) < 1e-9,
   `${retryCase.snapshot.status} competitorDomainCalls=${retryCase.competitorDomainCalls} cost=${retryCase.snapshot.costs.totalCost} attempts=${retryCase.snapshot.labsAttempts.length}`,
 );
 
@@ -1236,8 +1250,12 @@ else process.env.DATAFORSEO_PASSWORD = previousPassword;
 for (const slug of [tenantBSlug, tenantRetry, tenantPartial, tenantAllFail, tenantAuth, tenantTimeoutCompetitors, tenantTimeoutRanked, tenantLimit]) {
   for (const artifact of [
     "search-intelligence-v1",
+    "search-intelligence-v2",
     "ranked-keywords-customer",
+    "ranked-keywords-customer-v2",
     "ranked-keywords-competitors",
+    "ranked-keywords-competitors-v2",
+    "competitor-keyword-gaps-v2",
     "cost-ledger-v1",
     "refresh-metadata-v1",
     "competitor-discovery",

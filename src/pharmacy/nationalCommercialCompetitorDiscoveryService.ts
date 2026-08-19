@@ -224,7 +224,7 @@ export function buildCommercialCompetitorDiscoveryContext(slug: string) {
       name: row.name,
       title: row.name,
       websiteText: "",
-      url: row.url || `https://${row.domain}`,
+      url: row.websiteUrl || `https://${row.domain}`,
       discoverySource: "organic-overlap" as const,
       discoveryEvidence: `Organic/SERP overlap evidence only (sharedKeywordCount=${row.sharedKeywordCount ?? "n/a"}). Not commercial proof.`,
       sharedKeywordCount: row.sharedKeywordCount ?? 0,

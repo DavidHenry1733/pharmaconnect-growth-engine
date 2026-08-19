@@ -26,6 +26,10 @@ export type NationalIntelligenceArtifact =
   | "cost-ledger-v1"
   | "refresh-metadata-v1"
   | "search-intelligence-v1"
+  | "search-intelligence-v2"
+  | "ranked-keywords-customer-v2"
+  | "ranked-keywords-competitors-v2"
+  | "competitor-keyword-gaps-v2"
   | "competitors"
   | "market"
   | "growth";

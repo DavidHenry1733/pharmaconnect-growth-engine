@@ -3,6 +3,9 @@
  * Defaults are commercial, not tenant-specific.
  * Override with env or collect options. Never hard-code a tenant slug or domain.
  */
+export const SPARSE_SEARCH_INTELLIGENCE_MAX_DIRECT_EXPANSION = 3;
+export const SPARSE_SEARCH_INTELLIGENCE_MAX_TASKS = 8;
+
 export const NI03C_DEFAULT_LIMITS = {
   customerKeywordUniverse: 500,
   competitorDiscoveryCandidates: 20,
@@ -111,23 +114,39 @@ export function describeCustomerOrganicFootprint(
     threshold: limits.sparseCustomerKeywordThreshold,
     sufficientForHighConfidenceCommercialDiscovery: !sparse,
     note: sparse
-      ? "Customer organic footprint is sparse. Competitors Domain overlap is retained as SERP evidence and is not commercial competitor proof."
+      ? "Customer organic footprint is sparse. Commercial discovery uses Business Intelligence seed keywords with serp_competitors. Competitors Domain is not used as commercial discovery."
       : "Customer organic footprint is sufficient for high-confidence commercial competitor discovery.",
   };
 }
 
 export function planNationalSearchIntelligenceTasks(
   limits: NationalSearchIntelligenceLimits = resolveNationalSearchIntelligenceLimits(),
+  options: { sparse?: boolean } = {},
 ): {
   customerKeywordTasks: number;
   competitorDiscoveryTasks: number;
   competitorKeywordTasks: number;
+  domainIntersectionTasks: number;
   maximumPaidRequests: number;
 } {
+  if (options.sparse) {
+    const expansion = Math.min(SPARSE_SEARCH_INTELLIGENCE_MAX_DIRECT_EXPANSION, limits.qualifiedCompetitorsAnalysed);
+    return {
+      customerKeywordTasks: 1,
+      competitorDiscoveryTasks: 1,
+      competitorKeywordTasks: expansion,
+      domainIntersectionTasks: expansion,
+      maximumPaidRequests: Math.min(
+        SPARSE_SEARCH_INTELLIGENCE_MAX_TASKS,
+        1 + 1 + expansion + expansion,
+      ),
+    };
+  }
   return {
     customerKeywordTasks: 1,
     competitorDiscoveryTasks: 1,
     competitorKeywordTasks: limits.qualifiedCompetitorsAnalysed,
+    domainIntersectionTasks: 0,
     maximumPaidRequests: 1 + 1 + limits.qualifiedCompetitorsAnalysed,
   };
 }

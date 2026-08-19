@@ -41,6 +41,8 @@ const BROAD_ALONE = new Set([
   "local",
   "online",
   "uk",
+  "seo",
+  "hosting",
 ]);
 
 /**
@@ -67,8 +69,9 @@ const TENANT_SERVICE_CONCEPTS: Array<{
     id: "seo",
     tenantMatcher: /\bseo\b|search engine opt/i,
     phrases: [
-      "seo",
       "local seo",
+      "national seo",
+      "pharmacy seo",
       "search engine optimisation",
       "search engine optimization",
       "local search",
@@ -89,7 +92,6 @@ const TENANT_SERVICE_CONCEPTS: Array<{
     phrases: [
       "website hosting",
       "web hosting",
-      "hosting",
     ],
   },
   {
@@ -145,13 +147,28 @@ function unique(values: string[]): string[] {
   return [...new Set(values.map((value) => normalise(value)).filter(Boolean))];
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function extractMatchedSourceExcerpt(text: string, phrase: string, max = 220): string {
+  const haystack = String(text || "");
+  const needle = normalise(phrase);
+  if (!haystack || !needle) return "";
+  const idx = haystack.toLowerCase().indexOf(needle);
+  if (idx < 0) return "";
+  const start = Math.max(0, idx - 48);
+  const end = Math.min(haystack.length, idx + needle.length + 96);
+  return haystack.slice(start, end).replace(/\s+/g, " ").trim().slice(0, max);
+}
+
 function hasPhrase(text: string, phrase: string): boolean {
   const needle = normalise(phrase);
-  if (!needle) return false;
+  if (!needle || BROAD_ALONE.has(needle)) return false;
   if (/^[a-z0-9]+$/.test(needle)) {
-    return new RegExp(`\\b${needle}\\b`, "i").test(text);
+    return new RegExp(`\\b${escapeRegExp(needle)}\\b`, "i").test(text);
   }
-  return text.includes(needle);
+  return new RegExp(`\\b${escapeRegExp(needle)}\\b`, "i").test(text) || text.includes(needle);
 }
 
 function conceptsForTenantService(serviceName: string): typeof TENANT_SERVICE_CONCEPTS {

@@ -1,6 +1,6 @@
 /**
  * Canonical DataForSEO Labs client for ranked_keywords, keywords_for_site,
- * domain_intersection, and competitors_domain.
+ * domain_intersection, competitors_domain, and serp_competitors.
  * Live HTTP runs only when an explicit execution function is called.
  * Read/render paths must not import-call these live functions.
  */
@@ -16,7 +16,10 @@ export const DATAFORSEO_LABS_ENDPOINTS = {
   keywordsForSite: "https://api.dataforseo.com/v3/dataforseo_labs/google/keywords_for_site/live",
   domainIntersection: "https://api.dataforseo.com/v3/dataforseo_labs/google/domain_intersection/live",
   competitorsDomain: "https://api.dataforseo.com/v3/dataforseo_labs/google/competitors_domain/live",
+  serpCompetitors: "https://api.dataforseo.com/v3/dataforseo_labs/google/serp_competitors/live",
 } as const;
+
+export const DATAFORSEO_ORGANIC_ITEM_TYPES = ["organic"] as const;
 
 export type DataForSeoRankedKeyword = {
   keyword: string;
@@ -82,6 +85,7 @@ export type DataForSeoLabsExecutionResult<T> = {
   endpoint: string;
   result: T | null;
   attempts: DataForSeoLabsTaskAttempt[];
+  redactedPayload?: unknown;
 };
 
 function credentials() {
@@ -182,6 +186,39 @@ export function parseLabsCompetitorItems(payload: unknown): { rows: DataForSeoDo
     cost: typeof task.cost === "number" ? task.cost : 0,
     tasks: task ? 1 : 0,
   };
+}
+
+/**
+ * Official DataForSEO Labs Google SERP Competitors live:
+ * https://docs.dataforseo.com/v3/dataforseo_labs-google-serp_competitors-live/
+ * Returned domains are SERP co-occurrence candidates only, not commercially
+ * qualified competitors.
+ */
+export function parseSerpCompetitorItems(payload: unknown): { rows: DataForSeoDomainCompetitor[]; cost: number; tasks: number } {
+  const json = payload as { tasks?: Array<{ cost?: number; result?: Array<{ items?: unknown[] }> }> };
+  const task = json?.tasks?.[0] || {};
+  const items = task?.result?.[0]?.items || [];
+  return {
+    rows: items.map((item: any) => ({
+      domain: normaliseLabsDomain(String(item?.domain || "")),
+      avgPosition: num(item?.avg_position),
+      sharedKeywordCount: num(item?.keywords_count ?? item?.relevant_serp_items ?? item?.intersections),
+      organicEtv: num(item?.etv ?? item?.full_domain_metrics?.organic?.etv),
+      organicKeywordCount: num(item?.keywords_count ?? item?.full_domain_metrics?.organic?.count),
+      sharedKeywordEtv: num(item?.etv),
+    })).filter((row: DataForSeoDomainCompetitor) => row.domain),
+    cost: typeof task.cost === "number" ? task.cost : 0,
+    tasks: task ? 1 : 0,
+  };
+}
+
+export function redactDataForSeoLabsPayload(body: unknown): unknown {
+  if (body == null) return null;
+  try {
+    return JSON.parse(JSON.stringify(body));
+  } catch {
+    return null;
+  }
 }
 
 async function executeLabsOnce(
@@ -373,6 +410,8 @@ export async function executeDomainRankedKeywords(input: {
     target: domain,
     ...labsLocationFields(input),
     language_code: input.languageCode || "en",
+    item_types: ["organic"],
+    include_clickstream_data: false,
     limit: Math.min(Math.max(input.limit || 1000, 1), 1000),
     order_by: input.orderBy || ["keyword_data.keyword_info.search_volume,desc"],
   }]);
@@ -408,6 +447,7 @@ export async function executeDomainCompetitors(input: {
     language_code: input.languageCode || "en",
     limit: Math.min(Math.max(input.limit || 20, 1), 1000),
     item_types: ["organic"],
+    include_clickstream_data: false,
     exclude_top_domains: input.excludeTopDomains !== false,
     exclude_domains: (input.excludeDomains || []).map(normaliseLabsDomain).filter(Boolean),
     order_by: ["intersections,desc"],
@@ -425,6 +465,81 @@ export async function executeDomainCompetitors(input: {
       ? { rows: parsed.rows, cost: executed.cost, tasks: executed.attempts.length, endpoint: DATAFORSEO_LABS_ENDPOINTS.competitorsDomain }
       : null,
     attempts: executed.attempts,
+  };
+}
+
+export async function executeSerpCompetitors(input: {
+  keywords: string[];
+  locationName?: string;
+  locationCode?: number;
+  languageCode?: string;
+  limit?: number;
+}): Promise<DataForSeoLabsExecutionResult<DataForSeoLabsCompetitorResult>> {
+  const keywords = [...new Set((input.keywords || []).map((value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase()).filter(Boolean))].slice(0, 6);
+  const body = [{
+    keywords,
+    ...labsLocationFields(input),
+    language_code: input.languageCode || "en",
+    item_types: ["organic"],
+    include_clickstream_data: false,
+    limit: Math.min(Math.max(input.limit || 20, 1), 20),
+  }];
+  const executed = await executeDataForSeoLabs(DATAFORSEO_LABS_ENDPOINTS.serpCompetitors, body);
+  const parsed = executed.payload ? parseSerpCompetitorItems(executed.payload) : { rows: [], cost: 0, tasks: 0 };
+  return {
+    successful: executed.successful,
+    fatal: executed.fatal,
+    fatalMessage: executed.fatalMessage,
+    timedOut: executed.timedOut,
+    cost: executed.cost,
+    tasks: executed.attempts.length,
+    endpoint: DATAFORSEO_LABS_ENDPOINTS.serpCompetitors,
+    result: executed.successful
+      ? { rows: parsed.rows, cost: executed.cost, tasks: executed.attempts.length, endpoint: DATAFORSEO_LABS_ENDPOINTS.serpCompetitors }
+      : null,
+    attempts: executed.attempts,
+    redactedPayload: redactDataForSeoLabsPayload(body),
+  };
+}
+
+export async function executeDomainIntersection(input: {
+  competitorDomain: string;
+  subjectDomain: string;
+  locationName?: string;
+  locationCode?: number;
+  languageCode?: string;
+  limit?: number;
+  intersections?: boolean;
+  orderBy?: string[];
+}): Promise<DataForSeoLabsExecutionResult<DataForSeoLabsResult>> {
+  const competitorDomain = normaliseLabsDomain(input.competitorDomain);
+  const subjectDomain = normaliseLabsDomain(input.subjectDomain);
+  const body = [{
+    target1: competitorDomain,
+    target2: subjectDomain,
+    intersections: input.intersections === true,
+    ...labsLocationFields(input),
+    language_code: input.languageCode || "en",
+    item_types: ["organic"],
+    include_clickstream_data: false,
+    limit: Math.min(Math.max(input.limit || 100, 1), 1000),
+    order_by: input.orderBy || ["keyword_data.keyword_info.search_volume,desc"],
+  }];
+  const executed = await executeDataForSeoLabs(DATAFORSEO_LABS_ENDPOINTS.domainIntersection, body);
+  const parsed = executed.payload ? parseLabsKeywordItems(executed.payload, competitorDomain) : { rows: [], cost: 0, tasks: 0 };
+  return {
+    successful: executed.successful,
+    fatal: executed.fatal,
+    fatalMessage: executed.fatalMessage,
+    timedOut: executed.timedOut,
+    cost: executed.cost,
+    tasks: executed.attempts.length,
+    endpoint: DATAFORSEO_LABS_ENDPOINTS.domainIntersection,
+    result: executed.successful
+      ? { rows: parsed.rows, cost: executed.cost, tasks: executed.attempts.length, endpoint: DATAFORSEO_LABS_ENDPOINTS.domainIntersection }
+      : null,
+    attempts: executed.attempts,
+    redactedPayload: redactDataForSeoLabsPayload(body),
   };
 }
 

@@ -8,12 +8,16 @@
  */
 import { qualifyNationalCompetitor } from "./nationalCompetitorQualificationService.ts";
 import { qualifyNationalCompetitorV2 } from "./nationalCompetitorQualificationV2Service.ts";
-import { compareNationalCommercialServiceOverlap } from "./nationalCommercialServiceOverlap.ts";
+import {
+  compareNationalCommercialServiceOverlap,
+  extractMatchedSourceExcerpt,
+} from "./nationalCommercialServiceOverlap.ts";
 import type { NationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
 
 export type NationalSearchCompetitorRole =
   | "commercial_competitor"
   | "adjacent_commercial_provider"
+  | "international_comparator"
   | "serp_content_competitor"
   | "customer_market"
   | "publisher"
@@ -24,11 +28,30 @@ export type NationalSearchCompetitorRole =
   | "insufficient_evidence"
   | "irrelevant";
 
+export type NationalSearchQualificationOutcome =
+  | "direct_competitor"
+  | "adjacent_provider"
+  | "international_comparator"
+  | "customer_market"
+  | "rejected"
+  | "insufficient_evidence";
+
 export type CompetitorWebsiteEvidence = {
   domain: string;
   title?: string | null;
   websiteText?: string | null;
   reachable?: boolean;
+};
+
+export type NationalSearchCandidateQualificationEvidence = {
+  candidateDomain: string;
+  candidateSourceUrl: string;
+  exactMatchedSourceText: string;
+  matchedConfiguredService: string | null;
+  targetCustomerEvidence: string | null;
+  ukMarketEvidence: string | null;
+  fetchedAt: string;
+  evidenceProvenance: "candidate_website";
 };
 
 export type NationalSearchCommercialGateInput = {
@@ -41,10 +64,12 @@ export type NationalSearchCommercialGateInput = {
   subject: Pick<NationalIntelligenceSubject, "subjectDomain" | "primaryMarket" | "country" | "commercialServices">;
   ownDomains?: string[];
   sparseCustomerFootprint?: boolean;
+  fetchedAt?: string;
 };
 
 export type NationalSearchCommercialGateResult = {
   role: NationalSearchCompetitorRole;
+  outcome: NationalSearchQualificationOutcome;
   classification: "direct_competitor" | "adjacent_competitor" | "insufficient_evidence" | "excluded";
   qualification: "qualified" | "candidate" | "rejected";
   eligibleForKeywordExpansion: boolean;
@@ -61,6 +86,7 @@ export type NationalSearchCommercialGateResult = {
   reasons: string[];
   exclusionReasons: string[];
   nonSelectionReason: string | null;
+  qualificationEvidence: NationalSearchCandidateQualificationEvidence;
 };
 
 const STOP_WORDS = new Set([
@@ -219,16 +245,99 @@ function isInfrastructureDomain(domain: string, ownDomains: string[]): boolean {
   return INFRASTRUCTURE_DOMAIN_PATTERNS.some((pattern) => pattern.test(domain));
 }
 
-function geographicRelevance(text: string, country: string, domain: string): boolean {
-  const countryToken = normalise(country);
-  if (countryToken && text.includes(countryToken)) return true;
-  if (countryToken.includes("united kingdom") || countryToken === "uk") {
-    if (domain.endsWith(".co.uk") || /\buk\b|united kingdom|uk-based|england|scotland|wales/.test(text)) {
-      return true;
-    }
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasBoundedTerm(text: string, term: string): boolean {
+  const needle = normalise(term);
+  if (!needle || needle.length < 3) return false;
+  return new RegExp(`\\b${escapeRegExp(needle)}\\b`, "i").test(text);
+}
+
+function firstExcerpt(text: string, phrases: string[]): string | null {
+  for (const phrase of phrases) {
+    const excerpt = extractMatchedSourceExcerpt(text, phrase);
+    if (excerpt) return excerpt;
   }
-  if (countryToken && domain.endsWith(`.${countryToken.split(" ").pop()}`)) return true;
-  return false;
+  return null;
+}
+
+function ukMarketExcerpt(websiteText: string, country: string): string | null {
+  const countryToken = normalise(country);
+  const phrases = [
+    "united kingdom",
+    "uk-based",
+    "uk based",
+    "uk pharmacies",
+    "uk pharmacy",
+    "england",
+    "scotland",
+    "wales",
+    "northern ireland",
+  ];
+  if (countryToken && countryToken !== "uk" && countryToken !== "united kingdom") {
+    phrases.unshift(countryToken);
+  }
+  const excerpt = firstExcerpt(websiteText, phrases);
+  if (excerpt) return excerpt;
+  if (/\buk\b/.test(websiteText)) {
+    return extractMatchedSourceExcerpt(websiteText, " uk ")
+      || extractMatchedSourceExcerpt(websiteText, "uk-")
+      || extractMatchedSourceExcerpt(websiteText, "uk ")
+      || extractMatchedSourceExcerpt(websiteText, " uk");
+  }
+  return null;
+}
+
+function explicitForeignMarket(websiteText: string): boolean {
+  return /\bunited states\b|\busa\b|\bu\.s\.a\.?\b|\bcanada\b|\baustralia\b|\bnew zealand\b|\bus pharmacies\b|\bamerican pharmacies\b/.test(websiteText);
+}
+
+function targetCustomerExcerpt(websiteText: string, terms: string[]): string | null {
+  const preferred = terms.filter((term) => /pharmac|owner|business|community/.test(normalise(term)));
+  return firstExcerpt(websiteText, preferred.length ? preferred : terms);
+}
+
+function isPmrOrDispensingProvider(text: string): boolean {
+  return /\bpmr\b|patient medication record|dispensing software|dispensing system|pharmacy management system/.test(text);
+}
+
+function isQuestionnaireProvider(text: string): boolean {
+  return /\bcppq\b|patient questionnaire|survey platform|community pharmacy patient questionnaire/.test(text);
+}
+
+function isGeneralHealthcareSupplier(text: string): boolean {
+  return /\bhealthcare supplier\b|\bmedical supplies\b|\bpharmaceutical wholesaler\b|\bwholesale pharmacy\b/.test(text);
+}
+
+function strongCommercialProviderEvidence(text: string): boolean {
+  return /\b(agency|we provide|we offer|our clients|our customers|book a call|request a quote|get started|free consultation|software provider)\b/.test(text);
+}
+
+function buildQualificationEvidence(input: {
+  domain: string;
+  sourceUrl: string;
+  websiteText: string;
+  overlappingServices: string[];
+  overlappingPhrases: string[];
+  targetExcerpt: string | null;
+  ukExcerpt: string | null;
+  fetchedAt: string;
+}): NationalSearchCandidateQualificationEvidence {
+  const matchedService = input.overlappingServices[0] || null;
+  const phrase = input.overlappingPhrases[0] || "";
+  const serviceExcerpt = phrase ? extractMatchedSourceExcerpt(input.websiteText, phrase) : "";
+  return {
+    candidateDomain: input.domain,
+    candidateSourceUrl: input.sourceUrl,
+    exactMatchedSourceText: serviceExcerpt || input.targetExcerpt || input.ukExcerpt || "",
+    matchedConfiguredService: matchedService,
+    targetCustomerEvidence: input.targetExcerpt,
+    ukMarketEvidence: input.ukExcerpt,
+    fetchedAt: input.fetchedAt,
+    evidenceProvenance: "candidate_website",
+  };
 }
 
 export function assessNationalSearchCommercialCompetitor(
@@ -237,17 +346,20 @@ export function assessNationalSearchCommercialCompetitor(
   const domain = normalise(input.domain).replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
   const websiteText = String(input.websiteText || "");
   const title = String(input.title || "");
-  const text = normalise([domain, title, websiteText, input.url].join(" "));
+  const sourceUrl = String(input.url || `https://${domain}`).trim() || `https://${domain}`;
+  const titleForEvidence = normalise(title) === domain ? "" : title;
+  const websiteCorpus = normalise([titleForEvidence, websiteText].join(" "));
   const ownDomains = input.ownDomains || [input.subject.subjectDomain];
-  const marketTerms = tenantMarketTerms(input.subject);
+  const marketTerms = tenantMarketTerms(input.subject).filter((term) => !STOP_WORDS.has(normalise(term)) && normalise(term) !== "seo");
   const services = tenantServiceNames(input.subject);
-  const roleFromEvidence = detectRole(text);
+  const roleFromEvidence = detectRole(websiteCorpus);
+  const fetchedAt = input.fetchedAt || new Date().toISOString();
 
   const v2 = qualifyNationalCompetitorV2({
     domain,
     title,
     snippet: null,
-    url: input.url || `https://${domain}`,
+    url: sourceUrl,
     websiteText,
     ownDomains,
   });
@@ -263,51 +375,75 @@ export function assessNationalSearchCommercialCompetitor(
 
   const overlap = compareNationalCommercialServiceOverlap({
     tenantServices: services,
-    websiteText: text,
+    websiteText: websiteCorpus,
   });
-  const targetMarketRelevance = marketTerms.some((term) => text.includes(normalise(term)));
+  const targetExcerpt = targetCustomerExcerpt(websiteCorpus, [
+    input.subject.primaryMarket,
+    "community pharmacies",
+    "community pharmacy",
+    "pharmacy businesses",
+    "pharmacy business",
+    "pharmacy owners",
+    ...marketTerms,
+  ]);
+  const ukExcerpt = ukMarketExcerpt(websiteCorpus, input.subject.country);
+  const targetMarketRelevance = Boolean(targetExcerpt) || marketTerms.some((term) => hasBoundedTerm(websiteCorpus, term));
   const serviceOverlap = overlap.serviceOverlap;
   const organisationExcluded = v2.exclusionReasons.some((reason) =>
     /publisher|regulator|professional body|non-competing organisation|non-commercial evidence/i.test(reason),
   );
+  const pmrProvider = isPmrOrDispensingProvider(websiteCorpus);
+  const questionnaireProvider = isQuestionnaireProvider(websiteCorpus);
+  const healthcareSupplier = isGeneralHealthcareSupplier(websiteCorpus);
+  const blockedDirectRole = pmrProvider || questionnaireProvider || healthcareSupplier;
   const nonCommercialRole = roleFromEvidence != null
     && roleFromEvidence !== "commercial_competitor"
     && roleFromEvidence !== "adjacent_commercial_provider"
+    && roleFromEvidence !== "international_comparator"
     && roleFromEvidence !== "serp_content_competitor"
     && roleFromEvidence !== "insufficient_evidence";
-  const strongCommercialProvider = /\b(agency|we provide|we offer|our clients|our customers|book a call|request a quote|get started|free consultation|software provider)\b/.test(text)
-    || v1.qualificationReasons.some((reason) => /commercial digital-service/i.test(reason));
   const commercialProvider =
-    strongCommercialProvider
+    strongCommercialProviderEvidence(websiteCorpus)
     && !nonCommercialRole
-    && !organisationExcluded
-    && roleFromEvidence !== "publisher"
-    && roleFromEvidence !== "education_academic"
-    && roleFromEvidence !== "professional_body"
-    && roleFromEvidence !== "customer_market"
-    && roleFromEvidence !== "directory_platform"
-    && roleFromEvidence !== "generic_informational";
-  const marketRelevance = v2.evidence.ukMarket || geographicRelevance(text, input.subject.country, domain);
+    && !organisationExcluded;
+  const marketRelevance = Boolean(ukExcerpt);
   const infrastructure = isInfrastructureDomain(domain, ownDomains) || v1.rejectionReasons.some((reason) => /own domain/i.test(reason));
+  const foreignMarket = explicitForeignMarket(websiteCorpus);
 
   const commercialGate =
     !infrastructure
     && !nonCommercialRole
     && !organisationExcluded
+    && !blockedDirectRole
     && targetMarketRelevance
     && commercialProvider
     && serviceOverlap
     && marketRelevance;
 
+  const qualificationEvidence = buildQualificationEvidence({
+    domain,
+    sourceUrl,
+    websiteText,
+    overlappingServices: overlap.overlappingServices,
+    overlappingPhrases: overlap.overlappingPhrases,
+    targetExcerpt,
+    ukExcerpt,
+    fetchedAt,
+  });
+
+  const overlapReason = serviceOverlap && qualificationEvidence.candidateSourceUrl && qualificationEvidence.exactMatchedSourceText
+    ? `Material overlap with configured tenant service ${overlap.overlappingServices.join(", ")} at ${qualificationEvidence.candidateSourceUrl}: "${qualificationEvidence.exactMatchedSourceText}".`
+    : (serviceOverlap ? "Material tenant-service overlap requires a candidate source URL and matching source text." : "No material tenant-service overlap evidenced.");
+
   const reasons = unique([
-    ...v2.reasons,
-    ...v1.qualificationReasons,
+    ...v2.reasons.filter((reason) => !/digital-service evidence/i.test(reason)),
     targetMarketRelevance ? "Tenant target-market terms appear in website evidence." : "",
-    serviceOverlap ? `Material tenant service overlap: ${overlap.overlappingServices.join(", ")}.` : "No material tenant-service overlap evidenced.",
+    overlapReason,
     overlap.overlappingPhrases.length ? `Overlapping service phrases: ${overlap.overlappingPhrases.join(", ")}.` : "",
     overlap.nonOverlappingServices.length ? `Non-overlapping services detected: ${overlap.nonOverlappingServices.join(", ")}.` : "",
     commercialProvider ? "Commercial provider evidence present." : "",
-    marketRelevance ? "Geographic/commercial market evidence present." : "",
+    marketRelevance ? "UK-market evidence present on the candidate website." : "A .co.uk domain or SERP snippet is not UK pharmacy-market proof.",
+    domain.endsWith(".co.uk") ? ".co.uk is supporting geography only and does not independently prove the UK pharmacy market." : "",
     input.sharedKeywordCount != null
       ? `DataForSEO intersections=${input.sharedKeywordCount} is organic keyword overlap (SERP evidence only), not commercial equivalence.`
       : "Organic overlap is SERP evidence only. Official Competitors Domain intersections do not establish commercial competition.",
@@ -317,6 +453,9 @@ export function assessNationalSearchCommercialCompetitor(
     ...v2.exclusionReasons,
     ...v1.rejectionReasons.filter((reason) => /own domain/i.test(reason)),
     nonCommercialRole && roleFromEvidence ? `Classified as ${roleFromEvidence.replace(/_/g, " ")} from website evidence.` : "",
+    pmrProvider ? "Candidate is a PMR or dispensing-system provider, not a matching commercial-service competitor." : "",
+    questionnaireProvider ? "Candidate is a questionnaire provider, not a matching commercial-service competitor." : "",
+    healthcareSupplier ? "Candidate is a general healthcare supplier, not a matching commercial-service competitor." : "",
   ]);
 
   const gateFields = {
@@ -329,11 +468,13 @@ export function assessNationalSearchCommercialCompetitor(
     candidateServicesDetected: overlap.candidateServicesDetected,
     overlappingServices: overlap.overlappingServices,
     nonOverlappingServices: overlap.nonOverlappingServices,
+    qualificationEvidence,
   };
 
   if (infrastructure) {
     return {
       role: "irrelevant",
+      outcome: "rejected",
       classification: "excluded",
       qualification: "rejected",
       eligibleForKeywordExpansion: false,
@@ -346,8 +487,12 @@ export function assessNationalSearchCommercialCompetitor(
   }
 
   if (nonCommercialRole && roleFromEvidence) {
+    const outcome: NationalSearchQualificationOutcome = roleFromEvidence === "customer_market"
+      ? "customer_market"
+      : "rejected";
     return {
       role: roleFromEvidence,
+      outcome,
       classification: "insufficient_evidence",
       qualification: "candidate",
       eligibleForKeywordExpansion: false,
@@ -360,11 +505,47 @@ export function assessNationalSearchCommercialCompetitor(
     };
   }
 
+  if (blockedDirectRole) {
+    return {
+      role: "adjacent_commercial_provider",
+      outcome: "adjacent_provider",
+      classification: "insufficient_evidence",
+      qualification: "candidate",
+      eligibleForKeywordExpansion: false,
+      score: Math.max(v2.score, v1.score),
+      ...gateFields,
+      reasons,
+      exclusionReasons,
+      nonSelectionReason: pmrProvider
+        ? "PMR or dispensing-system providers are adjacent suppliers, not direct commercial competitors."
+        : questionnaireProvider
+          ? "Questionnaire providers are adjacent suppliers, not direct commercial competitors."
+          : "General healthcare suppliers are not direct commercial competitors.",
+    };
+  }
+
+  if (commercialProvider && serviceOverlap && !marketRelevance && !infrastructure && !nonCommercialRole) {
+    if (foreignMarket) {
+      return {
+        role: "international_comparator",
+        outcome: "international_comparator",
+        classification: "insufficient_evidence",
+        qualification: "candidate",
+        eligibleForKeywordExpansion: false,
+        score: Math.max(v2.score, v1.score),
+        ...gateFields,
+        reasons,
+        exclusionReasons,
+        nonSelectionReason: "Overlapping commercial services were evidenced outside the UK pharmacy market. International comparators are not selected for paid keyword expansion.",
+      };
+    }
+  }
+
   if (commercialGate) {
-    const direct = v2.classification === "direct_competitor" || (v1.qualification === "qualified" && v2.evidence.multiServiceOverlap);
     return {
       role: "commercial_competitor",
-      classification: direct ? "direct_competitor" : "adjacent_competitor",
+      outcome: "direct_competitor",
+      classification: "direct_competitor",
       qualification: "qualified",
       eligibleForKeywordExpansion: true,
       score: Math.max(v2.score, v1.score),
@@ -378,6 +559,7 @@ export function assessNationalSearchCommercialCompetitor(
   if (targetMarketRelevance && commercialProvider && !serviceOverlap && !infrastructure && !nonCommercialRole) {
     return {
       role: "adjacent_commercial_provider",
+      outcome: "adjacent_provider",
       classification: "insufficient_evidence",
       qualification: "candidate",
       eligibleForKeywordExpansion: false,
@@ -392,6 +574,7 @@ export function assessNationalSearchCommercialCompetitor(
   const hasOverlap = (input.sharedKeywordCount || 0) > 0;
   return {
     role: hasOverlap ? "serp_content_competitor" : "insufficient_evidence",
+    outcome: "insufficient_evidence",
     classification: "insufficient_evidence",
     qualification: "candidate",
     eligibleForKeywordExpansion: false,

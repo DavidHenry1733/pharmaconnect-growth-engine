@@ -312,8 +312,12 @@ const previousPassword = process.env.DATAFORSEO_PASSWORD;
 function restoreNi03c1SideEffects() {
   for (const artifact of [
     "search-intelligence-v1",
+    "search-intelligence-v2",
     "ranked-keywords-customer",
+    "ranked-keywords-customer-v2",
     "ranked-keywords-competitors",
+    "ranked-keywords-competitors-v2",
+    "competitor-keyword-gaps-v2",
     "cost-ledger-v1",
     "refresh-metadata-v1",
     "competitor-discovery",
@@ -358,8 +362,15 @@ async function collectScenario(
     }
     const payload = JSON.parse(String(init?.body || "[]"));
     const task = Array.isArray(payload) ? (payload[0] || {}) : {};
-    if (url.includes("competitors_domain")) {
+    if (url.includes("competitors_domain") || url.includes("serp_competitors")) {
       return new Response(JSON.stringify(competitorsPayload(items)), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.includes("domain_intersection")) {
+      const target = String(task.target1 || "competitor.example");
+      return new Response(JSON.stringify(rankedPayload(target, [{ keyword: "competitor only keyword", volume: 40 }], 0.006)), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -435,8 +446,8 @@ check(
     && two.organicCompetitors.filter((row) => row.eligibleForKeywordExpansion).every((row) => /agency/.test(row.domain))
     && two.organicCompetitors.some((row) => row.domain === "high-authority-overlap.example" && row.eligibleForKeywordExpansion === false)
     && two.labsAttempts.filter((row) => row.role === "competitor_ranked_keywords").length === 2
-    && two.collectionPlan.competitorKeywordTasks === 5
-    && two.collectionPlan.maximumPaidRequests === 7,
+    && two.collectionPlan.competitorKeywordTasks === 3
+    && two.collectionPlan.maximumPaidRequests === 8,
   `universes=${two.competitorKeywordUniverses.length} eligible=${two.organicCompetitors.filter((row) => row.eligibleForKeywordExpansion).map((row) => row.domain).join(",")} planMax=${two.collectionPlan.competitorKeywordTasks}`,
 );
 

@@ -62,6 +62,18 @@ function printProgress(event: NationalSearchIntelligenceProgressEvent): void {
     case "competitors_domain_retry":
       console.log(`COMPETITORS_DOMAIN FAILED — ${event.statusCode ?? "unknown"} — retrying once`);
       return;
+    case "serp_competitors_start":
+      console.log("COLLECTING serp_competitors...");
+      return;
+    case "serp_competitors_complete":
+      console.log(`SERP_COMPETITORS COMPLETE — rows=${event.rows} cost=${money(event.cost)}`);
+      return;
+    case "serp_competitors_failed":
+      console.log(`SERP_COMPETITORS FAILED — ${event.timedOut ? "TIMEOUT" : event.message}`);
+      return;
+    case "serp_competitors_retry":
+      console.log(`SERP_COMPETITORS FAILED — ${event.statusCode ?? "unknown"} — retrying once`);
+      return;
     case "competitor_keywords_start":
       console.log(`COLLECTING competitor ranked_keywords ${event.index}/${event.total} — ${event.domain}`);
       return;
@@ -73,6 +85,15 @@ function printProgress(event: NationalSearchIntelligenceProgressEvent): void {
       return;
     case "competitor_keywords_retry":
       console.log(`COMPETITOR KEYWORDS FAILED — ${event.domain} ${event.statusCode ?? "unknown"} — retrying once`);
+      return;
+    case "domain_intersection_start":
+      console.log(`COLLECTING domain_intersection ${event.index}/${event.total} — ${event.domain}`);
+      return;
+    case "domain_intersection_complete":
+      console.log(`DOMAIN_INTERSECTION COMPLETE — ${event.domain} rows=${event.rows} cost=${money(event.cost)}`);
+      return;
+    case "domain_intersection_failed":
+      console.log(`DOMAIN_INTERSECTION FAILED — ${event.domain} ${event.timedOut ? "TIMEOUT" : event.message}`);
       return;
   }
 }
