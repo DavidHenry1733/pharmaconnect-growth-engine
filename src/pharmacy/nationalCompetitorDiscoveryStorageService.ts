@@ -115,6 +115,10 @@ export function writeNationalCompetitorDiscovery(
   if (result.evidenceKind === "REAL_DISCOVERY") {
     return writeRealCommercialCompetitorDiscovery(result);
   }
+  const existing = readNationalCompetitorDiscovery(result.slug);
+  if (existing?.evidenceKind === "REAL_DISCOVERY") {
+    return nationalCompetitorDiscoveryPath(result.slug);
+  }
   ensureNationalIntelligenceDataDir();
   const file = nationalCompetitorDiscoveryPath(result.slug);
   fs.writeFileSync(file, JSON.stringify(result, null, 2) + "\n", "utf8");

@@ -54,6 +54,7 @@ export type InjectedCommercialCandidate = {
   domain: string;
   name?: string;
   title?: string;
+  snippet?: string;
   websiteText?: string;
   url?: string;
   discoverySource?: NationalCompetitorDiscoverySource | string;
@@ -140,6 +141,49 @@ function businessNameFromTitle(title: string, domain: string): string {
 
 function unique(values: string[]): string[] {
   return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function isTenantQueryEvidenceSentence(text: string): boolean {
+  return /discovery evidence, not commercial/i.test(text)
+    || /google organic serp for query/i.test(text)
+    || /organic\/serp overlap evidence only/i.test(text);
+}
+
+export function websiteTextFromPersistedCandidate(
+  candidate: Pick<NationalCompetitorDiscoveryCandidate, "title" | "name" | "description" | "websiteText">,
+): string {
+  const stored = String(candidate.websiteText || "").trim();
+  if (stored && !isTenantQueryEvidenceSentence(stored)) return stored.slice(0, 8000);
+  const description = String(candidate.description || "").trim();
+  const parts = [candidate.title, candidate.name];
+  if (description && !isTenantQueryEvidenceSentence(description)) parts.push(description);
+  return unique(parts).join(" ").slice(0, 8000);
+}
+
+export function commercialDiscoverySummary(result: NationalCompetitorDiscoveryResult) {
+  const unclassified = result.candidates.filter((row) => !row.role).length;
+  const direct = result.candidates.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified").length;
+  const adjacent = result.candidates.filter((row) => row.role === "adjacent_commercial_provider").length;
+  const rejected = Math.max(0, result.candidates.length - direct - adjacent - unclassified);
+  return {
+    status: result.status,
+    total: result.candidates.length,
+    direct,
+    adjacent,
+    rejected,
+    unclassified,
+    rankedKeywordRequests: result.rankedKeywordRequests ?? 0,
+  };
+}
+
+function applyCommercialDiscoveryCounts(result: NationalCompetitorDiscoveryResult): NationalCompetitorDiscoveryResult {
+  const summary = commercialDiscoverySummary(result);
+  result.directCommercialCompetitors = summary.direct;
+  result.adjacentCommercialProviders = summary.adjacent;
+  result.unclassifiedCandidates = summary.unclassified;
+  result.qualifiedCompetitors = result.candidates.filter((row) => row.qualification === "qualified");
+  result.rejectedCandidates = result.candidates.filter((row) => row.qualification !== "qualified");
+  return result;
 }
 
 function mapQualification(gate: NationalSearchCommercialGateResult): NationalCompetitorDiscoveryCandidate["qualification"] {
@@ -289,7 +333,7 @@ export function assembleCommercialCompetitorDiscovery(
     seen.add(domain);
 
     const title = raw.title || raw.name || domain;
-    const websiteText = String(raw.websiteText || title);
+    const websiteText = String(raw.websiteText || raw.snippet || title);
     const gate = assessNationalSearchCommercialCompetitor({
       domain,
       title,
@@ -320,7 +364,8 @@ export function assembleCommercialCompetitorDiscovery(
         confidence: gate.serviceOverlap ? 80 : 20,
       })),
       title,
-      description: raw.discoveryEvidence || null,
+      description: raw.snippet || null,
+      websiteText,
       evidenceUrls: [raw.url || `https://${domain}`],
       capturedAt: new Date().toISOString(),
       role: gate.role,
@@ -343,10 +388,7 @@ export function assembleCommercialCompetitorDiscovery(
   }
 
   result.candidates = mapped;
-  result.qualifiedCompetitors = mapped.filter((row) => row.qualification === "qualified");
-  result.rejectedCandidates = mapped.filter((row) => row.qualification !== "qualified");
-  result.directCommercialCompetitors = mapped.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified").length;
-  result.adjacentCommercialProviders = mapped.filter((row) => row.role === "adjacent_commercial_provider").length;
+  applyCommercialDiscoveryCounts(result);
   result.generatedAt = new Date().toISOString();
   result.status = "complete";
   const limitations: string[] = [];
@@ -427,6 +469,7 @@ export async function runCommercialCompetitorDiscovery(
           domain,
           name: businessNameFromTitle(row.title, domain),
           title: row.title,
+          snippet: row.description,
           websiteText: [row.title, row.description].filter(Boolean).join(" "),
           url: row.url || `https://${domain}`,
           discoverySource: "search-engine",
@@ -467,13 +510,72 @@ export async function runCommercialCompetitorDiscovery(
   result.serpCost = serpCost;
   if (isRealDiscovery) {
     result.candidates = result.candidates.filter((row) => !isExampleTldDomain(row.domain));
-    result.qualifiedCompetitors = result.candidates.filter((row) => row.qualification === "qualified");
-    result.rejectedCandidates = result.candidates.filter((row) => row.qualification !== "qualified");
-    result.directCommercialCompetitors = result.candidates.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified").length;
-    result.adjacentCommercialProviders = result.candidates.filter((row) => row.role === "adjacent_commercial_provider").length;
+    applyCommercialDiscoveryCounts(result);
   }
   if (options.persist !== false) writeNationalCompetitorDiscovery(result);
   return result;
+}
+
+export function persistedCandidateToInjected(
+  candidate: NationalCompetitorDiscoveryCandidate,
+): InjectedCommercialCandidate {
+  return {
+    domain: candidate.domain,
+    name: candidate.name,
+    title: candidate.title || candidate.name,
+    snippet: candidate.description && !isTenantQueryEvidenceSentence(candidate.description)
+      ? candidate.description
+      : undefined,
+    websiteText: websiteTextFromPersistedCandidate(candidate),
+    url: candidate.websiteUrl,
+    discoverySource: candidate.source,
+    discoveryEvidence: candidate.discoveryEvidence || candidate.sourceQuery || undefined,
+    sharedKeywordCount: null,
+  };
+}
+
+export function requalifyPersistedCommercialCompetitorDiscovery(
+  slug: string,
+  options: {
+    persist?: boolean;
+    snapshot?: NationalCompetitorDiscoveryResult;
+  } = {},
+): NationalCompetitorDiscoveryResult {
+  const safe = safePharmacySlug(slug);
+  const existing = options.snapshot || readNationalCompetitorDiscovery(safe);
+  if (!existing) {
+    throw new Error(`No persisted competitor discovery snapshot for ${safe}`);
+  }
+  if (!existing.candidates?.length) {
+    throw new Error(`Persisted competitor discovery snapshot for ${safe} has no candidates to qualify`);
+  }
+  const ctx = buildCommercialCompetitorDiscoveryContext(safe);
+  const injected = existing.candidates.map(persistedCandidateToInjected);
+  const assembled = assembleCommercialCompetitorDiscovery(ctx, injected);
+  const byDomain = new Map(existing.candidates.map((row) => [cleanDomain(row.domain), row]));
+  const fixtureKind = existing.evidenceKind === "FIXTURE_VALIDATION"
+    || (existing.discoveryProvider || "").toLowerCase() === "fixture";
+  assembled.evidenceKind = fixtureKind ? "FIXTURE_VALIDATION" : "REAL_DISCOVERY";
+  assembled.discoveryProvider = existing.discoveryProvider || assembled.discoveryProvider;
+  assembled.serpRequestCount = existing.serpRequestCount ?? 0;
+  assembled.serpCost = existing.serpCost ?? 0;
+  assembled.rankedKeywordRequests = 0;
+  assembled.queries = existing.queries?.length ? existing.queries : assembled.queries;
+  assembled.candidates = assembled.candidates.map((row) => {
+    const prev = byDomain.get(cleanDomain(row.domain));
+    return {
+      ...row,
+      source: prev?.source || row.source,
+      capturedAt: prev?.capturedAt || row.capturedAt,
+      discoveryEvidence: prev?.discoveryEvidence || row.discoveryEvidence,
+      sourceQuery: prev?.sourceQuery ?? row.sourceQuery,
+      websiteUrl: prev?.websiteUrl || row.websiteUrl,
+      evidenceUrls: prev?.evidenceUrls?.length ? prev.evidenceUrls : row.evidenceUrls,
+    };
+  });
+  applyCommercialDiscoveryCounts(assembled);
+  if (options.persist !== false) writeNationalCompetitorDiscovery(assembled);
+  return assembled;
 }
 
 export function readCommercialCompetitorDiscovery(slug: string): NationalCompetitorDiscoveryResult | null {

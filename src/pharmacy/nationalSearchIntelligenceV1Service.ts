@@ -51,7 +51,10 @@ import {
   resolveNationalSearchIntelligenceLimits,
   type NationalSearchIntelligenceLimits,
 } from "./nationalSearchIntelligenceLimits.ts";
-import { writeNationalCompetitorDiscovery } from "./nationalCompetitorDiscoveryStorageService.ts";
+import {
+  readNationalCompetitorDiscovery,
+  writeNationalCompetitorDiscovery,
+} from "./nationalCompetitorDiscoveryStorageService.ts";
 import { emptyNationalCompetitorDiscoveryResult } from "./nationalCompetitorDiscoveryModel.ts";
 import { resolveDataForSeoSearchLocationFromSubject } from "./dataForSeoSearchLocationResolver.ts";
 
@@ -386,6 +389,10 @@ function persistSnapshot(snapshot: NationalSearchIntelligenceSnapshot): void {
 }
 
 function persistCompetitorDiscovery(snapshot: NationalSearchIntelligenceSnapshot): void {
+  const existing = readNationalCompetitorDiscovery(snapshot.tenantSlug);
+  if (existing?.evidenceKind === "REAL_DISCOVERY") {
+    return;
+  }
   const result = emptyNationalCompetitorDiscoveryResult(
     snapshot.tenantSlug,
     snapshot.country || "United Kingdom",

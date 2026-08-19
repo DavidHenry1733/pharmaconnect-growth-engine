@@ -80,6 +80,8 @@ export interface NationalCompetitorDiscoveryCandidate {
   nonOverlappingServices?: string[];
   discoveryEvidence?: string;
   qualificationReason?: string;
+  /** Website/SERP text actually assessed by the commercial gate. Not tenant query provenance. */
+  websiteText?: string;
 }
 
 export interface NationalCompetitorDiscoveryResult {
@@ -116,6 +118,7 @@ export interface NationalCompetitorDiscoveryResult {
   rankedKeywordRequests?: number;
   directCommercialCompetitors?: number;
   adjacentCommercialProviders?: number;
+  unclassifiedCandidates?: number;
   evidenceLimitations?: string[];
   sparseOrganicFootprint?: boolean;
   evidenceKind?: CommercialDiscoveryEvidenceKind;
@@ -153,6 +156,7 @@ export function emptyNationalCompetitorDiscoveryResult(
     rankedKeywordRequests: 0,
     directCommercialCompetitors: 0,
     adjacentCommercialProviders: 0,
+    unclassifiedCandidates: 0,
     evidenceLimitations: [],
     sparseOrganicFootprint: false,
     commercialServices: [],

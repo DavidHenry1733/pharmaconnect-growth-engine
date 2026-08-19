@@ -163,7 +163,7 @@ function competitorCard(row: NationalOrganicSearchCompetitor): string {
 
 function commercialDiscoveryCard(row: NationalCompetitorDiscoveryCandidate): string {
   const qualified = row.qualification === "qualified" && row.role === "commercial_competitor";
-  const role = (row.role || "insufficient_evidence").replace(/_/g, " ");
+  const role = (row.role || "unclassified").replace(/_/g, " ");
   return `<article class="ge-competitor" data-cp02-candidate="${esc(row.domain)}" data-cp02-role="${esc(row.role || "")}" data-cp02-qualified="${qualified ? "yes" : "no"}">
 <div class="ge-competitor-head">
 <div>
@@ -189,10 +189,11 @@ function commercialDiscoveryCard(row: NationalCompetitorDiscoveryCandidate): str
 function groupedCandidateSections(candidates: NationalCompetitorDiscoveryCandidate[]): string {
   const direct = candidates.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified");
   const adjacent = candidates.filter((row) => row.role === "adjacent_commercial_provider");
-  const rejected = candidates.filter((row) => !direct.includes(row) && !adjacent.includes(row));
+  const unclassified = candidates.filter((row) => !row.role);
+  const rejected = candidates.filter((row) => !direct.includes(row) && !adjacent.includes(row) && !unclassified.includes(row));
   const section = (title: string, rows: NationalCompetitorDiscoveryCandidate[], attr: string) =>
     `<div data-cp02-group="${esc(attr)}"><h3>${esc(title)}</h3>${rows.length ? rows.map(commercialDiscoveryCard).join("") : `<p class="ge-lead">None.</p>`}</div>`;
-  return `${section("Direct commercial competitors", direct, "direct")}${section("Adjacent commercial providers", adjacent, "adjacent")}${section("Rejected / SERP-only candidates", rejected, "rejected")}`;
+  return `${section("Direct commercial competitors", direct, "direct")}${section("Adjacent commercial providers", adjacent, "adjacent")}${section("Rejected / SERP-only candidates", rejected, "rejected")}${section("Unclassified candidates", unclassified, "unclassified")}`;
 }
 
 function renderDiscoveryResultPanel(
@@ -204,7 +205,8 @@ function renderDiscoveryResultPanel(
   const candidates = result?.candidates || [];
   const direct = result?.directCommercialCompetitors ?? candidates.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified").length;
   const adjacent = result?.adjacentCommercialProviders ?? candidates.filter((row) => row.role === "adjacent_commercial_provider").length;
-  const rejected = Math.max(0, candidates.length - direct - adjacent);
+  const unclassified = result?.unclassifiedCandidates ?? candidates.filter((row) => !row.role).length;
+  const rejected = Math.max(0, candidates.length - direct - adjacent - unclassified);
   const status = result?.status || "draft";
   const businessName = result?.businessName || bi.identity.businessName.value || "";
   const targetCustomer = result?.targetCustomerMarket || bi.targetCustomer.value || "";
@@ -222,7 +224,7 @@ function renderDiscoveryResultPanel(
   const fixtureWarning = kind === "FIXTURE_VALIDATION"
     ? `<p class="ge-lead" data-cp02-fixture-warning="yes">FIXTURE_VALIDATION only. These domains are not real persisted competitors.</p>`
     : `<p class="ge-lead" data-cp02-real-warning="yes">REAL_DISCOVERY. Organic overlap is discovery evidence only.</p>`;
-  return `<div class="ge-panel" data-cp02-page="commercial-competitor-discovery" data-cp02-evidence-kind="${esc(kind)}" data-cp02-status="${esc(status)}" data-cp02-candidates="${candidates.length}" data-cp02-direct="${direct}" data-cp02-adjacent="${adjacent}" data-cp02-rejected="${rejected}" data-cp02-ranked-keywords="${result?.rankedKeywordRequests ?? 0}">
+  return `<div class="ge-panel" data-cp02-page="commercial-competitor-discovery" data-cp02-evidence-kind="${esc(kind)}" data-cp02-status="${esc(status)}" data-cp02-candidates="${candidates.length}" data-cp02-direct="${direct}" data-cp02-adjacent="${adjacent}" data-cp02-rejected="${rejected}" data-cp02-unclassified="${unclassified}" data-cp02-ranked-keywords="${result?.rankedKeywordRequests ?? 0}">
 <h2>${kind === "REAL_DISCOVERY" ? "Commercial competitor discovery" : "Fixture validation (not real discovery)"}</h2>
 ${fixtureWarning}
 <p class="ge-lead">Which real businesses compete for substantially the same customers by selling materially overlapping commercial services? Organic keyword overlap is discovery evidence only and cannot pass this gate.</p>
@@ -237,6 +239,7 @@ ${fixtureWarning}
 <div class="ge-card"><h3>Direct commercial competitors</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-direct-count="${direct}">${direct}</p></div>
 <div class="ge-card"><h3>Adjacent commercial providers</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-adjacent-count="${adjacent}">${adjacent}</p></div>
 <div class="ge-card"><h3>Rejected / non-competitors</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-rejected-count="${rejected}">${rejected}</p></div>
+<div class="ge-card"><h3>Unclassified candidates</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-unclassified-count="${unclassified}">${unclassified}</p></div>
 <div class="ge-card"><h3>Evidence limitations</h3><p data-cp02-limitations="${esc(limitations)}">${esc(limitations || "None recorded.")}</p></div>
 <div class="ge-card"><h3>Ranked-keyword expansion</h3><p data-cp02-ranked-keyword-requests="${result?.rankedKeywordRequests ?? 0}">COMPETITOR_RANKED_KEYWORD_REQUESTS=${result?.rankedKeywordRequests ?? 0}</p></div>
 </div>
