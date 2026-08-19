@@ -17,7 +17,7 @@ function exported<T extends object>(mod: T | { default: T }): T {
 
 const { renderNationalSearchIntelligencePage } = exported(pageMod);
 const { qualifyInjectedCommercialCandidates } = exported(discovery);
-const { writeNationalCompetitorDiscovery, nationalCompetitorDiscoveryPath } = exported(storage);
+const { writeNationalCompetitorDiscovery, nationalCompetitorDiscoveryPath, nationalCompetitorDiscoveryFixturePath } = exported(storage);
 
 const items: Array<{ id: string; pass: boolean; detail: string }> = [];
 function check(id: string, pass: boolean, detail: string) {
@@ -50,7 +50,9 @@ const result = qualifyInjectedCommercialCandidates("pharmaconnect", [
   { domain: "high-authority-overlap.example", name: "Overlap Only", websiteText: "", discoverySource: "organic-overlap", discoveryEvidence: "Organic overlap only.", sharedKeywordCount: 90 },
 ]);
 const discoveryFile = nationalCompetitorDiscoveryPath("pharmaconnect");
+const fixtureFile = nationalCompetitorDiscoveryFixturePath("pharmaconnect");
 const previousDiscovery = fs.existsSync(discoveryFile) ? fs.readFileSync(discoveryFile, "utf8") : null;
+const previousFixture = fs.existsSync(fixtureFile) ? fs.readFileSync(fixtureFile, "utf8") : null;
 writeNationalCompetitorDiscovery(result);
 
 const page = await visiblePage(renderNationalSearchIntelligencePage("pharmaconnect"));
@@ -69,6 +71,11 @@ if (previousDiscovery == null) {
   try { fs.unlinkSync(discoveryFile); } catch { /* ignore */ }
 } else {
   fs.writeFileSync(discoveryFile, previousDiscovery, "utf8");
+}
+if (previousFixture == null) {
+  try { fs.unlinkSync(fixtureFile); } catch { /* ignore */ }
+} else {
+  fs.writeFileSync(fixtureFile, previousFixture, "utf8");
 }
 
 const passed = items.filter((row) => row.pass).length;

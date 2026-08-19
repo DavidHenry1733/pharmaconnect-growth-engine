@@ -205,7 +205,7 @@ router.post("/growth-engine/:slug/commercial-competitors/discover", async (req, 
     const live = req.body?.live === true || req.body?.live === "true" || req.query.live === "1";
     const plan = buildCommercialCompetitorDiscoveryPlan(slug);
     console.log("COMMERCIAL_COMPETITOR_DISCOVERY_PLAN " + JSON.stringify(plan, null, 2));
-    const result = await runCommercialCompetitorDiscovery({ slug, live, persist: true });
+    const result = await runCommercialCompetitorDiscovery({ slug, live, persist: live });
     res.json({
       ok: result.status === "complete" || result.status === "insufficient-evidence",
       plan,

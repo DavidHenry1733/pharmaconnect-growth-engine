@@ -37,6 +37,7 @@ npx tsx scripts/run-checkpoint-02-commercial-discovery.ts pharmaconnect
 if [ "${CHECKPOINT_02_LIVE:-0}" = "1" ]; then
   echo "ONE bounded live commercial competitor discovery run (SERP discovery evidence only; ranked-keyword expansion remains 0)"
   npx tsx scripts/run-checkpoint-02-commercial-discovery.ts pharmaconnect --live
+  echo "REAL_DISCOVERY printed above. Browser acceptance is a later step after this live run."
 fi
 echo "BROWSER_URL=http://127.0.0.1:${PORT}/api/growth-engine/search-intelligence?slug=pharmaconnect"
 echo "CHECKPOINT_02_VALIDATION_DONE $(date -u +%Y-%m-%dT%H:%M:%SZ)"

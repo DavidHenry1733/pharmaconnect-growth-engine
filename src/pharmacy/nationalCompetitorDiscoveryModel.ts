@@ -28,6 +28,8 @@ export type NationalCompetitorQualification =
   | "candidate"
   | "rejected";
 
+export type CommercialDiscoveryEvidenceKind = "FIXTURE_VALIDATION" | "REAL_DISCOVERY";
+
 export interface NationalCompetitorDiscoveryQuery {
   id: string;
   query: string;
@@ -116,6 +118,12 @@ export interface NationalCompetitorDiscoveryResult {
   adjacentCommercialProviders?: number;
   evidenceLimitations?: string[];
   sparseOrganicFootprint?: boolean;
+  evidenceKind?: CommercialDiscoveryEvidenceKind;
+  discoveryProvider?: string;
+  serpRequestCount?: number;
+  serpCost?: number | null;
+  websiteInventoryStatus?: string;
+  readyForCompetitorDiscovery?: boolean;
 }
 
 export function emptyNationalCompetitorDiscoveryResult(

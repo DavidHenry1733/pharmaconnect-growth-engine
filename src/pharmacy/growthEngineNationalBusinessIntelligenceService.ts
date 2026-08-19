@@ -567,6 +567,65 @@ export function assembleNationalBusinessIntelligence(sources: NationalBiSources)
   };
 }
 
+export interface CommercialDiscoveryBusinessIntelligenceSubject {
+  tenantSlug: string;
+  businessName: string;
+  domain: string;
+  websiteUrl: string;
+  businessType: string;
+  targetCustomerMarket: string;
+  country: string;
+  marketScope: string;
+  commercialServices: string[];
+  websiteInventoryStatus: CompletenessStatus;
+  readyForCompetitorDiscovery: boolean;
+  proposition: string;
+  missingRequired: string[];
+  provenance: {
+    businessName: ProvenancedFact;
+    domain: ProvenancedFact;
+    targetCustomer: ProvenancedFact;
+    country: ProvenancedFact;
+    marketScope: ProvenancedFact;
+    servicesSource: string;
+  };
+}
+
+export function commercialDiscoverySubjectFromBusinessIntelligence(
+  view: NationalBusinessIntelligenceView,
+): CommercialDiscoveryBusinessIntelligenceSubject {
+  const servicesSource = view.services[0]?.source || "none";
+  return {
+    tenantSlug: view.slug,
+    businessName: view.identity.businessName.value || "",
+    domain: view.identity.domain.value || "",
+    websiteUrl: view.identity.websiteUrl.value || "",
+    businessType: view.identity.businessType.value || "",
+    targetCustomerMarket: view.targetCustomer.value || "",
+    country: view.marketCountry.value || "",
+    marketScope: view.marketScope.value || "",
+    commercialServices: view.services.map((row) => row.serviceName),
+    websiteInventoryStatus: view.completeness.websiteInventory,
+    readyForCompetitorDiscovery: view.readyForCompetitorDiscovery,
+    proposition: view.identity.proposition.value || view.targetCustomer.value || "",
+    missingRequired: [...view.missingRequired],
+    provenance: {
+      businessName: view.identity.businessName,
+      domain: view.identity.domain,
+      targetCustomer: view.targetCustomer,
+      country: view.marketCountry,
+      marketScope: view.marketScope,
+      servicesSource,
+    },
+  };
+}
+
+export function buildCommercialDiscoveryBusinessIntelligenceSubject(
+  slug: string,
+): CommercialDiscoveryBusinessIntelligenceSubject {
+  return commercialDiscoverySubjectFromBusinessIntelligence(buildNationalBusinessIntelligenceView(slug));
+}
+
 export function collectNationalBiSources(slug: string): NationalBiSources {
   const safe = safePharmacySlug(slug);
   const platform = resolveGrowthPlatform(safe).platform;

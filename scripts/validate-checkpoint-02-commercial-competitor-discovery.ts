@@ -13,6 +13,7 @@ import * as pageMod from "../src/pharmacy/nationalSearchIntelligencePage.ts";
 import * as biMod from "../src/pharmacy/growthEngineNationalBusinessIntelligenceService.ts";
 import * as storageMod from "../src/pharmacy/nationalCompetitorDiscoveryStorageService.ts";
 import * as catalogueMod from "../src/pharmacy/growthEngineTenantServiceCatalogue.ts";
+import * as workspacePaths from "../src/pharmacy/pharmacyWorkspacePaths.ts";
 
 function exported<T extends object>(mod: T | { default: T }): T {
   const maybe = mod as { default?: T };
@@ -45,8 +46,9 @@ const {
 const { buildNationalCompetitorDiscoveryQueries } = exported(queryService);
 const { renderNationalSearchIntelligencePage } = exported(pageMod);
 const { buildNationalBusinessIntelligenceView } = exported(biMod);
-const { writeNationalCompetitorDiscovery, nationalCompetitorDiscoveryPath } = exported(storageMod);
+const { writeNationalCompetitorDiscovery, writeRealCommercialCompetitorDiscovery, nationalCompetitorDiscoveryPath, nationalCompetitorDiscoveryFixturePath } = exported(storageMod);
 const { resolveTenantServiceCatalogue } = exported(catalogueMod);
+const { getPharmacyProjectConfigPath } = exported(workspacePaths);
 
 console.log("\n=== CHECKPOINT 02 COMMERCIAL COMPETITOR DISCOVERY ===\n");
 
@@ -62,7 +64,21 @@ record(
   "generic discovery/query sources",
 );
 record(
+  "NO_PHARMACONNECT_HARDCODE",
+  !discoverySrc.includes('slug === "pharmaconnect"') &&
+    !discoverySrc.includes("pharmaconnect.uk") &&
+    !querySrc.includes("pharmaconnect.uk") &&
+    !querySrc.includes("pharmacy marketing agency") &&
+    !querySrc.includes("digital marketing services for pharmacies"),
+  "generic discovery/query sources",
+);
+record(
   "no-competitor-domain-whitelist",
+  !/boots\.com|nymopmr|surveyfocus|pharmacymentor|rxweb|chemist2u/.test(discoverySrc + querySrc),
+  "no competitor domain whitelist",
+);
+record(
+  "NO_COMPETITOR_DOMAIN_WHITELIST",
   !/boots\.com|nymopmr|surveyfocus|pharmacymentor|rxweb|chemist2u/.test(discoverySrc + querySrc),
   "no competitor domain whitelist",
 );
@@ -75,7 +91,8 @@ record(
 );
 
 const genericTenant = "cp02-generic-national";
-const tenantFile = path.join(ROOT, "config/projects", `${genericTenant}.json`);
+const tenantFile = getPharmacyProjectConfigPath(genericTenant);
+fs.mkdirSync(path.dirname(tenantFile), { recursive: true });
 fs.writeFileSync(tenantFile, JSON.stringify({
   clientSlug: genericTenant,
   businessName: "Northwind Digital",
@@ -93,6 +110,17 @@ record("bi-feeds-discovery-plan", plan.businessName === "Northwind Digital" && p
 record("target-customer-used", /grocers/i.test(plan.targetCustomerMarket) && plan.queries.some((q) => /grocers/i.test(q)), plan.targetCustomerMarket);
 record("commercial-services-used", plan.commercialServices.includes("Website Design") && plan.queries.some((q) => /website design/i.test(q)), plan.commercialServices.join("|"));
 record("market-used", plan.country === "United Kingdom" && plan.queries.every((q) => /united kingdom/i.test(q)), plan.country);
+record("GENERIC_BI_FEEDS_DISCOVERY_PLAN", plan.businessName === "Northwind Digital" && plan.domain.includes("northwind-digital.example"), `${plan.businessName}/${plan.domain}`);
+record("GENERIC_TARGET_CUSTOMER_USED", /grocers/i.test(plan.targetCustomerMarket) && plan.queries.some((q) => /grocers/i.test(q)), plan.targetCustomerMarket);
+record("GENERIC_COMMERCIAL_SERVICES_USED", plan.commercialServices.includes("Website Design") && plan.queries.some((q) => /website design/i.test(q)), plan.commercialServices.join("|"));
+record("GENERIC_MARKET_USED", plan.country === "United Kingdom" && plan.queries.every((q) => /united kingdom/i.test(q)), plan.country);
+record(
+  "generic-does-not-inherit-pharmaconnect",
+  !/pharmaconnect/i.test(JSON.stringify(plan)) &&
+    !plan.commercialServices.some((service) => /pharmacy website design/i.test(service)) &&
+    !/uk community pharmacies/i.test(plan.targetCustomerMarket),
+  `name=${plan.businessName} target=${plan.targetCustomerMarket}`,
+);
 record("candidate-limit-20", plan.maxCandidates === 20, String(plan.maxCandidates));
 record("ranked-keyword-requests-plan-0", plan.rankedKeywordRequests === 0, String(plan.rankedKeywordRequests));
 record("organic-overlap-not-proof", plan.organicOverlapIsCommercialProof === false, "false");
@@ -121,6 +149,30 @@ const broadText = "We are a digital marketing growth service online for pharmacy
 
 const pcPlan = buildCommercialCompetitorDiscoveryPlan("pharmaconnect");
 record("pharmaconnect-bi-consumed", pcPlan.businessName === "PharmaConnect" && pcPlan.commercialServices.length === 5, `${pcPlan.businessName} services=${pcPlan.commercialServices.length}`);
+record("PHARMACONNECT_BI_FEEDS_DISCOVERY_PLAN", pcPlan.businessName === "PharmaConnect" && pcPlan.commercialServices.length === 5, `${pcPlan.businessName} services=${pcPlan.commercialServices.length}`);
+record(
+  "PHARMACONNECT_TARGET_CUSTOMER_USED",
+  Boolean(pcPlan.targetCustomerMarket) && pcPlan.queries.some((q) => /community pharmacies/i.test(q)),
+  pcPlan.targetCustomerMarket,
+);
+record(
+  "PHARMACONNECT_COMMERCIAL_SERVICES_USED",
+  pcPlan.commercialServices.length === 5 &&
+    pcPlan.commercialServices.every((service) => pcPlan.queries.some((q) => q.toLowerCase().includes(service.toLowerCase()))),
+  pcPlan.commercialServices.join("|"),
+);
+record(
+  "PHARMACONNECT_MARKET_USED",
+  pcPlan.country === "United Kingdom" && pcPlan.queries.every((q) => /united kingdom/i.test(q)),
+  pcPlan.country,
+);
+record(
+  "DISCOVERY_QUERIES_DERIVED_FROM_BI",
+  pcPlan.queries.length > 0 &&
+    pcPlan.queries.every((q) => /united kingdom/i.test(q)) &&
+    !pcPlan.queries.some((q) => /pharmacy marketing agency|digital marketing services for pharmacies/i.test(q)),
+  pcPlan.queries.join(" | "),
+);
 
 const result = qualifyInjectedCommercialCandidates("pharmaconnect", [
   { domain: "pharmacy-digital-agency.co.uk", name: "Pharmacy Digital Agency", websiteText: agencyText, discoverySource: "search-engine", discoveryEvidence: "SERP discovery from tenant services/market queries." },
@@ -134,8 +186,24 @@ const result = qualifyInjectedCommercialCandidates("pharmaconnect", [
 ]);
 
 const discoveryFile = nationalCompetitorDiscoveryPath("pharmaconnect");
+const fixtureFile = nationalCompetitorDiscoveryFixturePath("pharmaconnect");
 const previousDiscovery = fs.existsSync(discoveryFile) ? fs.readFileSync(discoveryFile, "utf8") : null;
+const previousFixture = fs.existsSync(fixtureFile) ? fs.readFileSync(fixtureFile, "utf8") : null;
 writeNationalCompetitorDiscovery(result);
+let realPersistRefused = false;
+try {
+  writeRealCommercialCompetitorDiscovery(result);
+} catch {
+  realPersistRefused = true;
+}
+const realUnchanged = previousDiscovery == null
+  ? !fs.existsSync(discoveryFile)
+  : fs.readFileSync(discoveryFile, "utf8") === previousDiscovery;
+record(
+  "FIXTURE_CANNOT_PERSIST_AS_REAL_DISCOVERY",
+  result.evidenceKind === "FIXTURE_VALIDATION" && realPersistRefused && realUnchanged,
+  `kind=${result.evidenceKind} refused=${realPersistRefused} realUnchanged=${realUnchanged}`,
+);
 
 const byDomain = Object.fromEntries(result.candidates.map((row) => [row.domain, row]));
 record("sparse-new-business-discovers-candidates", result.candidates.length >= 7 && result.status === "complete", `status=${result.status} n=${result.candidates.length} sparse=${result.sparseOrganicFootprint}`);
@@ -198,6 +266,17 @@ record(
 record("provenance-survives", result.candidates.every((row) => Boolean(row.source && (row.discoveryEvidence || row.sourceQuery))), "source+evidence");
 record("direct-count", (result.directCommercialCompetitors || 0) >= 1, String(result.directCommercialCompetitors));
 record("adjacent-count", (result.adjacentCommercialProviders || 0) >= 1, String(result.adjacentCommercialProviders));
+record("SPARSE_ORGANIC_FOOTPRINT_DOES_NOT_BLOCK", result.candidates.length >= 7 && result.sparseOrganicFootprint === true, `n=${result.candidates.length}`);
+record("ORGANIC_OVERLAP_NOT_COMMERCIAL_PROOF", byDomain["high-authority-overlap.example"]?.qualification !== "qualified", byDomain["high-authority-overlap.example"]?.role || "missing");
+record("DIRECT_AGENCY_FIXTURE", byDomain["pharmacy-digital-agency.co.uk"]?.role === "commercial_competitor" && byDomain["pharmacy-digital-agency.co.uk"]?.qualification === "qualified", "agency");
+record("CUSTOMER_MARKET_FIXTURE", byDomain["retail-pharmacy-chain.co.uk"]?.role === "customer_market", byDomain["retail-pharmacy-chain.co.uk"]?.role || "missing");
+record("PUBLISHER_FIXTURE", byDomain["pharmacy-trade-press.co.uk"]?.role === "publisher", byDomain["pharmacy-trade-press.co.uk"]?.role || "missing");
+record("PROFESSIONAL_BODY_FIXTURE", byDomain["royal-college.example"]?.role === "professional_body", byDomain["royal-college.example"]?.role || "missing");
+record("EDUCATION_FIXTURE", byDomain["scientific-articles.example"]?.role === "education_academic", byDomain["scientific-articles.example"]?.role || "missing");
+record("ADJACENT_PROVIDER_FIXTURE", byDomain["pharmacy-pmr-software.co.uk"]?.role === "adjacent_commercial_provider", byDomain["pharmacy-pmr-software.co.uk"]?.role || "missing");
+record("BROAD_VOCAB_FIXTURE", byDomain["broad-vocab.example"]?.serviceOverlap !== true && byDomain["broad-vocab.example"]?.qualification !== "qualified", `overlap=${byDomain["broad-vocab.example"]?.serviceOverlap}`);
+record("MAX_CANDIDATES_20", result.candidates.length <= 20, String(result.candidates.length));
+record("fixture-kind-not-real", result.evidenceKind === "FIXTURE_VALIDATION", String(result.evidenceKind));
 
 const html = renderNationalSearchIntelligencePage("pharmaconnect");
 record(
@@ -272,10 +351,17 @@ if (previousDiscovery == null) {
 } else {
   fs.writeFileSync(discoveryFile, previousDiscovery, "utf8");
 }
+if (previousFixture == null) {
+  try { fs.unlinkSync(fixtureFile); } catch { /* ignore */ }
+} else {
+  fs.writeFileSync(fixtureFile, previousFixture, "utf8");
+}
 
 const passed = checks.filter((row) => row.pass).length;
 console.log(`\n${passed === checks.length ? "✅" : "❌"} ${passed}/${checks.length} checks passed\n`);
-console.log(`DISCOVERY_STATUS=${result.status}`);
+console.log(`EVIDENCE_KIND=${result.evidenceKind}`);
+console.log(`FIXTURE_VALIDATION=YES`);
+console.log(`REAL_DISCOVERY=NO`);
 console.log(`CANDIDATES_DISCOVERED=${result.candidates.length}`);
 console.log(`DIRECT_COMMERCIAL_COMPETITORS=${result.directCommercialCompetitors}`);
 console.log(`ADJACENT_COMMERCIAL_PROVIDERS=${result.adjacentCommercialProviders}`);

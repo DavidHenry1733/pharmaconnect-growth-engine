@@ -16,7 +16,7 @@ import type {
   NationalSearchIntelligenceSnapshot,
 } from "./nationalSearchIntelligenceV1Model.ts";
 import { PARTIAL_COLLECTION_CUSTOMER_MESSAGE } from "./nationalSearchIntelligenceV1Model.ts";
-import { readCommercialCompetitorDiscovery } from "./nationalCommercialCompetitorDiscoveryService.ts";
+import { readCommercialCompetitorDiscovery, readFixtureCommercialDiscovery } from "./nationalCommercialCompetitorDiscoveryService.ts";
 import { buildNationalBusinessIntelligenceView } from "./growthEngineNationalBusinessIntelligenceService.ts";
 import type { NationalCompetitorDiscoveryCandidate, NationalCompetitorDiscoveryResult } from "./nationalCompetitorDiscoveryModel.ts";
 
@@ -174,6 +174,7 @@ function commercialDiscoveryCard(row: NationalCompetitorDiscoveryCandidate): str
 </div>
 <p class="ge-meta">Classification: ${esc(role)}</p>
 <p class="ge-meta">Discovery source: ${esc(row.source)} · ${esc(row.discoveryEvidence || row.sourceQuery || "—")}</p>
+<p class="ge-meta">Discovery provenance: ${esc(row.source)}</p>
 <p class="ge-meta">Target customer relevance: ${esc(row.targetMarketRelevance ? "YES" : "NO")}</p>
 <p class="ge-meta">Commercial provider: ${esc(row.commercialProvider ? "YES" : "NO")}</p>
 <p class="ge-meta">Detected commercial services: ${esc((row.detectedServices || []).join(", ") || "—")}</p>
@@ -185,8 +186,20 @@ function commercialDiscoveryCard(row: NationalCompetitorDiscoveryCandidate): str
 </article>`;
 }
 
-function renderCommercialCompetitorDiscoveryPanel(slug: string): string {
-  const result: NationalCompetitorDiscoveryResult | null = readCommercialCompetitorDiscovery(slug);
+function groupedCandidateSections(candidates: NationalCompetitorDiscoveryCandidate[]): string {
+  const direct = candidates.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified");
+  const adjacent = candidates.filter((row) => row.role === "adjacent_commercial_provider");
+  const rejected = candidates.filter((row) => !direct.includes(row) && !adjacent.includes(row));
+  const section = (title: string, rows: NationalCompetitorDiscoveryCandidate[], attr: string) =>
+    `<div data-cp02-group="${esc(attr)}"><h3>${esc(title)}</h3>${rows.length ? rows.map(commercialDiscoveryCard).join("") : `<p class="ge-lead">None.</p>`}</div>`;
+  return `${section("Direct commercial competitors", direct, "direct")}${section("Adjacent commercial providers", adjacent, "adjacent")}${section("Rejected / SERP-only candidates", rejected, "rejected")}`;
+}
+
+function renderDiscoveryResultPanel(
+  slug: string,
+  result: NationalCompetitorDiscoveryResult | null,
+  evidenceKind: "REAL_DISCOVERY" | "FIXTURE_VALIDATION",
+): string {
   const bi = buildNationalBusinessIntelligenceView(slug);
   const candidates = result?.candidates || [];
   const direct = result?.directCommercialCompetitors ?? candidates.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified").length;
@@ -202,14 +215,20 @@ function renderCommercialCompetitorDiscoveryPanel(slug: string): string {
     : bi.services.map((row) => row.serviceName);
   const services = serviceList.join(" | ") || "—";
   const limitations = (result?.evidenceLimitations || []).join(" ");
+  const kind = result?.evidenceKind || evidenceKind;
   const cards = candidates.length
-    ? candidates.map(commercialDiscoveryCard).join("")
+    ? groupedCandidateSections(candidates)
     : `<p class="ge-lead">No commercial competitor candidates have been discovered yet. Discovery uses Business Intelligence services and market, not the tenant's organic ranking footprint alone.</p>`;
-  return `<div class="ge-panel" data-cp02-page="commercial-competitor-discovery" data-cp02-status="${esc(status)}" data-cp02-candidates="${candidates.length}" data-cp02-direct="${direct}" data-cp02-adjacent="${adjacent}" data-cp02-rejected="${rejected}" data-cp02-ranked-keywords="${result?.rankedKeywordRequests ?? 0}">
-<h2>Commercial competitor discovery</h2>
+  const fixtureWarning = kind === "FIXTURE_VALIDATION"
+    ? `<p class="ge-lead" data-cp02-fixture-warning="yes">FIXTURE_VALIDATION only. These domains are not real persisted competitors.</p>`
+    : `<p class="ge-lead" data-cp02-real-warning="yes">REAL_DISCOVERY. Organic overlap is discovery evidence only.</p>`;
+  return `<div class="ge-panel" data-cp02-page="commercial-competitor-discovery" data-cp02-evidence-kind="${esc(kind)}" data-cp02-status="${esc(status)}" data-cp02-candidates="${candidates.length}" data-cp02-direct="${direct}" data-cp02-adjacent="${adjacent}" data-cp02-rejected="${rejected}" data-cp02-ranked-keywords="${result?.rankedKeywordRequests ?? 0}">
+<h2>${kind === "REAL_DISCOVERY" ? "Commercial competitor discovery" : "Fixture validation (not real discovery)"}</h2>
+${fixtureWarning}
 <p class="ge-lead">Which real businesses compete for substantially the same customers by selling materially overlapping commercial services? Organic keyword overlap is discovery evidence only and cannot pass this gate.</p>
 <div class="ge-grid-2" data-cp02-section="summary">
 <div class="ge-card"><h3>DISCOVERY STATUS</h3><p data-cp02-discovery-status="${esc(status)}">${esc(status.toUpperCase())}</p></div>
+<div class="ge-card"><h3>Evidence kind</h3><p data-cp02-kind="${esc(kind)}">${esc(kind)}</p></div>
 <div class="ge-card"><h3>Business</h3><p data-cp02-business="${esc(businessName)}">${esc(businessName || "Not discovered yet")}</p></div>
 <div class="ge-card"><h3>Target customer</h3><p data-cp02-target-customer="${esc(targetCustomer)}">${esc(targetCustomer || "—")}</p></div>
 <div class="ge-card"><h3>Market</h3><p data-cp02-market="${esc(marketCountry)}">${esc([marketCountry, marketScope].filter(Boolean).join(" · ") || "—")}</p></div>
@@ -224,6 +243,12 @@ function renderCommercialCompetitorDiscoveryPanel(slug: string): string {
 ${direct === 0 && status === "complete" ? `<p class="ge-lead" data-cp02-zero-direct>0 DIRECT COMMERCIAL COMPETITORS QUALIFIED. ${esc(limitations || "Current evidence did not prove all commercial conditions.")}</p>` : ""}
 <div data-cp02-section="candidates">${cards}</div>
 </div>`;
+}
+
+function renderCommercialCompetitorDiscoveryPanel(slug: string): string {
+  const real = readCommercialCompetitorDiscovery(slug);
+  const fixture = readFixtureCommercialDiscovery(slug);
+  return `${renderDiscoveryResultPanel(slug, real, "REAL_DISCOVERY")}${fixture ? renderDiscoveryResultPanel(slug, fixture, "FIXTURE_VALIDATION") : ""}`;
 }
 
 function competitorKeywordSection(universe: NationalCompetitorKeywordUniverse): string {
