@@ -10,6 +10,7 @@ import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 import {
   readNationalSearchIntelligence,
 } from "./nationalSearchIntelligenceV1Service.ts";
+import { resolveNationalIntelligenceArtifactPath } from "./nationalIntelligenceStorageService.ts";
 import type {
   NationalCompetitorKeywordUniverse,
   NationalOrganicSearchCompetitor,
@@ -257,7 +258,12 @@ ${direct === 0 && status === "complete" ? `<p class="ge-lead" data-cp02-zero-dir
 </div>`;
 }
 
+function hasAuthoritativeSearchIntelligenceV2(slug: string): boolean {
+  return Boolean(resolveNationalIntelligenceArtifactPath(slug, "search-intelligence-v2"));
+}
+
 function renderCommercialCompetitorDiscoveryPanel(slug: string): string {
+  if (hasAuthoritativeSearchIntelligenceV2(slug)) return "";
   const real = readCommercialCompetitorDiscovery(slug);
   const fixture = readFixtureCommercialDiscovery(slug);
   return `${renderDiscoveryResultPanel(slug, real, "REAL_DISCOVERY")}${fixture ? renderDiscoveryResultPanel(slug, fixture, "FIXTURE_VALIDATION") : ""}`;
@@ -332,6 +338,12 @@ export function renderNationalSearchIntelligencePage(
   }
 
   const snapshot = readNationalSearchIntelligence(slug);
+  const v2Authoritative = hasAuthoritativeSearchIntelligenceV2(slug);
+  const authoritativeArtefact = v2Authoritative
+    ? "search-intelligence-v2"
+    : resolveNationalIntelligenceArtifactPath(slug, "search-intelligence-v1")
+      ? "search-intelligence-v1"
+      : "none";
   const collected = snapshot.status === "collected" || snapshot.status === "empty" || snapshot.status === "partial";
   const keywords = snapshot.customerKeywords.slice(0, 100);
   const competitors = Array.isArray(snapshot.organicCompetitors) ? snapshot.organicCompetitors : [];
@@ -406,7 +418,7 @@ export function renderNationalSearchIntelligencePage(
     : `<p class="ge-lead" data-ni03c2-section="zero-paid-expansion">${snapshot.status === "not_collected" ? "Competitor keyword universes will appear after collection." : "Paid competitor expansions: 0. No commercially qualified competitors were selected for ranked-keyword expansion."}</p>`;
 
   const body = `${renderCommercialCompetitorDiscoveryPanel(slug)}
-<div class="ge-panel" data-ni03b-section="search-intelligence">
+<div class="ge-panel" data-ni03b-section="search-intelligence" data-si-authoritative-artefact="${authoritativeArtefact}">
 <h2>Search Intelligence</h2>
 <p class="ge-lead">What Google already knows about this national digital-growth business — organic rankings and search competitors, not nearby pharmacies.</p>
 <div class="ge-grid-2" data-ni03b-section="collection-meta">
