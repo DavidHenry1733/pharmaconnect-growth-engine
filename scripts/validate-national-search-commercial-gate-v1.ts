@@ -14,6 +14,7 @@ import * as searchPageMod from "../src/pharmacy/nationalSearchIntelligencePage.t
 import * as storageMod from "../src/pharmacy/nationalIntelligenceStorageService.ts";
 import * as gateMod from "../src/pharmacy/nationalSearchCommercialCompetitorGate.ts";
 import * as searchLimitsMod from "../src/pharmacy/nationalSearchIntelligenceLimits.ts";
+import * as workspacePathsMod from "../src/pharmacy/pharmacyWorkspacePaths.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -29,6 +30,7 @@ const searchPage = exported(searchPageMod);
 const storage = exported(storageMod);
 const gate = exported(gateMod);
 const searchLimits = exported(searchLimitsMod);
+const { getPharmacyProjectConfigPath } = exported(workspacePathsMod);
 
 let pass = 0;
 let fail = 0;
@@ -112,7 +114,8 @@ check(
 );
 
 const tenantSlug = "ni03c1-commercial-gate";
-const tenantFile = path.join(ROOT, "config/projects", `${tenantSlug}.json`);
+const tenantFile = getPharmacyProjectConfigPath(tenantSlug);
+fs.mkdirSync(path.dirname(tenantFile), { recursive: true });
 fs.writeFileSync(tenantFile, JSON.stringify({
   clientSlug: tenantSlug,
   businessName: "National Digital Growth Tenant",
@@ -305,6 +308,26 @@ function competitorsPayload(items: Array<{ domain: string; intersections: number
 
 const previousLogin = process.env.DATAFORSEO_LOGIN;
 const previousPassword = process.env.DATAFORSEO_PASSWORD;
+
+function restoreNi03c1SideEffects() {
+  for (const artifact of [
+    "search-intelligence-v1",
+    "ranked-keywords-customer",
+    "ranked-keywords-competitors",
+    "cost-ledger-v1",
+    "refresh-metadata-v1",
+    "competitor-discovery",
+  ] as const) {
+    const file = storage.nationalIntelligenceDataPath(tenantSlug, artifact);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
+  if (fs.existsSync(tenantFile)) fs.unlinkSync(tenantFile);
+  if (previousLogin === undefined) delete process.env.DATAFORSEO_LOGIN;
+  else process.env.DATAFORSEO_LOGIN = previousLogin;
+  if (previousPassword === undefined) delete process.env.DATAFORSEO_PASSWORD;
+  else process.env.DATAFORSEO_PASSWORD = previousPassword;
+  globalThis.fetch = originalFetch;
+}
 process.env.DATAFORSEO_LOGIN = "ni03c1-login";
 process.env.DATAFORSEO_PASSWORD = "ni03c1-password";
 
@@ -361,6 +384,7 @@ async function collectScenario(
   });
 }
 
+try {
 const sparse = await collectScenario([
   { domain: "high-authority-overlap.example", intersections: 90, etv: 800000 },
   { domain: "retail-pharmacy-chain.co.uk", intersections: 40, etv: 90000 },
@@ -443,26 +467,9 @@ check(
   fetchUrls.every((url) => url.includes("dataforseo.com") || url.startsWith("NI-03C.1")),
   fetchUrls.filter((url) => !url.includes("dataforseo.com")).join(" | ") || "ok",
 );
-
-for (const artifact of [
-  "search-intelligence-v1",
-  "ranked-keywords-customer",
-  "ranked-keywords-competitors",
-  "cost-ledger-v1",
-  "refresh-metadata-v1",
-  "competitor-discovery",
-] as const) {
-  const file = storage.nationalIntelligenceDataPath(tenantSlug, artifact);
-  if (fs.existsSync(file)) fs.unlinkSync(file);
+} finally {
+  restoreNi03c1SideEffects();
 }
-if (fs.existsSync(tenantFile)) fs.unlinkSync(tenantFile);
-
-if (previousLogin === undefined) delete process.env.DATAFORSEO_LOGIN;
-else process.env.DATAFORSEO_LOGIN = previousLogin;
-if (previousPassword === undefined) delete process.env.DATAFORSEO_PASSWORD;
-else process.env.DATAFORSEO_PASSWORD = previousPassword;
-
-globalThis.fetch = originalFetch;
 
 console.log(`\n${fail ? "FAIL" : "PASS"} — ${pass}/${pass + fail} checks\n`);
 if (fail) process.exit(1);

@@ -45,6 +45,9 @@ console.log(`SERP_REQUEST_COUNT=${result.serpRequestCount ?? 0}`);
 console.log(`SERP_COST=${result.serpCost ?? 0}`);
 console.log(`FIXTURE_DOMAINS_PRESENT_IN_REAL_DISCOVERY=${namedFixtureInReal.length ? "YES" : "NO"}`);
 console.log("COMPETITOR_RANKED_KEYWORD_REQUESTS=0");
+console.log(`REQUESTS=${result.serpRequestCount ?? 0}`);
+console.log(`TASKS=${result.queries.length}`);
+console.log(`TOTAL_COST=${result.serpCost ?? 0}`);
 for (const row of result.candidates) {
   console.log(`DOMAIN=${row.domain}`);
   console.log(`DISCOVERY_SOURCE=${row.source}`);

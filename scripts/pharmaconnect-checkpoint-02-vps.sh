@@ -37,9 +37,11 @@ npx tsx scripts/run-checkpoint-02-commercial-discovery.ts pharmaconnect
 if [ "${CHECKPOINT_02_LIVE:-0}" = "1" ]; then
   echo "ONE bounded live commercial competitor discovery run (SERP discovery evidence only; ranked-keyword expansion remains 0)"
   npx tsx scripts/run-checkpoint-02-commercial-discovery.ts pharmaconnect --live
-  echo "REAL_DISCOVERY printed above. Browser acceptance is a later step after this live run."
+  echo "CHECKPOINT_02_LIVE_DONE $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "STOP. Browser acceptance is the next operator step."
+  exit 0
 fi
 echo "BROWSER_URL=http://127.0.0.1:${PORT}/api/growth-engine/search-intelligence?slug=pharmaconnect"
 echo "CHECKPOINT_02_VALIDATION_DONE $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "Starting isolated browser server on ${PORT} (not production PM2)"
-exec env PORT="$PORT" HOST=127.0.0.1 WORKSPACE_ROOT="$WORKSPACE" npx tsx scripts/checkpoint-01-isolated-browser-server.ts
+echo "LIVE discovery not requested. Isolated browser server not started."
+exit 0
