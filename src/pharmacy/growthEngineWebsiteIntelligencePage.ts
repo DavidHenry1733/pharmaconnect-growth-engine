@@ -10,6 +10,8 @@ import { coverageStatusLabel } from "./growthEngineWebsiteReportCanonicalEvidenc
 import { buildGrowthEngineFramework } from "./growthEngineFrameworkService.ts";
 import { growthEngineWorkflowCss, renderGrowthEngineNavBar } from "./growthEngineWorkflowNav.ts";
 import { platformPlatformNavCss, renderPharmacyPlatformNavBar } from "./pharmacyPlatformNav.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { summariseWebsiteInventory } from "./growthEngineNationalBusinessIntelligenceService.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -135,10 +137,27 @@ export function renderWebsiteIntelligencePage(
   const canonicalServices = analysis?.canonicalServices || [];
   const stats = counts;
 
+  const national = isNationalGrowthPlatform(slug);
+  const inventorySummary = national ? summariseWebsiteInventory(snapshot, importSnap || null) : null;
+  const nationalInventoryPanel = inventorySummary
+    ? `<div class="ge-panel" data-pc-wi-page="website-intelligence" data-growth-platform="national" data-wi-inventory-origin="${esc(inventorySummary.origin)}">
+<h2>Website inventory</h2>
+<p class="ge-lead">Bounded import inventory — not a live crawl of this page. Missing inventory is shown as NOT YET CONNECTED.</p>
+<div class="wi-stat-grid">
+<div class="wi-stat"><strong data-wi-total-pages="${esc(inventorySummary.totalPages ?? "NOT_YET_CONNECTED")}">${esc(inventorySummary.totalPages ?? "NOT YET CONNECTED")}</strong><span>Total pages discovered</span></div>
+<div class="wi-stat"><strong data-wi-service-pages="${esc(inventorySummary.commercialServicePages ?? "NOT_YET_CONNECTED")}">${esc(inventorySummary.commercialServicePages ?? "NOT YET CONNECTED")}</strong><span>Commercial / service pages</span></div>
+<div class="wi-stat"><strong data-wi-blog-pages="${esc(inventorySummary.blogResourcePages ?? "NOT_YET_CONNECTED")}">${esc(inventorySummary.blogResourcePages ?? "NOT YET CONNECTED")}</strong><span>Blog / resource pages</span></div>
+<div class="wi-stat"><strong data-wi-utility-pages="${esc(inventorySummary.aboutContactUtilityPages ?? "NOT_YET_CONNECTED")}">${esc(inventorySummary.aboutContactUtilityPages ?? "NOT YET CONNECTED")}</strong><span>About / contact / utility</span></div>
+<div class="wi-stat"><strong data-wi-other-pages="${esc(inventorySummary.unknownOtherPages ?? "NOT_YET_CONNECTED")}">${esc(inventorySummary.unknownOtherPages ?? "NOT YET CONNECTED")}</strong><span>Unknown / other</span></div>
+</div>
+<p style="font-size:12px;color:#64748b">SOURCE=${esc(inventorySummary.source)} · ${esc(inventorySummary.origin)}</p>
+</div>`
+    : "";
+
   const warn = !snapshot
-    ? `<div class="wi-warn">Add your website URL in Your Pharmacy report, then run <strong>Scan my website</strong>.</div>`
+    ? `<div class="wi-warn">${national ? "Website inventory is not connected yet. Import or scan the website using the existing bounded importer." : "Add your website URL in Your Pharmacy report, then run <strong>Scan my website</strong>."}</div>`
     : snapshot.source === "no-website"
-      ? `<div class="wi-warn">No website URL in your pharmacy profile. Complete Your Pharmacy first.</div>`
+      ? `<div class="wi-warn">${national ? "No website URL is configured on this tenant yet." : "No website URL in your pharmacy profile. Complete Your Pharmacy first."}</div>`
       : snapshot.source === "fetch-failed"
         ? `<div class="wi-warn">We could not reach your website. Check the URL and try again.</div>`
         : "";
@@ -230,6 +249,7 @@ export function renderWebsiteIntelligencePage(
     : `<p class="ge-lead">Summary will appear after analysis.</p>`;
 
   const body = `${warn}
+${nationalInventoryPanel}
 ${renderImportEvidencePanel(importSnap)}
 <div class="ge-panel">
 <h2>What is on your website?</h2>

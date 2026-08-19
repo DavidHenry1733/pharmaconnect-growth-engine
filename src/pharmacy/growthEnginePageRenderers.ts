@@ -33,6 +33,7 @@ import { renderPremiumCustomerDashboardPage } from "./growthEnginePremiumCustome
 import { renderLiveIntegrationProofPage } from "./growthEngineLiveIntegrationProofPage.ts";
 import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
 import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { renderNationalBusinessIntelligencePage } from "./growthEngineNationalBusinessIntelligencePage.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
@@ -156,6 +157,10 @@ export function renderGrowthEngineHubPage(slug: string): string {
 export function renderBusinessIntelligencePage(slug: string, data: PharmacyProfileData): string {
   const copy = growthEnginePlatformCopy(slug);
   const framework = buildGrowthEngineFramework(slug);
+  const { next } = stepNavUrls(slug, framework, 1);
+  if (copy.platform === "national") {
+    return renderNationalBusinessIntelligencePage(slug, { nextUrl: next });
+  }
   const quality = computeWizardQualityScore(data);
   const ready = isRequiredProfileComplete(data);
   const fields = buildWizardImportFields(data);
@@ -207,7 +212,6 @@ ${brand.logoUrl ? `<img src="${esc(brand.logoUrl)}" alt="" style="max-height:52p
   ]
     .map(([label, val]) => `<div class="ge-import-row"><span>${esc(label)}</span><span style="font-size:13px;font-weight:700;color:#334155">${esc(val)}</span></div>`)
     .join("");
-  const { prev, next } = stepNavUrls(slug, framework, 1);
   const body = `<div class="ge-panel">
 <h2>Import-first — confirm what we found</h2>
 <p class="ge-lead">We populate your profile from your website, Google Places, and existing data. Badges: <strong>Imported</strong> · <strong>Confirmed</strong> · <strong>Needs Review</strong>.</p>
