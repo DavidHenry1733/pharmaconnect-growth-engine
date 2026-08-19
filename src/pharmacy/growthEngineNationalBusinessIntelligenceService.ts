@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { resolveGrowthPlatform, isNationalGrowthPlatform, type GrowthPlatform } from "./growthPlatformResolverService.ts";
 import { resolveTenantServiceCatalogue, type TenantServiceCatalogueEntry } from "./growthEngineTenantServiceCatalogue.ts";
+import { serviceDisplayName } from "./growthEngineWebsiteServiceDetection.ts";
 import { resolveWebsiteIntelligenceSnapshot } from "./growthEngineWebsiteIntelligenceService.ts";
 import { hostFromConfiguredDomain } from "./nationalIntelligenceSubjectResolver.ts";
 import { marketScopeLabel, resolveMarketScope, resolvePrimaryMarket } from "./masterAdminMarketScopeService.ts";
@@ -55,8 +56,11 @@ export interface NationalBiPageRow {
   url: string;
   title: string;
   type: string;
+  category: string;
   associatedService: string | null;
   source: string;
+  sourceUrl: string | null;
+  confidence: "high" | "medium" | "low" | "none";
 }
 
 export interface NationalWebsiteInventorySummary {
@@ -183,9 +187,68 @@ function firstPresent(
   return fact("", "none", fallbackOrigin);
 }
 
-const SERVICE_PAGE_TYPES = new Set<WebsitePageCategory>(["service-page", "services", "pricing", "landing"]);
+const SERVICE_PAGE_TYPES = new Set<WebsitePageCategory>(["service-page", "services", "pricing", "landing", "offer"]);
 const BLOG_RESOURCE_TYPES = new Set<WebsitePageCategory>(["blog", "guide", "faq", "news", "resources"]);
 const UTILITY_TYPES = new Set<WebsitePageCategory>(["about", "contact", "policy", "utility", "booking", "homepage"]);
+
+function groupedPageType(category: string): NationalBiPageRow["type"] {
+  if (SERVICE_PAGE_TYPES.has(category as WebsitePageCategory)) return "commercial/service";
+  if (BLOG_RESOURCE_TYPES.has(category as WebsitePageCategory)) return "blog/resource";
+  if (UTILITY_TYPES.has(category as WebsitePageCategory)) return "about/contact/utility";
+  return "unknown/other";
+}
+
+function normalizeComparablePath(url: string): string {
+  try {
+    const parsed = new URL(url, "https://placeholder.local");
+    const path = parsed.pathname.replace(/\/+$/, "") || "/";
+    return path.toLowerCase();
+  } catch {
+    return url.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+function associatedServiceForPage(
+  page: WebsitePageInventoryItem,
+  catalogue: TenantServiceCatalogueEntry[],
+): { name: string | null; confidence: NationalBiPageRow["confidence"] } {
+  const pagePath = normalizeComparablePath(page.url || page.path || "");
+  for (const service of catalogue) {
+    if (!service.href) continue;
+    const hrefPath = normalizeComparablePath(service.href);
+    if (hrefPath && hrefPath !== "/" && (pagePath === hrefPath || pagePath.startsWith(`${hrefPath}/`))) {
+      return { name: service.serviceName, confidence: "high" };
+    }
+  }
+  for (const service of catalogue) {
+    if (overlapService(`${page.title} ${page.path} ${page.url}`, service.serviceName)) {
+      return { name: service.serviceName, confidence: "medium" };
+    }
+  }
+  const detectedId = page.detectedServiceIds?.[0];
+  if (detectedId) {
+    const matched = catalogue.find((service) => service.serviceId === detectedId);
+    return { name: matched?.serviceName || serviceDisplayName(detectedId), confidence: "medium" };
+  }
+  return { name: null, confidence: "none" };
+}
+
+function emptyInventory(
+  origin: EvidenceOrigin,
+  source: string,
+): NationalWebsiteInventorySummary {
+  const counted = origin === "INSUFFICIENT_EVIDENCE";
+  return {
+    totalPages: counted ? 0 : null,
+    commercialServicePages: counted ? 0 : null,
+    blogResourcePages: counted ? 0 : null,
+    aboutContactUtilityPages: counted ? 0 : null,
+    unknownOtherPages: counted ? 0 : null,
+    pages: [],
+    origin,
+    source,
+  };
+}
 
 function countBy(pages: WebsitePageInventoryItem[], set: Set<WebsitePageCategory>): number {
   return pages.filter((page) => set.has(page.category)).length;
@@ -194,49 +257,54 @@ function countBy(pages: WebsitePageInventoryItem[], set: Set<WebsitePageCategory
 export function summariseWebsiteInventory(
   website: GrowthEngineWebsiteIntelligenceSnapshot | null,
   importSnap: WebsiteImportSnapshot | null,
+  catalogue?: TenantServiceCatalogueEntry[],
 ): NationalWebsiteInventorySummary {
   const analysis = website?.analysis;
   const pages = analysis?.pages || importSnap?.intelligence?.structure?.pages || [];
+  const source = website?.analysis ? "website-intelligence" : importSnap?.intelligence?.structure?.pages?.length ? "website-import-snapshot" : "website-intelligence";
   if (!pages.length) {
-    return {
-      totalPages: null,
-      commercialServicePages: null,
-      blogResourcePages: null,
-      aboutContactUtilityPages: null,
-      unknownOtherPages: null,
-      pages: [],
-      origin: "NOT_YET_CONNECTED",
-      source: "website-intelligence",
-    };
+    if (website?.source === "fetch-failed" || website?.source === "website-live") {
+      return emptyInventory("INSUFFICIENT_EVIDENCE", source);
+    }
+    if (website?.source === "no-website") {
+      return emptyInventory("NOT_CONFIGURED", source);
+    }
+    return emptyInventory("NOT_YET_CONNECTED", source);
   }
+  const services = catalogue || (website?.slug ? resolveTenantServiceCatalogue(website.slug).services : []);
   const byCategory = analysis?.inventory?.byCategory;
   const total = analysis?.inventory?.totalPages ?? pages.length;
   const commercial = byCategory
-    ? SERVICE_PAGE_TYPES.reduce((n, key) => n + (byCategory[key] || 0), 0)
+    ? [...SERVICE_PAGE_TYPES].reduce((n, key) => n + (byCategory[key] || 0), 0)
     : countBy(pages, SERVICE_PAGE_TYPES);
   const blogs = byCategory
-    ? BLOG_RESOURCE_TYPES.reduce((n, key) => n + (byCategory[key] || 0), 0)
+    ? [...BLOG_RESOURCE_TYPES].reduce((n, key) => n + (byCategory[key] || 0), 0)
     : countBy(pages, BLOG_RESOURCE_TYPES);
   const utility = byCategory
-    ? UTILITY_TYPES.reduce((n, key) => n + (byCategory[key] || 0), 0)
+    ? [...UTILITY_TYPES].reduce((n, key) => n + (byCategory[key] || 0), 0)
     : countBy(pages, UTILITY_TYPES);
   const unknown = Math.max(0, total - commercial - blogs - utility);
-  const catalogueNames = new Map<string, string>();
   return {
     totalPages: total,
     commercialServicePages: commercial,
     blogResourcePages: blogs,
     aboutContactUtilityPages: utility,
     unknownOtherPages: unknown,
-    pages: pages.slice(0, 40).map((page) => ({
-      url: page.url,
-      title: page.title || page.h1 || page.path,
-      type: page.category,
-      associatedService: page.detectedServiceIds?.[0] ? catalogueNames.get(page.detectedServiceIds[0]) || page.detectedServiceIds[0] : null,
-      source: page.discoverySource || "website-inventory",
-    })),
+    pages: pages.slice(0, 40).map((page) => {
+      const associated = associatedServiceForPage(page, services);
+      return {
+        url: page.url,
+        title: page.title || page.h1 || page.path,
+        type: groupedPageType(page.category),
+        category: page.category,
+        associatedService: associated.name,
+        source: page.discoverySource || (website?.analysis ? "website-intelligence" : "website-import-snapshot"),
+        sourceUrl: page.url || null,
+        confidence: associated.name ? associated.confidence : page.discoverySource ? "medium" : "low",
+      };
+    }),
     origin: "IMPORTED",
-    source: website?.analysis ? "website-intelligence" : "website-import-snapshot",
+    source,
   };
 }
 
@@ -449,7 +517,7 @@ export function assembleNationalBusinessIntelligence(sources: NationalBiSources)
     geoBits.length ? "CONFIGURED" : "NOT_CONFIGURED",
   );
 
-  const inventory = summariseWebsiteInventory(website, importSnap);
+  const inventory = summariseWebsiteInventory(website, importSnap, catalogue);
 
   const identityComplete =
     Boolean(identity.businessName.value) && Boolean(identity.domain.value || identity.websiteUrl.value);
@@ -464,13 +532,22 @@ export function assembleNationalBusinessIntelligence(sources: NationalBiSources)
   if (!servicesComplete) missingRequired.push("At least one commercial service");
   if (!targetCustomer.value) missingRequired.push("Target customer / business proposition");
   if (!marketCountry.value) missingRequired.push("Country / market");
+  if (!inventoryComplete) {
+    missingRequired.push(
+      inventory.origin === "INSUFFICIENT_EVIDENCE"
+        ? "Website inventory (import attempted, no pages discovered)"
+        : inventory.origin === "NOT_CONFIGURED"
+          ? "Website inventory (no website URL configured)"
+          : "Website inventory",
+    );
+  }
 
   const completeness = {
     identity: identityComplete ? "COMPLETE" : identity.businessName.value || identity.domain.value ? "PARTIAL" : "MISSING",
     services: servicesComplete ? "COMPLETE" : "MISSING",
     targetCustomer: targetComplete ? "COMPLETE" : "MISSING",
     market: marketComplete ? "COMPLETE" : marketCountry.value || marketScope.value ? "PARTIAL" : "MISSING",
-    websiteInventory: inventoryComplete ? "COMPLETE" : inventory.origin === "NOT_YET_CONNECTED" ? "MISSING" : "PARTIAL",
+    websiteInventory: inventoryComplete ? "COMPLETE" : "MISSING",
   } as const;
 
   return {

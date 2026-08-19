@@ -71,10 +71,24 @@ export function renderNationalBusinessIntelligenceBody(view: NationalBusinessInt
 </tr>`,
     )
     .join("");
-  const pageRows = inventory.pages
+  const commercialPages = inventory.pages.filter((page) => page.type === "commercial/service");
+  const pageRows = commercialPages
     .slice(0, 20)
     .map(
-      (page) => `<tr>
+      (page) => `<tr data-bi-page-type="${esc(page.type)}" data-bi-page-category="${esc(page.category)}">
+<td>${esc(page.title)}</td>
+<td>${esc(page.type)}</td>
+<td>${page.url ? `<a href="${esc(page.url)}" target="_blank" rel="noopener">${esc(page.url)}</a>` : "—"}</td>
+<td>${esc(page.associatedService || "—")}</td>
+<td>${esc(page.source)}</td>
+</tr>`,
+    )
+    .join("");
+  const otherPageRows = inventory.pages
+    .filter((page) => page.type !== "commercial/service")
+    .slice(0, 20)
+    .map(
+      (page) => `<tr data-bi-page-type="${esc(page.type)}" data-bi-page-category="${esc(page.category)}">
 <td>${esc(page.title)}</td>
 <td>${esc(page.type)}</td>
 <td>${page.url ? `<a href="${esc(page.url)}" target="_blank" rel="noopener">${esc(page.url)}</a>` : "—"}</td>
@@ -93,7 +107,7 @@ export function renderNationalBusinessIntelligenceBody(view: NationalBusinessInt
 
 <div class="bi-ready ${view.readyForCompetitorDiscovery ? "yes" : "no"}" data-bi-ready="${view.readyForCompetitorDiscovery ? "yes" : "no"}">
 READY FOR COMPETITOR DISCOVERY = ${view.readyForCompetitorDiscovery ? "YES" : "NO"}
-${view.missingRequired.length ? `<div class="bi-missing">Missing: ${esc(view.missingRequired.join(", "))}</div>` : "<p style=\"margin:8px 0 0;font-weight:600\">Identity, services, target customer and market are evidenced. Rankings, competitors, GSC and Google Business Profile are not required for this checkpoint.</p>"}
+${view.missingRequired.length ? `<div class="bi-missing">Missing: ${esc(view.missingRequired.join(", "))}</div>` : "<p style=\"margin:8px 0 0;font-weight:600\">Identity, services, target customer, market and website inventory are evidenced. Rankings, competitors, GSC and Google Business Profile are not required for this checkpoint.</p>"}
 </div>
 
 <div class="bi-stat-grid">
@@ -148,8 +162,9 @@ ${renderFact("Geography", view.geography)}
 <div class="bi-stat"><strong data-bi-inv="utility">${esc(inventory.aboutContactUtilityPages ?? "NOT YET CONNECTED")}</strong><span>About / contact / utility</span></div>
 <div class="bi-stat"><strong data-bi-inv="other">${esc(inventory.unknownOtherPages ?? "NOT YET CONNECTED")}</strong><span>Unknown / other</span></div>
 </div>
-<p class="bi-prov">SOURCE=${esc(inventory.source)} · ${esc(inventory.origin)}</p>
-${pageRows ? `<table class="bi-table"><thead><tr><th>Title</th><th>Type</th><th>URL</th><th>Associated service</th><th>Source</th></tr></thead><tbody>${pageRows}</tbody></table>` : `<p class="ge-lead">Website inventory is ${esc(inventory.origin === "NOT_YET_CONNECTED" ? "NOT YET CONNECTED" : "NOT FOUND")}. Run the existing website import / scan to populate pages. This is not an error for a new business.</p>`}
+<p class="bi-prov">SOURCE=${esc(inventory.source)} · SOURCE_URL=${esc(view.identity.websiteUrl.value || "—")} · ${esc(inventory.origin)} · CONFIDENCE=${esc(inventory.origin === "IMPORTED" ? "high" : "none")}</p>
+${pageRows ? `<h3 style="font-size:15px;margin:18px 0 8px">Commercial / service pages</h3><table class="bi-table"><thead><tr><th>Title</th><th>Type</th><th>URL</th><th>Associated service</th><th>Source</th></tr></thead><tbody>${pageRows}</tbody></table>` : `<p class="ge-lead">Website inventory is ${esc(inventory.origin === "NOT_YET_CONNECTED" ? "NOT YET CONNECTED" : inventory.origin.replace(/_/g, " "))}. The existing bounded website importer must discover pages before competitor discovery.</p>`}
+${otherPageRows ? `<h3 style="font-size:15px;margin:18px 0 8px">Other discovered pages</h3><table class="bi-table"><thead><tr><th>Title</th><th>Type</th><th>URL</th><th>Associated service</th><th>Source</th></tr></thead><tbody>${otherPageRows}</tbody></table>` : ""}
 </div>
 
 <div class="ge-panel" data-bi-section="missing">

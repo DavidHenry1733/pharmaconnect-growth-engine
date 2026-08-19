@@ -142,7 +142,7 @@ export function renderWebsiteIntelligencePage(
   const nationalInventoryPanel = inventorySummary
     ? `<div class="ge-panel" data-pc-wi-page="website-intelligence" data-growth-platform="national" data-wi-inventory-origin="${esc(inventorySummary.origin)}">
 <h2>Website inventory</h2>
-<p class="ge-lead">Bounded import inventory — not a live crawl of this page. Missing inventory is shown as NOT YET CONNECTED.</p>
+<p class="ge-lead">Bounded website-intelligence inventory from the existing importer. Missing inventory stays unknown until import evidence exists.</p>
 <div class="wi-stat-grid">
 <div class="wi-stat"><strong data-wi-total-pages="${esc(inventorySummary.totalPages ?? "NOT_YET_CONNECTED")}">${esc(inventorySummary.totalPages ?? "NOT YET CONNECTED")}</strong><span>Total pages discovered</span></div>
 <div class="wi-stat"><strong data-wi-service-pages="${esc(inventorySummary.commercialServicePages ?? "NOT_YET_CONNECTED")}">${esc(inventorySummary.commercialServicePages ?? "NOT YET CONNECTED")}</strong><span>Commercial / service pages</span></div>

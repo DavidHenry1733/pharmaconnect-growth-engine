@@ -26,6 +26,7 @@ import {
 } from "../../../../src/pharmacy/growthEngineLiveIntegrationProofService.ts";
 import { renderCustomerSetupStartPage } from "../../../../src/pharmacy/growthEngineCustomerSetupStartPage.ts";
 import { renderCustomerSetupConfirmPage } from "../../../../src/pharmacy/growthEngineCustomerSetupConfirmPage.ts";
+import { ensureWebsiteIntelligenceInventory } from "../../../../src/pharmacy/growthEngineWebsiteIntelligenceService.ts";
 
 const router = Router();
 const ROOT = process.env.WORKSPACE_ROOT ?? "/home/inboxingproweb/pharmaconnect-growth-engine";
@@ -52,10 +53,16 @@ router.get("/growth-engine", (req, res) => {
   }
 });
 
-router.get("/growth-engine/business-intelligence", (req, res) => {
+router.get("/growth-engine/business-intelligence", async (req, res) => {
   const slug = tenantSlugOrRespond(req, res);
   if (!slug) return;
-  res.type("html").send(renderBusinessIntelligencePage(slug, loadProfile(slug)));
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    await ensureWebsiteIntelligenceInventory(slug);
+    res.type("html").send(renderBusinessIntelligencePage(slug, loadProfile(slug)));
+  } catch (err) {
+    res.status(500).type("html").send(`<pre>Business Intelligence error: ${esc(String(err))}</pre>`);
+  }
 });
 
 router.get("/growth-engine/local-market", (req, res) => {
@@ -76,10 +83,16 @@ router.get("/growth-engine/search-intelligence", (req, res) => {
   }
 });
 
-router.get("/growth-engine/website-intelligence", (req, res) => {
+router.get("/growth-engine/website-intelligence", async (req, res) => {
   const slug = tenantSlugOrRespond(req, res);
   if (!slug) return;
-  res.type("html").send(renderWebsiteIntelligencePage(slug));
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    await ensureWebsiteIntelligenceInventory(slug);
+    res.type("html").send(renderWebsiteIntelligencePage(slug));
+  } catch (err) {
+    res.status(500).type("html").send(`<pre>Website Intelligence error: ${esc(String(err))}</pre>`);
+  }
 });
 
 router.get("/growth-engine/growth-intelligence", (req, res) => {

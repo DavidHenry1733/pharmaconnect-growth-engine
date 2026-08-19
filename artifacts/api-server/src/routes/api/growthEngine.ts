@@ -10,6 +10,7 @@ import {
 import { discoverLocalMarketCompetitors, loadCompetitorSnapshot } from "../../../../../src/pharmacy/growthEngineLocalMarketService.ts";
 import {
   analyseWebsiteIntelligence,
+  ensureWebsiteIntelligenceInventory,
   loadWebsiteIntelligenceSnapshot,
 } from "../../../../../src/pharmacy/growthEngineWebsiteIntelligenceService.ts";
 import {
@@ -213,10 +214,11 @@ router.post("/growth-engine/:slug/search-intelligence/collect", async (req, res)
   }
 });
 
-router.get("/growth-engine/:slug/website-intelligence", (req, res) => {
+router.get("/growth-engine/:slug/website-intelligence", async (req, res) => {
   const slug = resolveSlug(req.params.slug);
   if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
-  res.json({ ok: true, snapshot: loadWebsiteIntelligenceSnapshot(slug) });
+  const snapshot = await ensureWebsiteIntelligenceInventory(slug);
+  res.json({ ok: true, snapshot: snapshot || loadWebsiteIntelligenceSnapshot(slug) });
 });
 
 router.post("/growth-engine/:slug/website-intelligence/analyse", async (req, res) => {
