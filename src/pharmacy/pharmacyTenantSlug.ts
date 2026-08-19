@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Request, Response } from "express";
-import { getPharmacyProfilePath, PHARMACY_WORKSPACE_ROOT, safePharmacySlug } from "./pharmacyWorkspacePaths.ts";
+import { getPharmacyProfilePath, getPharmacyProjectConfigPath, PHARMACY_WORKSPACE_ROOT, safePharmacySlug } from "./pharmacyWorkspacePaths.ts";
 
 export const CLIENT_PORTFOLIO_URL = "/api/admin/pharmacies";
 
@@ -19,6 +19,7 @@ function slugCandidates(normalized: string): string[] {
 
 function storageExists(slug: string): boolean {
   if (fs.existsSync(getPharmacyProfilePath(slug))) return true;
+  if (fs.existsSync(getPharmacyProjectConfigPath(slug))) return true;
   if (fs.existsSync(path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-campaigns", `${slug}.json`))) return true;
   if (fs.existsSync(path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-asset-workflow", `${slug}.json`))) return true;
   return false;

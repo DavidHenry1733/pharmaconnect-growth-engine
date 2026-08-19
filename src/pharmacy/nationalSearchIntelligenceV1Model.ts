@@ -1,0 +1,287 @@
+/**
+ * NI-03B/C — Customer keyword universe + organic search competitor intelligence.
+ * Does not include keyword intersection/gap recommendations or Growth Plan.
+ */
+import type {
+  NationalEvidenceAuthority,
+  NationalEvidenceSourceType,
+  NationalIntelligenceEvidenceProvenance,
+} from "./nationalIntelligenceEvidenceProvenance.ts";
+import type { NationalIntelligenceCostLedger } from "./nationalIntelligenceCostLedger.ts";
+import type { NationalSearchIntelligenceLimits } from "./nationalSearchIntelligenceLimits.ts";
+import { NI03C_DEFAULT_LIMITS } from "./nationalSearchIntelligenceLimits.ts";
+import type { NationalSearchCompetitorRole, NationalSearchQualificationOutcome, NationalSearchCandidateQualificationEvidence } from "./nationalSearchCommercialCompetitorGate.ts";
+
+export const NATIONAL_SEARCH_INTELLIGENCE_VERSION = 1 as const;
+export const NATIONAL_SEARCH_INTELLIGENCE_CORRECTED_VERSION = 2 as const;
+
+/** NI-03C commercial defaults. Collection uses resolveNationalSearchIntelligenceLimits(). */
+export const NI03C_LIMITS = NI03C_DEFAULT_LIMITS;
+
+/** @deprecated NI-03B proof-of-concept bounds. Prefer NI03C_LIMITS / resolveNationalSearchIntelligenceLimits(). */
+export const NI03B_LIMITS = {
+  customerRankedKeywords: NI03C_DEFAULT_LIMITS.customerKeywordUniverse,
+  serpQueries: 0,
+  serpDepth: 10,
+  competitorCandidates: NI03C_DEFAULT_LIMITS.competitorDiscoveryCandidates,
+} as const;
+
+export type NationalSearchIntelligenceStatus =
+  | "not_collected"
+  | "collecting"
+  | "collected"
+  | "partial"
+  | "empty"
+  | "error";
+
+export const PARTIAL_COLLECTION_CUSTOMER_MESSAGE =
+  "Search intelligence was collected, but one or more search-engine requests could not be completed. Available evidence is shown below.";
+
+export function isUsableNationalSearchIntelligenceStatus(
+  status: NationalSearchIntelligenceStatus,
+): boolean {
+  return status === "collected" || status === "partial" || status === "empty";
+}
+
+export interface NationalCustomerRankingKeyword {
+  keyword: string;
+  position: number | null;
+  rankingUrl: string | null;
+  searchVolume: number | null;
+  cpc: number | null;
+  competition: number | null;
+  estimatedTraffic: number | null;
+  searchIntent: string | null;
+  serpType: string | null;
+  rankGroup: number | null;
+  seResultsCount: number | null;
+  capturedAt: string;
+  sourceEndpoint: string;
+  evidenceSource: NationalEvidenceSourceType;
+  calculated: false;
+}
+
+export interface NationalOrganicSearchCompetitor {
+  domain: string;
+  name: string;
+  websiteUrl: string;
+  whyIdentified: string[];
+  sourceQueries: string[];
+  discoverySource: "dataforseo_labs_competitors_domain" | "dataforseo_labs_serp_competitors";
+  evidenceType:
+    | "organic_overlap_domains"
+    | "serp_competitor_candidates"
+    | "qualified_uk_commercial_competitors"
+    | "adjacent_providers"
+    | "international_comparators"
+    | "rejected_candidates"
+    | "customer_market";
+  outcome: NationalSearchQualificationOutcome;
+  sharedKeywordCount: number | null;
+  averagePosition: number | null;
+  organicEtv: number | null;
+  organicKeywordCount: number | null;
+  sharedKeywordEtv: number | null;
+  bestSerpPosition: number | null;
+  role: NationalSearchCompetitorRole;
+  classification: "direct_competitor" | "adjacent_competitor" | "insufficient_evidence" | "excluded";
+  qualification: "qualified" | "candidate" | "rejected";
+  evidenceStatus: string;
+  evidenceUrls: string[];
+  exclusionReasons: string[];
+  qualificationScore: number;
+  qualificationEvidence: string[];
+  candidateQualificationEvidence: NationalSearchCandidateQualificationEvidence | null;
+  eligibleForKeywordExpansion: boolean;
+  nonSelectionReason: string | null;
+  commercialGate: {
+    targetMarketRelevance: boolean;
+    commercialProvider: boolean;
+    serviceOverlap: boolean;
+    marketRelevance: boolean;
+    matchedServices: string[];
+    tenantServices: string[];
+    candidateServicesDetected: string[];
+    overlappingServices: string[];
+    nonOverlappingServices: string[];
+    organicOverlapSupportingOnly: true;
+  };
+  analysed: boolean;
+  capturedAt: string;
+  evidenceSource: NationalEvidenceSourceType;
+  verified: false;
+}
+
+export interface NationalCompetitorRankingKeyword {
+  domain: string;
+  keyword: string;
+  position: number | null;
+  rankingUrl: string | null;
+  searchVolume: number | null;
+  cpc: number | null;
+  competition: number | null;
+  estimatedTraffic: number | null;
+  searchIntent: string | null;
+  capturedAt: string;
+  sourceEndpoint: string;
+  evidenceSource: NationalEvidenceSourceType;
+  calculated: false;
+}
+
+export interface NationalCompetitorKeywordUniverse {
+  domain: string;
+  status: "collected" | "empty" | "error";
+  lastError: string | null;
+  capturedAt: string;
+  sourceEndpoint: string;
+  cost: number;
+  keywords: NationalCompetitorRankingKeyword[];
+}
+
+export interface NationalCompetitorKeywordGap {
+  competitorDomain: string;
+  keyword: string;
+  position: number | null;
+  rankingUrl: string | null;
+  searchVolume: number | null;
+  cpc: number | null;
+  capturedAt: string;
+  sourceEndpoint: string;
+  evidenceSource: NationalEvidenceSourceType;
+  intersections: false;
+  calculated: false;
+}
+
+export interface NationalCompetitorKeywordGapUniverse {
+  domain: string;
+  status: "collected" | "empty" | "error";
+  lastError: string | null;
+  capturedAt: string;
+  sourceEndpoint: string;
+  cost: number;
+  intersections: false;
+  gaps: NationalCompetitorKeywordGap[];
+}
+
+export interface NationalSearchCollectionPlan {
+  customerKeywordTasks: number;
+  competitorDiscoveryTasks: number;
+  competitorKeywordTasks: number;
+  domainIntersectionTasks: number;
+  maximumPaidRequests: number;
+  limits: NationalSearchIntelligenceLimits;
+  endpoints: string[];
+  discoveryEndpoint: string;
+  commercialSeedKeywords: string[];
+}
+
+export interface NationalSearchLabsAttempt {
+  role: "customer_ranked_keywords" | "competitors_domain" | "serp_competitors" | "competitor_ranked_keywords" | "domain_intersection";
+  domain: string | null;
+  endpoint: string;
+  taskId: string | null;
+  taskStatusCode: number | null;
+  taskStatusMessage: string | null;
+  cost: number | null;
+  successful: boolean;
+  timedOut?: boolean;
+  attemptNumber: number;
+  capturedAt: string;
+  redactedPayload?: unknown;
+  resultCount?: number | null;
+  itemsCount?: number | null;
+  evidenceType?: string;
+}
+
+export interface NationalSearchIntelligenceSnapshot {
+  version: typeof NATIONAL_SEARCH_INTELLIGENCE_VERSION | typeof NATIONAL_SEARCH_INTELLIGENCE_CORRECTED_VERSION;
+  tenantSlug: string;
+  businessName: string;
+  subjectDomain: string;
+  primaryMarket: string;
+  country: string;
+  growthPlatform: "national";
+  capturedAt: string;
+  liveExecution: boolean;
+  status: NationalSearchIntelligenceStatus;
+  lastError: string | null;
+  reusedExistingSnapshot: boolean;
+  serpLocation: {
+    country: string;
+    locationCode: number;
+  } | null;
+  limits: NationalSearchIntelligenceLimits;
+  collectionPlan: NationalSearchCollectionPlan;
+  customerOrganicFootprint: {
+    keywordCount: number;
+    sparse: boolean;
+    threshold: number;
+    sufficientForHighConfidenceCommercialDiscovery: boolean;
+    note: string;
+  };
+  endpoints: Array<{ endpoint: string; requests: number; tasks: number; cost: number }>;
+  costs: { requests: number; tasks: number; totalCost: number };
+  costLedger: NationalIntelligenceCostLedger;
+  provenance: NationalIntelligenceEvidenceProvenance;
+  authority: NationalEvidenceAuthority;
+  customerKeywords: NationalCustomerRankingKeyword[];
+  commercialSeedKeywords: string[];
+  organicOverlapDomains: NationalOrganicSearchCompetitor[];
+  serpCompetitorCandidates: NationalOrganicSearchCompetitor[];
+  organicCompetitors: NationalOrganicSearchCompetitor[];
+  excludedCompetitors: NationalOrganicSearchCompetitor[];
+  competitorKeywordUniverses: NationalCompetitorKeywordUniverse[];
+  competitorKeywordGaps: NationalCompetitorKeywordGapUniverse[];
+  callCountByEndpoint: Record<string, number>;
+  labsAttempts: NationalSearchLabsAttempt[];
+  serpAttempts: Array<{
+    query: string;
+    endpoint: string;
+    taskId: string | null;
+    taskStatusCode: number | null;
+    taskStatusMessage: string | null;
+    cost: number | null;
+    successful: boolean;
+    timedOut?: boolean;
+    attemptNumber: number;
+    capturedAt: string;
+  }>;
+  summary: {
+    rankingKeywordCount: number;
+    top3Count: number;
+    top10Count: number;
+    top20Count: number;
+    top100Count: number;
+    rankingPageCount: number;
+    availableSearchDemand: number | null;
+    organicCompetitorCount: number;
+    commercialCompetitorCount: number;
+    serpCompetitorCount: number;
+    analysedCompetitorCount: number;
+    excludedCompetitorCount: number;
+    competitorKeywordCount: number;
+    directCompetitorCount: number;
+    adjacentCompetitorCount: number;
+    internationalComparatorCount: number;
+    customerMarketCount: number;
+    rejectedCandidateCount: number;
+    competitorKeywordGapCount: number;
+    strongestRankingPages: Array<{
+      url: string;
+      keywordCount: number;
+      searchDemand: number | null;
+      bestPosition: number | null;
+    }>;
+    top3CountCalculated: true;
+    top10CountCalculated: true;
+    top20CountCalculated: true;
+    top100CountCalculated: true;
+    rankingPageCountCalculated: true;
+    availableSearchDemandCalculated: true;
+  };
+  nextStage: {
+    title: string;
+    detail: string;
+    implemented: false;
+  };
+}

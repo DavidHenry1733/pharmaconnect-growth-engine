@@ -1,5 +1,8 @@
 /**
  * NC-02 — National Competitor Discovery Storage V1
+ *
+ * REAL_DISCOVERY and FIXTURE_VALIDATION are persisted separately.
+ * Fixture candidates must never be written to the real discovery file.
  */
 
 import fs from "node:fs";
@@ -8,28 +11,47 @@ import path from "node:path";
 import type {
   NationalCompetitorDiscoveryResult,
 } from "./nationalCompetitorDiscoveryModel.ts";
+import {
+  ensureNationalIntelligenceDataDir,
+  nationalIntelligenceDataDir,
+  nationalIntelligenceDataPath,
+} from "./nationalIntelligenceStorageService.ts";
+import { safePharmacySlug } from "./pharmacyWorkspacePaths.ts";
 
-const ROOT = path.resolve(
-  process.cwd(),
-  "data",
-  "national-growth-engine",
+export const COMMERCIAL_DISCOVERY_FIXTURE_VALIDATION_DOMAINS = [
+  "pharmacy-digital-agency.co.uk",
+  "retail-pharmacy-chain.co.uk",
+  "pharmacy-trade-press.co.uk",
+  "royal-college.example",
+  "scientific-articles.example",
+  "pharmacy-pmr-software.co.uk",
+  "high-authority-overlap.example",
+  "broad-vocab.example",
+] as const;
+
+const FIXTURE_DOMAIN_SET = new Set(
+  COMMERCIAL_DISCOVERY_FIXTURE_VALIDATION_DOMAINS.map((domain) => domain.toLowerCase()),
 );
 
-function safeSlug(slug: string): string {
-  const safe = String(slug || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]/g, "");
-
-  if (!safe) throw new Error("Invalid national growth platform slug");
-
-  return safe;
+export function nationalCompetitorDiscoveryPath(slug: string): string {
+  return nationalIntelligenceDataPath(slug, "competitor-discovery");
 }
 
-export function nationalCompetitorDiscoveryPath(slug: string): string {
+export function nationalCompetitorDiscoveryFixturePath(slug: string): string {
   return path.join(
-    ROOT,
-    `${safeSlug(slug)}-competitor-discovery.json`,
+    nationalIntelligenceDataDir(),
+    `${safePharmacySlug(slug)}-competitor-discovery.fixture.json`,
   );
+}
+
+export function isExampleTldDomain(domain: string): boolean {
+  const host = String(domain || "").trim().toLowerCase().replace(/^www\./, "");
+  return host === "example" || host.endsWith(".example");
+}
+
+export function isCommercialDiscoveryFixtureValidationDomain(domain: string): boolean {
+  const host = String(domain || "").trim().toLowerCase().replace(/^www\./, "");
+  return FIXTURE_DOMAIN_SET.has(host) || isExampleTldDomain(host);
 }
 
 export function readNationalCompetitorDiscovery(
@@ -44,18 +66,61 @@ export function readNationalCompetitorDiscovery(
   ) as NationalCompetitorDiscoveryResult;
 }
 
+export function readFixtureCommercialCompetitorDiscovery(
+  slug: string,
+): NationalCompetitorDiscoveryResult | null {
+  const file = nationalCompetitorDiscoveryFixturePath(slug);
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, "utf8")) as NationalCompetitorDiscoveryResult;
+}
+
+function writeJson(file: string, result: NationalCompetitorDiscoveryResult): string {
+  ensureNationalIntelligenceDataDir();
+  fs.writeFileSync(file, JSON.stringify(result, null, 2) + "\n", "utf8");
+  return file;
+}
+
+export function writeFixtureCommercialCompetitorDiscovery(
+  result: NationalCompetitorDiscoveryResult,
+): string {
+  const copy: NationalCompetitorDiscoveryResult = {
+    ...result,
+    evidenceKind: "FIXTURE_VALIDATION",
+  };
+  return writeJson(nationalCompetitorDiscoveryFixturePath(copy.slug), copy);
+}
+
+export function writeRealCommercialCompetitorDiscovery(
+  result: NationalCompetitorDiscoveryResult,
+): string {
+  if (result.evidenceKind !== "REAL_DISCOVERY") {
+    throw new Error("FIXTURE_VALIDATION cannot persist as REAL_DISCOVERY");
+  }
+  const exampleDomains = (result.candidates || []).filter((row) => isExampleTldDomain(row.domain));
+  if (exampleDomains.length) {
+    throw new Error("REAL_DISCOVERY cannot persist .example fixture domains");
+  }
+  if ((result.discoveryProvider || "").toLowerCase() === "fixture") {
+    throw new Error("Fixture provider results cannot persist as REAL_DISCOVERY");
+  }
+  return writeJson(nationalCompetitorDiscoveryPath(result.slug), result);
+}
+
 export function writeNationalCompetitorDiscovery(
   result: NationalCompetitorDiscoveryResult,
 ): string {
-  fs.mkdirSync(ROOT, { recursive: true });
-
+  if (result.evidenceKind === "FIXTURE_VALIDATION") {
+    return writeFixtureCommercialCompetitorDiscovery(result);
+  }
+  if (result.evidenceKind === "REAL_DISCOVERY") {
+    return writeRealCommercialCompetitorDiscovery(result);
+  }
+  const existing = readNationalCompetitorDiscovery(result.slug);
+  if (existing?.evidenceKind === "REAL_DISCOVERY") {
+    return nationalCompetitorDiscoveryPath(result.slug);
+  }
+  ensureNationalIntelligenceDataDir();
   const file = nationalCompetitorDiscoveryPath(result.slug);
-
-  fs.writeFileSync(
-    file,
-    JSON.stringify(result, null, 2) + "\n",
-    "utf8",
-  );
-
+  fs.writeFileSync(file, JSON.stringify(result, null, 2) + "\n", "utf8");
   return file;
 }

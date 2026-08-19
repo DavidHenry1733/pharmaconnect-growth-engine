@@ -12,11 +12,11 @@ import { readVerifiedNationalCompetitorIntelligence } from "./verifiedNationalCo
  */
 
 import fs from "node:fs";
-import path from "node:path";
 import {
   resolveGrowthPlatform,
   isNationalGrowthPlatform,
 } from "./growthPlatformResolverService.ts";
+import { nationalIntelligenceDataPath } from "./nationalIntelligenceStorageService.ts";
 
 export type NationalPlatformStepStatus =
   | "complete"
@@ -59,15 +59,8 @@ export interface NationalGrowthPlatformDashboard {
   };
 }
 
-const ROOT = process.cwd();
-
 function discoveryPath(slug: string): string {
-  return path.join(
-    ROOT,
-    "data",
-    "national-growth-engine",
-    `${slug}-competitor-discovery.json`,
-  );
+  return nationalIntelligenceDataPath(slug, "competitor-discovery");
 }
 
 function readDiscoveryEvidence(slug: string): {
@@ -112,10 +105,11 @@ function readDiscoveryEvidence(slug: string): {
 }
 
 
-function getVerifiedNationalCompetitorDashboardEvidence(){
+function getVerifiedNationalCompetitorDashboardEvidence(slug: string){
   try {
     const intelligence =
-      readVerifiedNationalCompetitorIntelligence();
+      readVerifiedNationalCompetitorIntelligence(slug);
+    if (!intelligence) throw new Error("verified_national_competitor_intelligence_not_found");
 
     return {
       status: intelligence.status,

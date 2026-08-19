@@ -21,6 +21,7 @@ export type NationalCompetitorQualificationV2Input = {
   websiteText?: string | null;
   servicesDetected?: string[];
   matchedQueries?: string[];
+  ownDomains?: string[];
 };
 
 export type NationalCompetitorQualificationV2Result = {
@@ -67,6 +68,14 @@ const EXCLUDED_DOMAIN_PATTERNS = [
   /(^|\.)gov\.uk$/i,
   /(^|\.)nhs\.uk$/i,
   /(^|\.)bmj\.com$/i,
+  /(^|\.)google\.(com|co\.\w{2}|com?\.\w{2})$/i,
+  /(^|\.)bing\.com$/i,
+  /(^|\.)yahoo\.com$/i,
+  /(^|\.)duckduckgo\.com$/i,
+  /(^|\.)yandex\.(com|ru)$/i,
+  /(^|\.)baidu\.com$/i,
+  /(^|\.)yell\.com$/i,
+  /(^|\.)yellowpages\./i,
 ];
 
 const EXCLUDED_ORGANISATION_SIGNALS = [
@@ -252,8 +261,16 @@ export function qualifyNationalCompetitorV2(
   const reasons: string[] = [];
   const exclusionReasons: string[] = [];
 
-  if (domain === "pharmaconnect.uk" || domain.endsWith(".pharmaconnect.uk")) {
-    exclusionReasons.push("Platform owner's own domain.");
+  const ownDomains = (input.ownDomains || []).map((value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split("/")[0],
+  ).filter(Boolean);
+  if (ownDomains.some((own) => domain === own || domain.endsWith(`.${own}`))) {
+    exclusionReasons.push("Subject's own domain.");
   }
 
   if (

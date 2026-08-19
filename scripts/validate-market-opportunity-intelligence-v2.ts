@@ -4,9 +4,10 @@ import service from "../src/pharmacy/marketUniverseIntelligenceV2Service.ts";
 
 const runtime = process.argv.includes("--runtime");
 const snapshot = runtime
-  ? service.readMarketUniverseV2Snapshot()
-  : service.buildMarketUniverseV2FromFixture();
+  ? service.readMarketUniverseV2Snapshot("pharmaconnect")
+  : service.buildMarketUniverseV2FromFixture("pharmaconnect");
 const source = fs.readFileSync("src/pharmacy/marketUniverseIntelligenceV2Service.ts", "utf8");
+const labsSource = fs.readFileSync("src/pharmacy/dataForSeoRankedKeywordIntelligenceService.ts", "utf8");
 const apiSource = fs.readFileSync("artifacts/api-server/src/routes/api/masterAdminPlatform.ts", "utf8");
 const runtimePath = "data/national-growth-engine/pharmaconnect-market-opportunity-intelligence-v2.json";
 
@@ -25,11 +26,11 @@ function check(id: string, ok: boolean, detail: string) {
 
 console.log(`\n=== MARKET UNIVERSE INTELLIGENCE V2 ${runtime ? "RUNTIME" : "FIXTURE"} ===\n`);
 
-check("multiple-sources-wired", source.includes("keywords_for_site/live") && source.includes("domain_intersection/live"), "ranked + site + gap endpoints");
+check("multiple-sources-wired", labsSource.includes("keywords_for_site/live") && labsSource.includes("domain_intersection/live") && source.includes("getKeywordsForSiteWithCost") && source.includes("getDomainIntersectionWithCost"), "ranked + site + gap endpoints");
 check("provenance-retained", snapshot.universe.every((x) => Array.isArray(x.sources) && x.sources.length > 0), "sources on every keyword");
 check("true-domain-gap-supported", source.includes("intersections: false") && snapshot.summary.untapped >= 0, "domain gap mode");
 check("volume-deduplication", snapshot.summary.qualifiedCommercialSearchDemand >= 0 && snapshot.summary.unique <= snapshot.summary.raw, `${snapshot.summary.unique}/${snapshot.summary.raw}`);
-check("taxonomy-filtering", snapshot.universe.some((x) => x.reasons.some((r) => /term:/.test(r))) || snapshot.universe.length === 0, "taxonomy reasons");
+check("taxonomy-filtering", snapshot.universe.some((x) => x.reasons.some((r) => /term:|Market signal:|Commercial service signal:|Classification authority: commercialIntentTaxonomyV2/.test(r))) || snapshot.universe.length === 0, "taxonomy reasons");
 check("intent-retained", snapshot.summary.intentCoverage >= 0, String(snapshot.summary.intentCoverage));
 check("difficulty-retained", snapshot.summary.difficultyCoverage >= 0, String(snapshot.summary.difficultyCoverage));
 check("cpc-separate-from-difficulty", snapshot.universe.every((x) => "cpc" in x && "keywordDifficulty" in x), "separate fields");

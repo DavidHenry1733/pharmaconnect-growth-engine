@@ -1,13 +1,10 @@
 import fs from "node:fs";
-
-const ENRICHMENT =
-  "data/national-growth-engine/pharmaconnect-competitor-evidence-enrichment-v1.json";
-
-const KEYWORDS =
-  "data/national-growth-engine/pharmaconnect-commercial-keyword-qualification-v1.json";
-
-const OUTPUT =
-  "data/national-growth-engine/pharmaconnect-verified-national-competitors.json";
+import { resolveNationalIntelligenceSubject } from "./nationalIntelligenceSubjectResolver.ts";
+import {
+  ensureNationalIntelligenceDataDir,
+  nationalIntelligenceDataPath,
+  resolveNationalIntelligenceArtifactPath,
+} from "./nationalIntelligenceStorageService.ts";
 
 function readJson(path:string){
   return JSON.parse(fs.readFileSync(path,"utf8"));
@@ -43,10 +40,15 @@ function uniqueByDomain(items:any[]){
   return [...map.values()];
 }
 
-export function buildVerifiedNationalCompetitorIntelligence(){
+export function buildVerifiedNationalCompetitorIntelligence(slug: string){
+  const subject = resolveNationalIntelligenceSubject(slug);
+  const enrichmentFile = resolveNationalIntelligenceArtifactPath(slug, "competitor-evidence-enrichment-v1");
+  const keywordFile = resolveNationalIntelligenceArtifactPath(slug, "commercial-keyword-qualification-v1");
+  if (!enrichmentFile) throw new Error(`Competitor evidence enrichment snapshot not found for ${slug}`);
+  if (!keywordFile) throw new Error(`Commercial keyword qualification snapshot not found for ${slug}`);
 
-  const enrichment=readJson(ENRICHMENT);
-  const keyword=readJson(KEYWORDS);
+  const enrichment=readJson(enrichmentFile);
+  const keyword=readJson(keywordFile);
 
   const ownSiteDirect=
     enrichment.directCompetitors || [];
@@ -146,7 +148,7 @@ export function buildVerifiedNationalCompetitorIntelligence(){
 
     generatedAt:new Date().toISOString(),
 
-    tenant:"pharmaconnect",
+    tenant: subject.slug,
 
     platformScope:"national",
 
@@ -181,18 +183,21 @@ export function buildVerifiedNationalCompetitorIntelligence(){
     },
   };
 
+  ensureNationalIntelligenceDataDir();
+  const file = nationalIntelligenceDataPath(slug, "verified-national-competitors");
   fs.writeFileSync(
-    OUTPUT,
+    file,
     JSON.stringify(output,null,2)+"\n"
   );
 
   return output;
 }
 
-export function readVerifiedNationalCompetitorIntelligence(){
-  if(!fs.existsSync(OUTPUT)){
-    return buildVerifiedNationalCompetitorIntelligence();
+export function readVerifiedNationalCompetitorIntelligence(slug: string){
+  const file = resolveNationalIntelligenceArtifactPath(slug, "verified-national-competitors");
+  if(!file){
+    return null;
   }
 
-  return readJson(OUTPUT);
+  return readJson(file);
 }

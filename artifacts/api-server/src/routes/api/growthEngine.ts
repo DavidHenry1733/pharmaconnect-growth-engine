@@ -10,13 +10,14 @@ import {
 import { discoverLocalMarketCompetitors, loadCompetitorSnapshot } from "../../../../../src/pharmacy/growthEngineLocalMarketService.ts";
 import {
   analyseWebsiteIntelligence,
+  ensureWebsiteIntelligenceInventory,
   loadWebsiteIntelligenceSnapshot,
 } from "../../../../../src/pharmacy/growthEngineWebsiteIntelligenceService.ts";
 import {
   buildGrowthOpportunityReport,
   saveGrowthOpportunityReport,
 } from "../../../../../src/pharmacy/growthEngineOpportunityEngine.ts";
-import { buildGrowthPlanIntelligence } from "../../../../../src/pharmacy/growthEngineCampaignRecommendationEngine.ts";
+import { resolveGrowthPlan } from "../../../../../src/pharmacy/growthEngineGrowthPlanResolver.ts";
 import {
   buildGrowthJourneyView,
   syncGrowthCycles,
@@ -25,6 +26,18 @@ import { loadGrowthMemory, recordRecommendationDecision } from "../../../../../s
 import { checkLaunchPlanEligibility, buildAdaptiveLaunchRecommendation } from "../../../../../src/pharmacy/growthEngineLaunchManagerService.ts";
 import { buildCycleAwareRecommendation } from "../../../../../src/pharmacy/growthEngineCycleLearningEngine.ts";
 import { resolveTenantProfileSlug } from "../../../../../src/pharmacy/pharmacyTenantSlug.ts";
+import { isNationalGrowthPlatform } from "../../../../../src/pharmacy/growthPlatformResolverService.ts";
+import {
+  collectNationalSearchIntelligence,
+  planNationalSearchIntelligenceCollection,
+  readNationalSearchIntelligence,
+} from "../../../../../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
+import {
+  buildCommercialCompetitorDiscoveryPlan,
+  readCommercialCompetitorDiscovery,
+  runCommercialCompetitorDiscovery,
+} from "../../../../../src/pharmacy/nationalCommercialCompetitorDiscoveryService.ts";
+import { generateApprovedGrowthPlanContent } from "../../../../../src/pharmacy/nationalApprovedPlanGenerationService.ts";
 import {
   loadLiveIntegrationProof,
   runLiveIntegrationProof,
@@ -83,7 +96,8 @@ router.get("/growth-engine/:slug/opportunities", (req, res) => {
 router.get("/growth-engine/:slug/growth-plan", (req, res) => {
   const slug = resolveSlug(req.params.slug);
   if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
-  res.json({ ok: true, plan: buildGrowthPlanIntelligence(slug) });
+  const resolved = resolveGrowthPlan(slug);
+  return res.json({ ok: true, platform: resolved.platform, plan: resolved.plan });
 });
 
 router.get("/growth-engine/:slug/cycles", (req, res) => {
@@ -129,6 +143,13 @@ router.get("/growth-engine/:slug/launch-plan/:serviceId", (req, res) => {
 router.post("/growth-engine/:slug/local-market/discover", async (req, res) => {
   const slug = resolveSlug(req.params.slug);
   if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      live: false,
+      error: "Local Google Places discovery is not applicable to the NATIONAL Growth Platform.",
+    });
+  }
   try {
     const snapshot = await discoverLocalMarketCompetitors(slug);
     const live = snapshot.source === "google-places-live" && snapshot.competitors.length >= 5;
@@ -145,10 +166,97 @@ router.post("/growth-engine/:slug/local-market/discover", async (req, res) => {
   }
 });
 
-router.get("/growth-engine/:slug/website-intelligence", (req, res) => {
+router.get("/growth-engine/:slug/search-intelligence", (req, res) => {
   const slug = resolveSlug(req.params.slug);
   if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
-  res.json({ ok: true, snapshot: loadWebsiteIntelligenceSnapshot(slug) });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      error: "National Search Intelligence is available for NATIONAL Growth Platform tenants only.",
+    });
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true, snapshot: readNationalSearchIntelligence(slug) });
+});
+
+router.get("/growth-engine/:slug/search-intelligence/plan", (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      error: "National Search Intelligence is available for NATIONAL Growth Platform tenants only.",
+    });
+  }
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true, plan: planNationalSearchIntelligenceCollection(slug) });
+});
+
+router.post("/growth-engine/:slug/commercial-competitors/discover", async (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Commercial competitor discovery is available for NATIONAL Growth Platform tenants only.",
+    });
+  }
+  try {
+    const live = req.body?.live === true || req.body?.live === "true" || req.query.live === "1";
+    const plan = buildCommercialCompetitorDiscoveryPlan(slug);
+    console.log("COMMERCIAL_COMPETITOR_DISCOVERY_PLAN " + JSON.stringify(plan, null, 2));
+    const result = await runCommercialCompetitorDiscovery({ slug, live, persist: live });
+    res.json({
+      ok: result.status === "complete" || result.status === "insufficient-evidence",
+      plan,
+      result,
+      rankedKeywordRequests: result.rankedKeywordRequests ?? 0,
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.get("/growth-engine/:slug/commercial-competitors", (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  const plan = buildCommercialCompetitorDiscoveryPlan(slug);
+  const result = readCommercialCompetitorDiscovery(slug);
+  res.json({ ok: true, plan, result, rankedKeywordRequests: result?.rankedKeywordRequests ?? 0 });
+});
+
+router.post("/growth-engine/:slug/search-intelligence/collect", async (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      error: "National Search Intelligence is available for NATIONAL Growth Platform tenants only.",
+    });
+  }
+  try {
+    const force = req.body?.force === true || req.body?.force === "true" || req.query.force === "1";
+    const snapshot = await collectNationalSearchIntelligence(slug, { force });
+    res.json({
+      ok: snapshot.status === "collected" || snapshot.status === "empty" || snapshot.status === "partial",
+      snapshot,
+      reusedExistingSnapshot: snapshot.reusedExistingSnapshot,
+      keywordCount: snapshot.customerKeywords.length,
+      competitorCount: snapshot.organicCompetitors.length,
+      competitorKeywordCount: snapshot.summary.competitorKeywordCount,
+      collectionPlan: snapshot.collectionPlan,
+      cost: snapshot.costs.totalCost,
+    });
+  } catch (err: unknown) {
+    res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.get("/growth-engine/:slug/website-intelligence", async (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  const snapshot = await ensureWebsiteIntelligenceInventory(slug);
+  res.json({ ok: true, snapshot: snapshot || loadWebsiteIntelligenceSnapshot(slug) });
 });
 
 router.post("/growth-engine/:slug/website-intelligence/analyse", async (req, res) => {
@@ -216,7 +324,9 @@ for (const stepId of ACK_STEPS) {
     saveWorkflowAcknowledgement(slug, stepId);
     const next: Record<GrowthEngineStepId, string> = {
       "growth-intelligence": `/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}`,
-      "growth-plan": `/api/growth-engine/campaign-builder?slug=${encodeURIComponent(slug)}`,
+      "growth-plan": isNationalGrowthPlatform(slug)
+        ? `/api/growth-engine/generate?slug=${encodeURIComponent(slug)}`
+        : `/api/growth-engine/campaign-builder?slug=${encodeURIComponent(slug)}`,
       dashboard: `/api/growth-engine?slug=${encodeURIComponent(slug)}`,
       "business-intelligence": `/api/growth-engine/business-intelligence?slug=${encodeURIComponent(slug)}`,
       "local-market": `/api/growth-engine/local-market?slug=${encodeURIComponent(slug)}`,
@@ -226,6 +336,24 @@ for (const stepId of ACK_STEPS) {
     res.redirect(next[stepId]);
   });
 }
+
+router.post("/growth-engine/:slug/generate-approved-plan", (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({ ok: false, error: "Approved-plan generation is for national tenants only" });
+  }
+  const result = generateApprovedGrowthPlanContent(slug);
+  if (result.blocked) {
+    return res.redirect(`/api/growth-engine/generate?slug=${encodeURIComponent(slug)}`);
+  }
+  if (!result.ok) {
+    return res.status(400).type("html").send(`<pre>${String(result.error || "Generation failed")}</pre>`);
+  }
+  return res.redirect(
+    `/api/growth-engine/review-centre?slug=${encodeURIComponent(slug)}&campaign=approved-growth-plan`,
+  );
+});
 
 router.post("/growth-engine/:slug/setup-start", async (req, res) => {
   const slug = resolveSlug(req.params.slug);

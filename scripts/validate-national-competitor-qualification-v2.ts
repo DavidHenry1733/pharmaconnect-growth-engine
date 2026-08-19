@@ -1,6 +1,7 @@
-import {
-  qualifyNationalCompetitorV2,
-} from "../src/pharmacy/nationalCompetitorQualificationV2Service.ts";
+import * as qualificationMod from "../src/pharmacy/nationalCompetitorQualificationV2Service.ts";
+
+const qualification = (qualificationMod as { default?: typeof qualificationMod }).default ?? qualificationMod;
+const { qualifyNationalCompetitorV2 } = qualification;
 
 let passed = 0;
 let failed = 0;
@@ -125,6 +126,7 @@ const self = qualifyNationalCompetitorV2({
   title: "PharmaConnect",
   snippet:
     "Pharmacy website design, SEO, email marketing and digital growth services for UK pharmacies.",
+  ownDomains: ["pharmaconnect.uk"],
 });
 
 check(

@@ -1,18 +1,22 @@
 import fs from "node:fs";
-import path from "node:path";
 import type { GrowthPlanIntelligenceInput, GrowthPlanKeywordInput } from "./growthPlanIntelligenceContract.ts";
 import {
   GROWTH_PLAN_STRATEGY_VERSION,
+  compareGapEvidenceQuality,
   type GrowthPlanAction,
   type GrowthPlanActionPriority,
   type GrowthPlanActionType,
   type GrowthPlanIntelligenceSnapshot,
 } from "./growthPlanIntelligenceV1Model.ts";
-
-const DATA_DIR = path.join(process.cwd(), "data/national-growth-engine");
-const INPUT_FILE = path.join(DATA_DIR, "pharmaconnect-growth-plan-intelligence-input-v1.json");
-const OUTPUT_FILE = path.join(DATA_DIR, "pharmaconnect-growth-plan-intelligence-v1.json");
-const FIXTURE_FILE = path.join(process.cwd(), "fixtures/national-growth-engine/pharmaconnect-growth-plan-intelligence-v1.json");
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { inheritPersistedDataForSeoCost } from "./nationalIntelligenceCostLedger.ts";
+import {
+  resolveNationalIntelligenceArtifactPath,
+  nationalIntelligenceDataPath,
+  nationalIntelligenceFixturePath,
+  ensureNationalIntelligenceDataDir,
+  ensureNationalIntelligenceFixtureDir,
+} from "./nationalIntelligenceStorageService.ts";
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "action";
@@ -65,8 +69,18 @@ function confidence(items: GrowthPlanKeywordInput[]): GrowthPlanAction["confiden
   return "LOW";
 }
 
+function compareClusterMembers(a: GrowthPlanKeywordInput, b: GrowthPlanKeywordInput): number {
+  const evidence = compareGapEvidenceQuality(a, b);
+  if (evidence) return evidence;
+  const volumeDelta = (b.searchVolume || 0) - (a.searchVolume || 0);
+  if (volumeDelta) return volumeDelta;
+  if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
+  return a.keyword.localeCompare(b.keyword);
+}
+
 function actionFromCluster(family: string, items: GrowthPlanKeywordInput[]): GrowthPlanAction {
-  const sorted = [...items].sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0) || b.opportunityScore - a.opportunityScore);
+  const volumeLeader = [...items].sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0) || b.opportunityScore - a.opportunityScore || a.keyword.localeCompare(b.keyword))[0];
+  const sorted = [...items].sort(compareClusterMembers);
   const primary = sorted[0];
   const actionType = actionTypeFor(sorted);
   const actionScore = scoreAction(sorted, actionType);
@@ -74,9 +88,13 @@ function actionFromCluster(family: string, items: GrowthPlanKeywordInput[]): Gro
   const best = [...sorted].sort((a, b) => (a.bestCompetitorPosition || 999) - (b.bestCompetitorPosition || 999))[0];
   const supporting = sorted.slice(1).map((item) => item.keyword);
   const pageType = actionType.replace(/_/g, " ");
+  const representativeDiffers = Boolean(volumeLeader && volumeLeader.keyword !== primary.keyword);
   const evidenceReasons = [
     `${sorted.length} validated keyword(s) in ${family}.`,
     `Combined search demand ${combinedDemand}.`,
+    ...(representativeDiffers
+      ? ["Cluster representative is the strongest-evidence keyword in the family; higher-volume supporting terms keep their own evidence and are not copied onto the primary."]
+      : []),
     primary.gapEvidenceStatus === "PROVEN_UNTAPPED"
       ? "At least one keyword has proven untapped gap evidence."
       : `Gap evidence status: ${primary.gapEvidenceStatus}.`,
@@ -141,7 +159,9 @@ export function buildGrowthPlanIntelligenceV1(input: GrowthPlanIntelligenceInput
     subjectDomain: input.metadata.subjectDomain,
     market: "UK Community Pharmacy Digital Growth",
     intelligenceSourceVersion: input.metadata.source,
-    inheritedDataForSeoCost: 0.21792,
+    inheritedDataForSeoCost: inheritPersistedDataForSeoCost({
+      totalCost: input.metadata.inheritedUpstreamCost,
+    }).cost,
     summary: {
       totalActions: actions.length,
       highPriorityActions: actions.filter((action) => action.priority === "HIGH").length,
@@ -157,19 +177,27 @@ export function buildGrowthPlanIntelligenceV1(input: GrowthPlanIntelligenceInput
   };
 }
 
-export function readGrowthPlanIntelligenceV1(): GrowthPlanIntelligenceSnapshot | null {
-  const file = fs.existsSync(OUTPUT_FILE) ? OUTPUT_FILE : fs.existsSync(FIXTURE_FILE) ? FIXTURE_FILE : "";
+/**
+ * Read persisted GP-01 snapshot for a NATIONAL tenant only.
+ * LOCAL tenants must never receive another tenant's national fixture.
+ */
+export function readGrowthPlanIntelligenceV1(slug: string): GrowthPlanIntelligenceSnapshot | null {
+  if (!slug || !isNationalGrowthPlatform(slug)) return null;
+  const file = resolveNationalIntelligenceArtifactPath(slug, "growth-plan-intelligence-v1");
   if (!file) return null;
   return JSON.parse(fs.readFileSync(file, "utf8")) as GrowthPlanIntelligenceSnapshot;
 }
 
-export function writeGrowthPlanIntelligenceV1(): GrowthPlanIntelligenceSnapshot {
-  if (!fs.existsSync(INPUT_FILE)) throw new Error(`Growth Plan Intelligence input not found: ${INPUT_FILE}`);
-  const input = JSON.parse(fs.readFileSync(INPUT_FILE, "utf8")) as GrowthPlanIntelligenceInput;
+export function writeGrowthPlanIntelligenceV1(slug: string): GrowthPlanIntelligenceSnapshot {
+  const inputFile =
+    resolveNationalIntelligenceArtifactPath(slug, "growth-plan-intelligence-input-v1")
+    || nationalIntelligenceDataPath(slug, "growth-plan-intelligence-input-v1");
+  if (!fs.existsSync(inputFile)) throw new Error(`Growth Plan Intelligence input not found: ${inputFile}`);
+  const input = JSON.parse(fs.readFileSync(inputFile, "utf8")) as GrowthPlanIntelligenceInput;
   const snapshot = buildGrowthPlanIntelligenceV1(input);
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.mkdirSync(path.dirname(FIXTURE_FILE), { recursive: true });
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(snapshot, null, 2) + "\n");
-  fs.writeFileSync(FIXTURE_FILE, JSON.stringify(snapshot, null, 2) + "\n");
+  ensureNationalIntelligenceDataDir();
+  ensureNationalIntelligenceFixtureDir();
+  fs.writeFileSync(nationalIntelligenceDataPath(slug, "growth-plan-intelligence-v1"), JSON.stringify(snapshot, null, 2) + "\n");
+  fs.writeFileSync(nationalIntelligenceFixturePath(slug, "growth-plan-intelligence-v1"), JSON.stringify(snapshot, null, 2) + "\n");
   return snapshot;
 }

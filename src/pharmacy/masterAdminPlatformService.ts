@@ -358,6 +358,12 @@ export interface MasterAdminCustomerRecord {
     selected: boolean;
   } | null;
   selectedCampaignId?: string | null;
+  growthPlatform?: "local" | "national";
+  tenantServiceCatalogue?: {
+    platform: "local" | "national";
+    source: "project-commercial" | "pharmacy-patient-catalogue";
+    services: Array<{ serviceId: string; serviceName: string; href?: string }>;
+  };
 }
 
 export interface MasterAdminActionDef {

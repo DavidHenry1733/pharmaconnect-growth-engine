@@ -28,10 +28,12 @@ import {
 import {
   contentPackageGenerated,
   getContentPackageReviewSections,
+  loadContentPackage,
   verifyContentPackageReviewSources,
   type ContentPackageAsset,
 } from "./pharmacyContentPackageService.ts";
 import { WORKSPACE_ROOT } from "./pharmacyCompetitorDiscovery.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 
 const CUSTOMER_VISIBLE_TYPES = new Set(Object.keys(REVIEW_CENTRE_ASSET_TYPE_TO_GROUP));
 
@@ -82,6 +84,14 @@ export function resolveReviewCentreCampaign(
   slug: string,
   campaignParam: string | null | undefined,
 ): { serviceId: string; campaignName: string } | null {
+  if (isNationalGrowthPlatform(slug)) {
+    const serviceId = String(campaignParam || "approved-growth-plan").trim() || "approved-growth-plan";
+    if (serviceId === "approved-growth-plan") {
+      return { serviceId, campaignName: "Approved Growth Plan" };
+    }
+    const fromList = buildCampaignBuilderList(slug).find((c) => c.serviceId === serviceId);
+    return { serviceId, campaignName: fromList?.serviceName || resolveCampaignBuilderServiceName(serviceId) };
+  }
   const session = loadCampaignBuilderSession(slug);
   const serviceId = String(campaignParam || session.selectedServiceId || "").trim();
   if (!serviceId) return null;
@@ -150,21 +160,24 @@ function buildAssets(slug: string, campaignId: string, campaignName: string): Re
     if (!sec.included && !sec.required) continue;
     if (sec.count <= 0 && sec.status !== "included") continue;
 
-    const groupId = REVIEW_CENTRE_ASSET_TYPE_TO_GROUP[sec.type];
+    const assetKey = sec.key || sec.type;
+    const groupId = REVIEW_CENTRE_ASSET_TYPE_TO_GROUP[sec.type] || "blogs";
     const groupLabel = REVIEW_CENTRE_GROUPS.find((g) => g.id === groupId)?.label || groupId;
-    const needsImprovement = isNeedsImprovement(rcSession, campaignId, sec.type);
-    const approved = Boolean(builderSession.approvedAssets[sec.type]) && !needsImprovement;
-    const status = assetStatus(Boolean(builderSession.approvedAssets[sec.type]), needsImprovement);
+    const needsImprovement = isNeedsImprovement(rcSession, campaignId, assetKey);
+    const status = assetStatus(Boolean(builderSession.approvedAssets[assetKey]), needsImprovement);
 
     const reviewPreviewTypes = new Set(["service-page", "local-area-pages", "faq", "guides", "blog", "gbp", "social", "email"]);
-    const previewUrl = reviewPreviewTypes.has(sec.type)
-      ? `/api/growth-engine/${encodeURIComponent(slug)}/review-preview?campaign=${encodeURIComponent(campaignId)}&asset=${encodeURIComponent(sec.type)}`
+    const previewUrl = reviewPreviewTypes.has(sec.type) || Boolean(sec.key)
+      ? `/api/growth-engine/${encodeURIComponent(slug)}/review-preview?campaign=${encodeURIComponent(campaignId)}&asset=${encodeURIComponent(assetKey)}`
       : sec.previewUrl;
 
+    const national = isNationalGrowthPlatform(slug);
     assets.push({
-      key: sec.type,
-      title: customerTitle(sec, campaignName),
-      summary: customerSummary(sec, campaignName),
+      key: assetKey,
+      title: national ? sec.title || customerTitle(sec, campaignName) : customerTitle(sec, campaignName),
+      summary: national
+        ? `${sec.commercialService || campaignName} · ${sec.contentAction || sec.targetPageType || sec.type}`
+        : customerSummary(sec, campaignName),
       typeLabel: customerTypeLabel(sec),
       groupId,
       groupLabel,
@@ -173,6 +186,24 @@ function buildAssets(slug: string, campaignId: string, campaignName: string): Re
       previewUrl,
       count: sec.count,
       improveMessage: needsImprovement ? REVIEW_CENTRE_IMPROVE_MESSAGE : null,
+      commercialService: sec.commercialService || null,
+      whyRecommended: sec.whyRecommended || sec.reasonForCreation || null,
+      evidenceSource: sec.evidenceSource || sec.provenance || null,
+      priority: sec.priority || null,
+      generationStatus: sec.generationStatus || (sec.included ? "generated" : "missing"),
+      reviewStatus: reviewCentreStatusLabel(status),
+      published: false,
+      indexed: false,
+      gapId: sec.gapId || null,
+      recommendationId: sec.recommendationId || null,
+      provenance: sec.provenance || null,
+      evidence: sec.evidence || [],
+      customerIntent: sec.customerIntent || null,
+      targetAudience: sec.targetAudience || null,
+      contentAction: sec.contentAction || null,
+      existingPageUrl: sec.existingPageUrl || null,
+      reasonForCreation: sec.reasonForCreation || sec.whyRecommended || null,
+      confidence: sec.confidence || null,
     });
   }
 
@@ -198,6 +229,13 @@ function buildNextAction(
     return {
       title: "Build your campaign first",
       detail: "Your content will appear here once your campaign has been built.",
+    };
+  }
+  const national = assets.some((a) => a.recommendationId);
+  if (national) {
+    return {
+      title: "Ready for review",
+      detail: "This is what the approved Growth Plan recommended and what was created. Nothing is published or indexed yet.",
     };
   }
 
@@ -250,7 +288,9 @@ export function buildReviewCentreView(slug: string, campaignParam: string | null
   const needsImprovementCount = assets.filter((a) => a.status === "needs-improvement").length;
   const readyCount = assets.filter((a) => a.status === "ready").length;
   const allApproved = assets.length > 0 && assets.every((a) => a.status === "approved");
-  const canPublish = generated && allApproved;
+  const national = isNationalGrowthPlatform(slug);
+  const pkg = loadContentPackage(slug, campaignId);
+  const canPublish = national ? false : generated && allApproved;
 
   return {
     slug,
@@ -266,6 +306,9 @@ export function buildReviewCentreView(slug: string, campaignParam: string | null
     nextAction: buildNextAction(generated, assets, allApproved),
     groups,
     publishUrl: campaignBuilderPublishUrl(slug, campaignId),
+    published: pkg?.published === true ? true : false,
+    indexed: pkg?.indexed === true ? true : false,
+    readyForReview: generated && pkg?.status !== "error",
   };
 }
 

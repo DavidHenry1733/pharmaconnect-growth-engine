@@ -31,6 +31,43 @@ import {
 import { renderGrowthPlanV1Page } from "./growthEngineGrowthPlanPage.ts";
 import { renderPremiumCustomerDashboardPage } from "./growthEnginePremiumCustomerDashboardPage.ts";
 import { renderLiveIntegrationProofPage } from "./growthEngineLiveIntegrationProofPage.ts";
+import { growthEnginePlatformCopy } from "./growthEnginePlatformCopy.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { renderNationalBusinessIntelligencePage } from "./growthEngineNationalBusinessIntelligencePage.ts";
+import fs from "node:fs";
+import path from "node:path";
+import { WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
+
+function nationalGenerationBlockedReason(slug: string): string | null {
+  const file = path.join(WORKSPACE_ROOT, "data/growth-engine", `${slug}-workflow.json`);
+  if (!fs.existsSync(file)) return "Generation is blocked until the Growth Plan is approved.";
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      acknowledgedSteps?: Record<string, string>;
+      approvedPlan?: { items?: unknown[] };
+    };
+    if (!raw.acknowledgedSteps?.["growth-plan"]) return "Generation is blocked until the Growth Plan is approved.";
+    if (!raw.approvedPlan?.items?.length) return "Generation is blocked until approved Growth Plan items are recorded.";
+    return null;
+  } catch {
+    return "Generation is blocked until the Growth Plan is approved.";
+  }
+}
+
+function readApprovedPlanGenerationInput(slug: string): { items: Array<Record<string, unknown>> } | null {
+  const file = path.join(WORKSPACE_ROOT, "data/growth-engine", `${slug}-workflow.json`);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      acknowledgedSteps?: Record<string, string>;
+      approvedPlan?: { items?: Array<Record<string, unknown>> };
+    };
+    if (!raw.acknowledgedSteps?.["growth-plan"] || !raw.approvedPlan?.items?.length) return null;
+    return { items: raw.approvedPlan.items };
+  } catch {
+    return null;
+  }
+}
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -80,7 +117,9 @@ function importBadgeClass(status: string): string {
 }
 
 import { renderLocalMarketIntelligencePage } from "./growthEngineLocalMarketPage.ts";
+import { renderNationalSearchIntelligencePage } from "./nationalSearchIntelligencePage.ts";
 import { renderGrowthIntelligenceV1Page } from "./growthEngineGrowthIntelligencePage.ts";
+import { renderNationalGrowthIntelligencePage } from "./nationalGrowthIntelligencePage.ts";
 import { renderWebsiteIntelligencePage as renderWebsiteIntelligenceHtml } from "./growthEngineWebsiteIntelligencePage.ts";
 import { resolveWebsiteIntelligenceSnapshot } from "./growthEngineWebsiteIntelligenceService.ts";
 import { readSetupProfile } from "./growthEngineCustomerSetupImportSplitService.ts";
@@ -92,6 +131,7 @@ function stepNavUrls(slug: string, framework: GrowthEngineFramework, step: numbe
 }
 
 export function renderGrowthEngineHubPage(slug: string): string {
+  const copy = growthEnginePlatformCopy(slug);
   const framework = buildGrowthEngineFramework(slug);
   const steps = framework.steps
     .filter((s) => isCustomerVisibleInStepper(s.id))
@@ -106,16 +146,21 @@ export function renderGrowthEngineHubPage(slug: string): string {
     .join("");
   const nextUrl = framework.nextStep?.url || framework.steps[0].url;
   const body = `<div class="ge-panel">
-<h2>Your pharmacy growth programme</h2>
-<p class="ge-lead">Four commercial reports tell you where you stand, how you compare, what is missing, and what to do next — then create and publish your campaign.</p>
+<h2>${esc(copy.hubTitle)}</h2>
+<p class="ge-lead">${esc(copy.hubLead)}</p>
 <div class="ge-grid-3">${steps}</div>
 <p style="margin-top:20px"><a class="ge-btn ge-btn-primary" href="${esc(nextUrl)}">Continue where you left off →</a></p>
 </div>`;
-  return pageShell(slug, "Your Pharmacy Programme", "Four reports · one clear path to growth", framework.currentStep, body);
+  return pageShell(slug, copy.hubTitle, copy.hubLead, framework.currentStep, body);
 }
 
 export function renderBusinessIntelligencePage(slug: string, data: PharmacyProfileData): string {
+  const copy = growthEnginePlatformCopy(slug);
   const framework = buildGrowthEngineFramework(slug);
+  const { next } = stepNavUrls(slug, framework, 1);
+  if (copy.platform === "national") {
+    return renderNationalBusinessIntelligencePage(slug, { nextUrl: next });
+  }
   const quality = computeWizardQualityScore(data);
   const ready = isRequiredProfileComplete(data);
   const fields = buildWizardImportFields(data);
@@ -155,7 +200,9 @@ ${brand.logoUrl ? `<img src="${esc(brand.logoUrl)}" alt="" style="max-height:52p
 <div><strong style="font-size:18px">${esc(data.pharmacyName || slug)}</strong>
 <p style="margin:4px 0 0;font-size:13px;color:#64748b">${brand.servicesDetected ? `${brand.servicesDetected} services detected · ` : ""}${brand.navLinks ? `${brand.navLinks} nav links · ` : ""}${brand.socialCount ? `${brand.socialCount} social profiles` : "Run website import to auto-fill your profile"}</p></div></div>`
     : `<div style="margin-bottom:16px;padding:14px;border:1px dashed #cbd5e1;border-radius:12px;font-size:13px;color:#64748b">Import your website to auto-fill business name, contact, brand and services — minimal typing required.</div>`;
-  const localRows = [
+  const localRows = copy.platform === "national"
+    ? ""
+    : [
     ["Google listing", local.googlePlaceFound ? local.googlePlaceLabel : "Not linked"],
     ["Competitors", local.competitorCount ? String(local.competitorCount) : "Load in wizard"],
     ["GP surgeries", local.gpCount ? String(local.gpCount) : "—"],
@@ -165,7 +212,6 @@ ${brand.logoUrl ? `<img src="${esc(brand.logoUrl)}" alt="" style="max-height:52p
   ]
     .map(([label, val]) => `<div class="ge-import-row"><span>${esc(label)}</span><span style="font-size:13px;font-weight:700;color:#334155">${esc(val)}</span></div>`)
     .join("");
-  const { prev, next } = stepNavUrls(slug, framework, 1);
   const body = `<div class="ge-panel">
 <h2>Import-first — confirm what we found</h2>
 <p class="ge-lead">We populate your profile from your website, Google Places, and existing data. Badges: <strong>Imported</strong> · <strong>Confirmed</strong> · <strong>Needs Review</strong>.</p>
@@ -174,14 +220,14 @@ ${hero}
 ${ready ? `<p style="color:#059669;font-weight:700">✓ Required profile fields complete</p>` : `<p style="color:#b45309;font-weight:700">${quality.missingRequired.length} required item(s) still needed — mostly confirm imported values</p>`}
 <h3 style="font-size:15px;margin:20px 0 10px">Imported business information</h3>
 <div style="margin:8px 0">${rows}</div>
-<h3 style="font-size:15px;margin:20px 0 10px">Local market preview</h3>
-<div style="margin:8px 0">${localRows}</div>
+${copy.platform === "national" ? `<h3 style="font-size:15px;margin:20px 0 10px">National market</h3><p class="ge-lead">Commercial market is national / UK. Local Google Places comparison is not a prerequisite.</p>` : `<h3 style="font-size:15px;margin:20px 0 10px">Local market preview</h3>
+<div style="margin:8px 0">${localRows}</div>`}
 <p style="margin-top:20px"><a class="ge-btn ge-btn-primary" href="${esc(growthEngineWizardUrl(slug))}">Review &amp; confirm in wizard →</a>
 <a class="ge-btn ge-btn-ghost" href="${esc(growthEngineWizardUrl(slug))}" style="margin-left:8px">Import website</a></p>
 </div>`;
-  return pageShell(slug, "Your Pharmacy", "Import from your website and Google — confirm what we found", "business-intelligence", body, {
+  return pageShell(slug, copy.businessStepTitle, copy.businessStepSubtitle, "business-intelligence", body, {
     nextUrl: next,
-    nextLabel: "Continue to Your Local Market →",
+    nextLabel: `Continue to ${copy.marketStepTitle} →`,
   });
 }
 
@@ -197,12 +243,24 @@ export function renderWebsiteIntelligencePage(slug: string): string {
 export function renderLocalMarketPage(slug: string, snapshot: GrowthEngineCompetitorSnapshot | null): string {
   const framework = buildGrowthEngineFramework(slug);
   const { prev, next } = stepNavUrls(slug, framework, 2);
+  if (isNationalGrowthPlatform(slug)) {
+    return renderNationalSearchIntelligencePage(slug, { prevUrl: prev, nextUrl: next });
+  }
   return renderLocalMarketIntelligencePage(slug, snapshot, { prevUrl: prev, nextUrl: next });
+}
+
+export function renderSearchIntelligencePage(slug: string): string {
+  const framework = buildGrowthEngineFramework(slug);
+  const { prev, next } = stepNavUrls(slug, framework, 2);
+  return renderNationalSearchIntelligencePage(slug, { prevUrl: prev, nextUrl: next });
 }
 
 export function renderGrowthIntelligencePage(slug: string, snapshot: GrowthEngineCompetitorSnapshot | null): string {
   const framework = buildGrowthEngineFramework(slug);
   const { prev, next } = stepNavUrls(slug, framework, 4);
+  if (isNationalGrowthPlatform(slug)) {
+    return renderNationalGrowthIntelligencePage(slug, { prevUrl: prev, nextUrl: next });
+  }
   return renderGrowthIntelligenceV1Page(slug, snapshot, { prevUrl: prev, nextUrl: next });
 }
 
@@ -214,8 +272,86 @@ export function renderGrowthPlanPage(slug: string, _plan: GrowthEnginePlanRecomm
 }
 
 export function renderGeneratePage(slug: string, plan: GrowthEnginePlanRecommendation): string {
+  const copy = growthEnginePlatformCopy(slug);
   const framework = buildGrowthEngineFramework(slug);
   const { prev, next } = stepNavUrls(slug, framework, 6);
+  if (copy.platform === "national") {
+    const blockedReason = nationalGenerationBlockedReason(slug);
+    const input = readApprovedPlanGenerationInput(slug);
+    const pkg = loadContentPackage(slug, "approved-growth-plan");
+    const generated = Boolean(pkg?.generatedAt && pkg.status !== "error" && pkg.status !== "missing");
+    const reviewUrl = `/api/growth-engine/review-centre?slug=${encodeURIComponent(slug)}&campaign=approved-growth-plan`;
+    const items = generated ? pkg?.assets || [] : input?.items || [];
+    const itemCards = items
+      .map((item) => {
+        const rec = item as Record<string, unknown>;
+        const recId = String(rec.recommendationId || rec.key || "");
+        const gapId = String(rec.gapId || "");
+        const title = String(rec.title || rec.workingTitle || rec.recommendedAction || recId);
+        const pageType = String(rec.contentAction || rec.targetPageType || rec.type || "");
+        const service = rec.commercialService == null ? null : String(rec.commercialService);
+        const why = String(rec.reasonForCreation || rec.whyRecommended || "");
+        const intent = String(rec.customerIntent || "");
+        const evidence = Array.isArray(rec.evidence) ? rec.evidence.map(String).join(" ") : "";
+        const provenance = String(rec.provenance || rec.evidenceSource || "");
+        const priority = String(rec.priority || "");
+        return `<article class="ge-panel" data-pc-gen-item="${esc(recId)}" data-pc-gen-gap="${esc(gapId)}" data-published="false" data-indexed="false" data-commercial-service="${esc(service || "")}" data-customer-intent="${esc(intent)}">
+<section data-pc-gen-section="what-created">
+<h3>${esc(title)}</h3>
+<ul style="font-size:14px;color:#475569">
+<li><strong>Customer-facing title:</strong> ${esc(title)}</li>
+<li><strong>Content / page type:</strong> ${esc(pageType)}</li>
+<li><strong>Commercial service:</strong> ${esc(service || "Not mapped")}</li>
+<li><strong>Customer intent:</strong> ${esc(intent || "Not generated")}</li>
+<li><strong>Generation status:</strong> ${generated ? "CONTENT GENERATED" : blockedReason ? "BLOCKED BEFORE APPROVAL" : "READY TO GENERATE"}</li>
+<li><strong>Review status:</strong> ${generated ? "READY FOR REVIEW" : "NOT GENERATED"}</li>
+<li><strong>Published:</strong> false</li>
+<li><strong>Indexed:</strong> false</li>
+</ul>
+</section>
+<section data-pc-gen-section="why-recommended">
+<h4>Why this was recommended</h4>
+<ul style="font-size:14px;color:#475569">
+<li><strong>Growth Plan recommendation:</strong> ${esc(why)}</li>
+<li><strong>Evidence:</strong> ${esc(evidence)}</li>
+<li><strong>Evidence source:</strong> ${esc(provenance)}</li>
+<li><strong>Priority:</strong> ${esc(priority)}</li>
+</ul>
+</section>
+</article>`;
+      })
+      .join("");
+    const skippedCards = generated
+      ? ((pkg as { skippedItems?: Array<{ recommendationId: string; gapId: string; reason: string; detail: string }> } | null)?.skippedItems || [])
+          .map(
+            (row) => `<article class="ge-panel" data-pc-gen-skipped="${esc(row.recommendationId)}" data-pc-gen-skip-reason="${esc(row.reason)}">
+<h3>NOT_GENERATED</h3>
+<p>${esc(row.detail)}</p>
+<p style="font-size:13px;color:#64748b">Recommendation ${esc(row.recommendationId)} · gap ${esc(row.gapId)}</p>
+</article>`,
+          )
+          .join("")
+      : "";
+    const body = `<div class="ge-panel" data-pc-generate-page="national" data-content-package="approved-growth-plan" data-pc-gen-blocked="${blockedReason ? "yes" : "no"}" data-pc-gen-generated="${generated ? "yes" : "no"}">
+<h2>Create your content</h2>
+<p class="ge-lead">Approved Growth Plan items become a commercial content brief, then the existing generator creates drafts. Patient-service Campaign Builder is not used.</p>
+${blockedReason ? `<p style="color:#9a3412;font-weight:800">${esc(blockedReason)}</p>
+<p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="/api/growth-engine/growth-plan?slug=${encodeURIComponent(slug)}">Approve Growth Plan →</a></p>` : ""}
+${!blockedReason && !generated ? `<form method="post" action="/api/growth-engine/${encodeURIComponent(slug)}/generate-approved-plan" style="margin-top:12px">
+<button type="submit" class="ge-btn ge-btn-primary">Generate approved content</button>
+</form>
+<p style="font-size:13px;color:#64748b;margin-top:12px">Maximum initial items: 3. Only commercially mapped briefs are generated. Drafts stay unpublished and unindexed until Review Centre.</p>` : ""}
+${generated ? `<p style="font-weight:800;color:#166534">CONTENT GENERATED — READY FOR REVIEW. Published=false. Indexed=false.</p>
+<p style="margin-top:16px"><a class="ge-btn ge-btn-primary" href="${esc(reviewUrl)}">Review generated content →</a></p>` : ""}
+</div>
+${itemCards || `<div class="ge-panel"><p>No approved Growth Plan items are available to generate.</p></div>`}
+${skippedCards}`;
+    return pageShell(slug, "Create Content", copy.generateStepSubtitle, "generate", body, {
+      prevUrl: prev,
+      nextUrl: next,
+      nextLabel: "Continue to Dashboard →",
+    });
+  }
   const generated = contentPackageGenerated(slug, plan.primaryServiceId);
   const reviewed = contentPackageReviewed(slug, plan.primaryServiceId);
   const approved = contentPackageApproved(slug, plan.primaryServiceId);

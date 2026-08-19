@@ -76,6 +76,24 @@ export interface ReviewCentreAsset {
   previewUrl: string | null;
   count: number;
   improveMessage: string | null;
+  commercialService?: string | null;
+  whyRecommended?: string | null;
+  evidenceSource?: string | null;
+  priority?: string | null;
+  generationStatus?: string | null;
+  reviewStatus?: string | null;
+  published?: boolean;
+  indexed?: boolean;
+  gapId?: string | null;
+  recommendationId?: string | null;
+  provenance?: string | null;
+  evidence?: string[];
+  customerIntent?: string | null;
+  targetAudience?: string | null;
+  contentAction?: string | null;
+  existingPageUrl?: string | null;
+  reasonForCreation?: string | null;
+  confidence?: string | null;
 }
 
 export interface ReviewCentreGroup {
@@ -103,6 +121,9 @@ export interface ReviewCentreView {
   nextAction: ReviewCentreNextAction;
   groups: ReviewCentreGroup[];
   publishUrl: string;
+  published: boolean;
+  indexed: boolean;
+  readyForReview: boolean;
 }
 
 export interface ReviewCentreCampaignState {

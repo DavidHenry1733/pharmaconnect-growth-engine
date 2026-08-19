@@ -1,10 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import {
-  buildGrowthPlatformContract,
-  type GrowthPlatform,
-} from "../src/pharmacy/commercialMarketContextService.ts";
+import * as commercialMarketContextService from "../src/pharmacy/commercialMarketContextService.ts";
+import type { GrowthPlatform } from "../src/pharmacy/commercialMarketContextService.ts";
+
+function exported<T extends object>(mod: T | { default: T }): T {
+  const maybe = mod as { default?: T };
+  return maybe.default ?? (mod as T);
+}
+
+const { buildGrowthPlatformContract } = exported(commercialMarketContextService);
 
 let passed = 0;
 let failed = 0;

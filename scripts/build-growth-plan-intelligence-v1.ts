@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 import service from "../src/pharmacy/growthPlanIntelligenceV1Service.ts";
 
-const snapshot = service.writeGrowthPlanIntelligenceV1();
+const snapshot = service.writeGrowthPlanIntelligenceV1("pharmaconnect");
 
 console.log("\n=== GROWTH PLAN INTELLIGENCE V1 ===\n");
 console.log(`Total actions: ${snapshot.summary.totalActions}`);

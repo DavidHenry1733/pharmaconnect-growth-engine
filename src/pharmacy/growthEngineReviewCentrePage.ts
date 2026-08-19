@@ -5,6 +5,7 @@ import { growthEngineWorkflowCss } from "./growthEngineWorkflowNav.ts";
 import type { ReviewCentreAsset, ReviewCentreView } from "./growthEngineReviewCentreModel.ts";
 import { buildReviewCentreView } from "./growthEngineReviewCentreService.ts";
 import { buildReviewCentreSourceDebug } from "./pharmacyContentPackageService.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -56,13 +57,47 @@ function statusClass(status: ReviewCentreAsset["status"]): string {
 
 function renderAssetCard(slug: string, campaignId: string, asset: ReviewCentreAsset): string {
   const countSuffix = asset.count > 1 ? ` (${asset.count})` : "";
-  return `<article class="rc-card ${statusClass(asset.status)}" data-asset-key="${esc(asset.key)}">
+  const whatCreated = [
+    asset.commercialService ? `<div><strong>Commercial service:</strong> ${esc(asset.commercialService)}</div>` : "",
+    asset.targetAudience ? `<div><strong>Target audience:</strong> ${esc(asset.targetAudience)}</div>` : "",
+    asset.customerIntent ? `<div><strong>Customer intent:</strong> ${esc(asset.customerIntent)}</div>` : "",
+    asset.contentAction ? `<div><strong>Content action:</strong> ${esc(asset.contentAction)}</div>` : "",
+    asset.existingPageUrl ? `<div><strong>Existing page:</strong> ${esc(asset.existingPageUrl)}</div>` : "",
+    `<div><strong>Generation status:</strong> ${esc(asset.generationStatus || "generated")}</div>`,
+    `<div><strong>Review status:</strong> ${esc(asset.reviewStatus || asset.statusLabel)}</div>`,
+    `<div><strong>Published:</strong> ${asset.published ? "true" : "false"}</div>`,
+    `<div><strong>Indexed:</strong> ${asset.indexed ? "true" : "false"}</div>`,
+  ].filter(Boolean).join("");
+  const whyRecommended = [
+    asset.reasonForCreation || asset.whyRecommended
+      ? `<div><strong>Growth Plan recommendation:</strong> ${esc(asset.reasonForCreation || asset.whyRecommended)}</div>`
+      : "",
+    asset.gapId ? `<div><strong>Gap:</strong> ${esc(asset.gapId)}</div>` : "",
+    (asset.evidence || []).length
+      ? `<div><strong>Search / plan evidence:</strong> ${esc((asset.evidence || []).join(" "))}</div>`
+      : "",
+    asset.priority ? `<div><strong>Priority:</strong> ${esc(asset.priority)}</div>` : "",
+    asset.confidence ? `<div><strong>Confidence:</strong> ${esc(asset.confidence)}</div>` : "",
+    asset.evidenceSource || asset.provenance
+      ? `<div><strong>Evidence source:</strong> ${esc(asset.evidenceSource || asset.provenance)}</div>`
+      : "",
+    asset.recommendationId ? `<div><strong>Recommendation:</strong> ${esc(asset.recommendationId)}</div>` : "",
+  ].filter(Boolean).join("");
+  return `<article class="rc-card ${statusClass(asset.status)}" data-asset-key="${esc(asset.key)}" data-recommendation="${esc(asset.recommendationId || "")}" data-gap="${esc(asset.gapId || "")}" data-published="${asset.published ? "true" : "false"}" data-indexed="${asset.indexed ? "true" : "false"}" data-ready-for-review="true" data-commercial-service="${esc(asset.commercialService || "")}" data-customer-intent="${esc(asset.customerIntent || "")}">
 <h3 class="rc-card-title">${esc(asset.title)}${countSuffix}</h3>
 <p class="rc-card-summary">${esc(asset.summary)}</p>
 <div class="rc-card-meta">
 <span class="rc-type">${esc(asset.typeLabel)}</span>
 <span class="rc-status ${statusClass(asset.status)}">${esc(asset.statusLabel)}</span>
 </div>
+<section class="rc-card-summary" data-rc-section="what-created">
+<h4>What we created</h4>
+${whatCreated}
+</section>
+<section class="rc-card-summary" data-rc-section="why-recommended">
+<h4>Why this was recommended</h4>
+${whyRecommended}
+</section>
 ${asset.improveMessage ? `<p class="rc-improve-msg">${esc(asset.improveMessage)}</p>` : ""}
 <div class="rc-actions">
 ${asset.previewUrl ? `<a class="rc-btn rc-btn-ghost" href="${esc(asset.previewUrl)}" target="_blank" rel="noopener">Preview</a>` : ""}
@@ -89,10 +124,13 @@ function renderGroups(view: ReviewCentreView): string {
 }
 
 function renderPublishBar(view: ReviewCentreView): string {
-  const lockedDetail = view.canPublish
-    ? "All sections are approved. You can publish when you're ready."
-    : "Publish stays locked until every section is approved.";
-  return `<div class="rc-publish-bar">
+  const nationalLocked = view.published === false && view.canPublish === false && view.campaignId === "approved-growth-plan";
+  const lockedDetail = nationalLocked
+    ? "This task stops at Ready for Review. Publish and indexing stay locked."
+    : view.canPublish
+      ? "All sections are approved. You can publish when you're ready."
+      : "Publish stays locked until every section is approved.";
+  return `<div class="rc-publish-bar" data-published="${view.published ? "true" : "false"}" data-indexed="${view.indexed ? "true" : "false"}" data-ready-for-review="${view.readyForReview ? "yes" : "no"}">
 <h3>${view.canPublish ? "Ready to go live" : "Publish is locked"}</h3>
 <p>${esc(lockedDetail)}</p>
 ${view.canPublish
@@ -125,7 +163,7 @@ export function renderReviewCentrePage(slug: string, campaignParam: string | nul
 <p>Review your campaign content before anything goes live.</p>
 </div>
 
-<div class="rc-hero">
+<div class="rc-hero" data-ready-for-review="${view.readyForReview ? "yes" : "no"}" data-published="${view.published ? "true" : "false"}" data-indexed="${view.indexed ? "true" : "false"}">
 <div class="rc-hero-label">Your campaign</div>
 <h2 class="rc-hero-name">${esc(view.campaignName)}</h2>
 <p class="rc-hero-meta">${view.totalAssets} pieces of content ready for your review.</p>
@@ -141,7 +179,7 @@ export function renderReviewCentrePage(slug: string, campaignParam: string | nul
 <p>${esc(view.nextAction.detail)}</p>
 </div>
 
-${view.generated ? renderGroups(view) : `<div class="rc-empty">Your campaign content will appear here once your campaign has been built. <a href="/api/growth-engine/campaign-builder?slug=${encodeURIComponent(slug)}&step=approval">Build your campaign</a></div>`}
+${view.generated ? renderGroups(view) : `<div class="rc-empty">Your campaign content will appear here once your campaign has been built. <a href="${isNationalGrowthPlatform(slug) ? `/api/growth-engine/generate?slug=${encodeURIComponent(slug)}` : `/api/growth-engine/campaign-builder?slug=${encodeURIComponent(slug)}&step=approval`}">${isNationalGrowthPlatform(slug) ? "Create content" : "Build your campaign"}</a></div>`}
 
 ${view.generated ? renderPublishBar(view) : ""}
 

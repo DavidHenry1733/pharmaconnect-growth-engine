@@ -58,6 +58,7 @@ export type ContentPackageAssetStatus = "included" | "planned" | "missing" | "er
 
 export interface ContentPackageAsset {
   type: string;
+  key?: string;
   title: string;
   status: ContentPackageAssetStatus;
   previewUrl: string | null;
@@ -66,6 +67,25 @@ export interface ContentPackageAsset {
   included: boolean;
   count: number;
   notes: string;
+  recommendationId?: string;
+  gapId?: string;
+  commercialService?: string | null;
+  whyRecommended?: string;
+  evidence?: string[];
+  evidenceSource?: string;
+  priority?: string;
+  confidence?: string;
+  provenance?: string;
+  targetPageType?: string;
+  generationStatus?: string;
+  published?: boolean;
+  indexed?: boolean;
+  customerIntent?: string | null;
+  targetAudience?: string | null;
+  contentAction?: string | null;
+  existingPageUrl?: string | null;
+  reasonForCreation?: string | null;
+  internalNotes?: string[];
 }
 
 export interface ContentPackageManifest {
@@ -92,6 +112,11 @@ export interface ContentPackageManifest {
   packageValidation: { ok: boolean; detail: string } | null;
   serviceValidation: { ok: boolean; detail: string } | null;
   tenantValidation: { ok: boolean; detail: string } | null;
+  published?: boolean;
+  indexed?: boolean;
+  source?: string;
+  reviewState?: string;
+  skippedItems?: Array<{ recommendationId: string; gapId: string; reason: string; detail: string }>;
 }
 
 function tenantKey(slug: string): string {
@@ -992,4 +1017,185 @@ export function getContentPackageReviewSections(slug: string, serviceId: string)
   const pkg = loadContentPackage(slug, serviceId);
   if (pkg?.assets?.length) return pkg.assets;
   return buildPackageAssets(tenantKey(slug), serviceId);
+}
+
+export interface ApprovedPlanDraftAssetInput {
+  key: string;
+  type: string;
+  title: string;
+  html: string;
+  pageSlug: string;
+  notes: string;
+  recommendationId: string;
+  gapId: string;
+  commercialService: string | null;
+  whyRecommended: string;
+  evidence: string[];
+  evidenceSource: string;
+  priority: string;
+  confidence: string;
+  provenance: string;
+  targetPageType: string;
+  customerIntent?: string | null;
+  targetAudience?: string | null;
+  contentAction?: string | null;
+  existingPageUrl?: string | null;
+  reasonForCreation?: string | null;
+  internalNotes?: string[];
+}
+
+export function persistApprovedGrowthPlanContentPackage(
+  slug: string,
+  drafts: ApprovedPlanDraftAssetInput[],
+  options?: {
+    skippedItems?: Array<{ recommendationId: string; gapId: string; reason: string; detail: string }>;
+    adminDiagnostics?: string[];
+  },
+): ContentPackageManifest {
+  const key = tenantKey(slug);
+  const serviceId = "approved-growth-plan";
+  const generatedAt = new Date().toISOString();
+  const stamp = generationStamp(key, serviceId, generatedAt);
+  const ecoRoot = ecosystemRoot(key, serviceId);
+  fs.mkdirSync(ecoRoot, { recursive: true });
+
+  const assets: ContentPackageAsset[] = [];
+  const indexAssets: Array<{ id: string; type: string; outputPath: string }> = [];
+
+  for (const draft of drafts) {
+    const outPath = path.join(ecoRoot, "pages", draft.pageSlug, "index.html");
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    const stamped = stampHtmlForPackage(draft.html, stamp);
+    fs.writeFileSync(outPath, stamped, "utf8");
+    const previewUrl = `/api/growth-engine/${encodeURIComponent(key)}/review-preview?campaign=${encodeURIComponent(serviceId)}&asset=${encodeURIComponent(draft.key)}`;
+    assets.push({
+      type: draft.type,
+      key: draft.key,
+      title: draft.title,
+      status: "included",
+      previewUrl,
+      outputPath: outPath,
+      required: true,
+      included: true,
+      count: 1,
+      notes: draft.notes,
+      recommendationId: draft.recommendationId,
+      gapId: draft.gapId,
+      commercialService: draft.commercialService,
+      whyRecommended: draft.whyRecommended,
+      evidence: draft.evidence,
+      evidenceSource: draft.evidenceSource,
+      priority: draft.priority,
+      confidence: draft.confidence,
+      provenance: draft.provenance,
+      targetPageType: draft.targetPageType,
+      generationStatus: "generated",
+      published: false,
+      indexed: false,
+      customerIntent: draft.customerIntent || null,
+      targetAudience: draft.targetAudience || null,
+      contentAction: draft.contentAction || null,
+      existingPageUrl: draft.existingPageUrl || null,
+      reasonForCreation: draft.reasonForCreation || draft.whyRecommended,
+      internalNotes: draft.internalNotes || [],
+    });
+    indexAssets.push({ id: draft.key, type: draft.type, outputPath: outPath });
+  }
+
+  fs.writeFileSync(
+    path.join(ecoRoot, "_ecosystem-index.json"),
+    JSON.stringify(
+      {
+        slug: key,
+        serviceId,
+        generatedAt,
+        generationStamp: stamp,
+        published: false,
+        indexed: false,
+        localClusterPagesGenerated: 0,
+        assets: indexAssets,
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const tenantOk = assets.every((asset) =>
+    ecosystemAssetTenantOk(asset.outputPath || "", key, key === "pharmaconnect" ? "PharmaConnect" : ""),
+  );
+  const manifest: ContentPackageManifest = {
+    version: 1,
+    slug: key,
+    serviceId,
+    serviceName: "Approved Growth Plan",
+    generatedAt,
+    generationStamp: stamp,
+    generatorVersion: CONTENT_PACKAGE_GENERATOR_VERSION,
+    profileUpdatedAt: null,
+    selectedAreas: [],
+    assets,
+    previewUrls: assets.map((asset) => asset.previewUrl).filter(Boolean) as string[],
+    outputPaths: assets.map((asset) => asset.outputPath).filter(Boolean) as string[],
+    status: "generated",
+    reviewedAt: null,
+    approvedAt: null,
+    approvedBy: null,
+    approvalStatus: "pending",
+    generationError: null,
+    adminDiagnostics: [
+      "generator:pharmacyContentPackageService",
+      "source:approved-growth-plan",
+      "scope:max-3-approved-items",
+      "publish:blocked",
+      "index:blocked",
+      ...(options?.adminDiagnostics || []),
+    ],
+    generationReportPath: null,
+    packageValidation: {
+      ok: true,
+      detail: `${assets.length} commercially valid drafts; ${options?.skippedItems?.length || 0} not generated`,
+    },
+    serviceValidation: { ok: true, detail: "Approved Growth Plan drafts" },
+    tenantValidation: { ok: tenantOk, detail: tenantOk ? "Tenant-specific drafts" : "Tenant check failed" },
+    published: false,
+    indexed: false,
+    source: "approved-growth-plan",
+    reviewState: "ready_for_review",
+    skippedItems: options?.skippedItems || [],
+  };
+  saveContentPackage(manifest);
+  if (assets.length === 0) {
+    return manifest;
+  }
+  const handoff = verifyContentPackageHandoff(key, serviceId, { scope: "full" });
+  if (!handoff.ok) {
+    const failed: ContentPackageManifest = {
+      ...manifest,
+      status: "error",
+      generationError: `Campaign output handoff failed: ${handoff.reason}`,
+      adminDiagnostics: [...manifest.adminDiagnostics, ...(handoff.missing || [])],
+    };
+    saveContentPackage(failed);
+    return failed;
+  }
+  return manifest;
+}
+
+function stampHtmlForPackage(html: string, stamp: GenerationStamp): string {
+  const meta = [
+    `<meta name="tenantSlug" content="${stamp.tenantSlug}"/>`,
+    `<meta name="campaignId" content="${stamp.campaignId}"/>`,
+    `<meta name="generatedAt" content="${stamp.generatedAt}"/>`,
+    `<meta name="sourceContext" content="${stamp.sourceContext}"/>`,
+    `<meta name="published" content="false"/>`,
+    `<meta name="indexed" content="false"/>`,
+  ].join("\n");
+  if (/<head>/i.test(html)) {
+    return html.replace(
+      /<head>/i,
+      `<head>\n${meta}\n<!-- tenantSlug: ${stamp.tenantSlug}; campaignId: ${stamp.campaignId}; generatedAt: ${stamp.generatedAt}; sourceContext: ${stamp.sourceContext} -->`,
+    );
+  }
+  return `${meta}\n${html}`;
 }

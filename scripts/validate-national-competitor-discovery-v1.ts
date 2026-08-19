@@ -1,22 +1,19 @@
-import {
-  emptyNationalCompetitorDiscoveryResult,
-} from "../src/pharmacy/nationalCompetitorDiscoveryModel.ts";
+import * as discoveryModel from "../src/pharmacy/nationalCompetitorDiscoveryModel.ts";
+import * as discoveryQuery from "../src/pharmacy/nationalCompetitorDiscoveryQueryService.ts";
+import * as qualification from "../src/pharmacy/nationalCompetitorQualificationService.ts";
+import * as discoveryStorage from "../src/pharmacy/nationalCompetitorDiscoveryStorageService.ts";
+import * as growthPlatform from "../src/pharmacy/growthPlatformResolverService.ts";
 
-import {
-  buildNationalCompetitorDiscoveryQueries,
-} from "../src/pharmacy/nationalCompetitorDiscoveryQueryService.ts";
+function exported<T extends object>(mod: T | { default: T }): T {
+  const maybe = mod as { default?: T };
+  return maybe.default ?? (mod as T);
+}
 
-import {
-  qualifyNationalCompetitor,
-} from "../src/pharmacy/nationalCompetitorQualificationService.ts";
-
-import {
-  nationalCompetitorDiscoveryPath,
-} from "../src/pharmacy/nationalCompetitorDiscoveryStorageService.ts";
-
-import {
-  resolveGrowthPlatform,
-} from "../src/pharmacy/growthPlatformResolverService.ts";
+const { emptyNationalCompetitorDiscoveryResult } = exported(discoveryModel);
+const { buildNationalCompetitorDiscoveryQueries } = exported(discoveryQuery);
+const { qualifyNationalCompetitor } = exported(qualification);
+const { nationalCompetitorDiscoveryPath } = exported(discoveryStorage);
+const { resolveGrowthPlatform } = exported(growthPlatform);
 
 let passed = 0;
 let failed = 0;
@@ -73,9 +70,15 @@ check(
 );
 
 check(
-  "queries-pharmacy-market",
-  queries.every((q) => /pharmac/i.test(q.query)),
+  "queries-from-configured-services",
+  context.services.every((service) => queries.some((q) => q.query.toLowerCase().includes(service.toLowerCase()))),
   queries.map((q) => q.query).join(" | "),
+);
+
+check(
+  "queries-include-market-or-country",
+  queries.every((q) => q.marketCountry === "United Kingdom" && q.targetCustomerMarket.length > 0),
+  queries.map((q) => q.targetCustomerMarket).join(" | "),
 );
 
 check(

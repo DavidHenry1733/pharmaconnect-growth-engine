@@ -15,17 +15,13 @@
  */
 
 import fs from "node:fs";
-import path from "node:path";
 
 import {
   buildGrowthPlatformContract,
   type GrowthPlatform,
   type GrowthPlatformContract,
 } from "./commercialMarketContextService.ts";
-
-function projectConfigPath(slug: string): string {
-  return path.join(process.cwd(), "config", "projects", `${slug}.json`);
-}
+import { getPharmacyProjectConfigPath } from "./pharmacyWorkspacePaths.ts";
 
 export interface ResolvedGrowthPlatform {
   slug: string;
@@ -35,7 +31,7 @@ export interface ResolvedGrowthPlatform {
 }
 
 export function resolveGrowthPlatform(slug: string): ResolvedGrowthPlatform {
-  const file = projectConfigPath(slug);
+  const file = getPharmacyProjectConfigPath(slug);
 
   if (!fs.existsSync(file)) {
     /*

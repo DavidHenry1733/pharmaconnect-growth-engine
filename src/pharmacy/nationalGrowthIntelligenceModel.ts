@@ -97,3 +97,84 @@ export function emptyNationalGrowthIntelligenceSnapshot(
     status: "draft",
   };
 }
+
+/** Canonical national gap types. COMPETITOR_GAP is only emitted when competitor keyword evidence exists. */
+export type NationalGapType =
+  | "MISSING_SERVICE_PAGE"
+  | "WEAK_SERVICE_COVERAGE"
+  | "KEYWORD_VISIBILITY_GAP"
+  | "CONTENT_DEPTH_GAP"
+  | "WEBSITE_STRUCTURE_GAP"
+  | "LOCAL_VISIBILITY_GAP"
+  | "SERP_OPPORTUNITY"
+  | "COMPETITOR_GAP"
+  | "INSUFFICIENT_COMPETITOR_EVIDENCE";
+
+export type NationalEvidenceClass =
+  | "PROVEN_GAP"
+  | "SUPPORTED_OPPORTUNITY"
+  | "INSUFFICIENT_COMPETITOR_EVIDENCE";
+
+export interface NationalGapProvenance {
+  evidenceSource: string;
+  authority: string;
+  sourceSystem: string;
+  capturedAt: string | null;
+}
+
+export interface NationalGrowthGap {
+  id: string;
+  type: NationalGapType;
+  evidenceClass: NationalEvidenceClass;
+  source: string;
+  currentState: string;
+  evidence: string[];
+  whyItMatters: string;
+  recommendedAction: string;
+  commercialService: string | null;
+  commercialServiceId: string | null;
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  provenance: NationalGapProvenance;
+  competitorGap: boolean;
+  recommendedPageType: string;
+  actionable: boolean;
+}
+
+export interface NationalSearchEvidenceSummary {
+  status: string;
+  customerKeywords: number;
+  organicCandidates: number;
+  qualifiedCommercialCompetitors: number;
+  paidCompetitorExpansions: number;
+  sparse: boolean;
+  sparseThreshold: number;
+  evidenceSource: string;
+  authority: string;
+  capturedAt: string | null;
+}
+
+export interface NationalWebsiteEvidenceSummary {
+  complete: boolean;
+  totalPages: number;
+  servicePages: number;
+  source: string;
+  configuredCommercialPages: number;
+}
+
+export interface NationalGrowthIntelligenceReport {
+  version: typeof NATIONAL_GROWTH_INTELLIGENCE_VERSION;
+  slug: string;
+  growthPlatform: "national";
+  generatedAt: string;
+  status: "analysis_complete" | "draft";
+  businessName: string;
+  subjectDomain: string;
+  primaryMarket: string;
+  commercialServices: Array<{ serviceId: string; serviceName: string; href?: string }>;
+  search: NationalSearchEvidenceSummary;
+  website: NationalWebsiteEvidenceSummary;
+  gaps: NationalGrowthGap[];
+  limitations: string[];
+  competitorGapsFabricated: false;
+}

@@ -4,10 +4,7 @@
 import {
   buildGrowthEngineFramework,
 } from "./growthEngineFrameworkService.ts";
-import {
-  buildGrowthPlanIntelligence,
-  type GrowthPlanIntelligence,
-} from "./growthEngineCampaignRecommendationEngine.ts";
+import type { GrowthPlanIntelligence } from "./growthEngineCampaignRecommendationEngine.ts";
 import type {
   CampaignAlternative,
   CampaignEvidence,
@@ -16,8 +13,12 @@ import type {
 } from "./growthEngineCampaignModel.ts";
 import { growthEngineWorkflowCss, renderGrowthEngineNavBar } from "./growthEngineWorkflowNav.ts";
 import { platformPlatformNavCss, renderPharmacyPlatformNavBar } from "./pharmacyPlatformNav.ts";
-import { customerReadinessLabel } from "./growthEngineOperationalActions.ts";
-import { readGrowthPlanIntelligenceV1 } from "./growthPlanIntelligenceV1Service.ts";
+import { resolveGrowthPlan } from "./growthEngineGrowthPlanResolver.ts";
+import {
+  customerReadinessLabelForPlatform,
+  growthEnginePlatformCopy,
+} from "./growthEnginePlatformCopy.ts";
+import type { NationalGrowthPlanView, NationalPrimaryRecommendation } from "./growthEngineNationalGrowthPlanService.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -35,7 +36,8 @@ function customerEvidenceSource(source: string): string {
   return map[source] || source.replace(/Business Intelligence/g, "Your Pharmacy");
 }
 
-function customerCopy(text: string): string {
+function customerCopy(text: string, platform: "local" | "national" = "local"): string {
+  if (platform === "national") return text;
   return text
     .replace(/Business Intelligence/g, "Your Pharmacy")
     .replace(/Local Healthcare Intelligence/g, "Your Local Market")
@@ -91,13 +93,16 @@ function confidencePill(confidence: string): string {
   return `<span class="gp-pill confidence-${esc(confidence)}">${esc(confidence)} confidence</span>`;
 }
 
-function renderExecutiveSummary(summary: GrowthPlanIntelligence["executiveSummary"]): string {
+function renderExecutiveSummary(
+  summary: GrowthPlanIntelligence["executiveSummary"],
+  platform: "local" | "national" = "local",
+): string {
   return `<div class="gp-hero">
 <h2>Where you stand</h2>
-<p><strong>Current position:</strong> ${esc(customerCopy(summary.currentPosition))}</p>
-<p><strong>Primary opportunity:</strong> ${esc(customerCopy(summary.primaryOpportunity))}</p>
-<p><strong>Why this campaign:</strong> ${esc(customerCopy(summary.whyRecommended))}</p>
-<p><strong>What you gain:</strong> ${esc(customerCopy(summary.estimatedBusinessBenefit))}</p>
+<p><strong>Current position:</strong> ${esc(customerCopy(summary.currentPosition, platform))}</p>
+<p><strong>Primary opportunity:</strong> ${esc(customerCopy(summary.primaryOpportunity, platform))}</p>
+<p><strong>Why this campaign:</strong> ${esc(customerCopy(summary.whyRecommended, platform))}</p>
+<p><strong>What you gain:</strong> ${esc(customerCopy(summary.estimatedBusinessBenefit, platform))}</p>
 </div>`;
 }
 
@@ -215,19 +220,19 @@ ${alternatives
 </div>`;
 }
 
-function renderReadiness(items: CampaignReadinessItem[], ready: boolean): string {
+function renderReadiness(items: CampaignReadinessItem[], ready: boolean, platform: "local" | "national" = "local"): string {
   return `<div class="ge-panel" id="campaign-readiness">
 <h2>Campaign Readiness</h2>
-<p class="gp-section-note">${ready ? "All prerequisites are complete — you can generate this campaign." : "Complete any missing steps before generating."}</p>
+<p class="gp-section-note">${ready ? "All prerequisites are complete — you can generate this campaign." : platform === "national" ? "National strategy readiness uses persisted commercial intelligence. Local pharmacy steps are not required." : "Complete any missing steps before generating."}</p>
 <div class="gp-readiness">${items
     .map(
       (r) => `<div class="gp-ready-item ${r.complete ? "complete" : "incomplete"}">
-<strong>${r.complete ? "✓" : "○"} ${esc(customerReadinessLabel(r.label))}</strong>
-<span>${esc(customerCopy(r.detail))}</span>
+<strong>${r.complete ? "✓" : "○"} ${esc(customerReadinessLabelForPlatform(platform, r.label))}</strong>
+<span>${esc(platform === "local" ? customerCopy(r.detail) : r.detail)}</span>
 </div>`,
     )
     .join("")}
-<p style="margin-top:14px;font-size:14px;font-weight:800;color:${ready ? "#166534" : "#9a3412"}">${ready ? "Ready to Generate" : "Not ready to generate yet"}</p>
+<p style="margin-top:14px;font-size:14px;font-weight:800;color:${ready ? "#166534" : "#9a3412"}">${ready ? "Ready to Generate" : platform === "national" ? "Approve the Growth Plan before creating content" : "Not ready to generate yet"}</p>
 </div>`;
 }
 
@@ -254,19 +259,123 @@ ${campaign ? `<form method="post" action="/api/growth-engine/${esc(slug)}/acknow
 </div>`;
 }
 
-function renderStrategicGrowthPlan(): string {
-  const strategy = readGrowthPlanIntelligenceV1();
-  if (!strategy) return "";
-  const actions = strategy.actions.slice(0, 5);
-  if (!actions.length) return "";
-  return `<div class="ge-panel">
-<h2>Market Opportunity Plan</h2>
-<p class="gp-section-note">These actions come from verified competitor and keyword evidence. They are strategy recommendations only — no pages or content are generated here.</p>
-<div class="gp-readiness">${actions.map((action) => `<div class="gp-ready-item complete">
-<strong>${esc(action.priority)} · ${esc(action.actionType.replace(/_/g, " "))}</strong>
-<span><strong>${esc(action.primaryKeyword)}</strong> — ${esc(action.rationale)} ${action.bestRankingUrl ? `Winning URL: ${esc(action.bestRankingUrl)}` : ""}</span>
-</div>`).join("")}</div>
+function metric(label: string, value: unknown): string {
+  const text = value == null || value === "" ? "Not available" : String(value);
+  return `<div class="gp-ready-item complete"><strong>${esc(label)}</strong><span>${esc(text)}</span></div>`;
+}
+
+function renderNationalPrimary(rec: NationalPrimaryRecommendation): string {
+  return `<div class="ge-panel" data-pc-gp-primary="${esc(rec.gapId)}">
+<h2>Recommended national commercial action</h2>
+<p class="gp-section-note">This recommendation is selected from Growth Intelligence gaps. Gap evidence is not upgraded. Content is not generated here.</p>
+<div class="gp-campaign">
+<h3 class="gp-campaign-name">${esc(rec.title)}</h3>
+<div class="gp-badges">${priorityPill(rec.priority.toLowerCase())}${confidencePill(rec.confidence.toLowerCase())}<span class="gp-pill source">${esc(rec.evidenceClass)}</span><span class="gp-pill source">${esc(rec.type)}</span></div>
+<p style="margin:0 0 12px;font-size:14px;color:#334155;line-height:1.55"><strong>Why:</strong> ${esc(rec.rationale)}</p>
+<div class="gp-readiness">
+${metric("Recommendation", rec.title)}
+${metric("Commercial objective", rec.recommendedIntent)}
+${metric("Action", rec.recommendedNextStep)}
+${metric("Priority", rec.priority)}
+${metric("Confidence", rec.confidence)}
+${metric("Evidence class", rec.evidenceClass)}
+${metric("Commercial service", rec.commercialService)}
+${metric("Provenance", rec.provenance)}
+${metric("Gap evidence", `${rec.gapEvidenceStatus} / ${rec.gapConfidence}`)}
+</div>
+</div>
 </div>`;
+}
+
+function renderNationalServices(view: NationalGrowthPlanView): string {
+  if (!view.commercialServices.length) {
+    return `<div class="ge-panel"><h2>Commercial services</h2><div class="gp-empty">No project commercial services configured.</div></div>`;
+  }
+  return `<div class="ge-panel">
+<h2>${esc(view.businessName)} commercial services</h2>
+<p class="gp-section-note">These are the digital-growth services this national business sells. They are not patient-facing pharmacy services.</p>
+<div class="gp-readiness">${view.commercialServices
+    .map(
+      (s) => `<div class="gp-ready-item complete"><strong>${esc(s.serviceName)}</strong><span>${esc(s.serviceId)}${s.href ? ` · ${esc(s.href)}` : ""}</span></div>`,
+    )
+    .join("")}</div>
+</div>`;
+}
+
+function renderNationalPlanBody(view: NationalGrowthPlanView): string {
+  const copy = growthEnginePlatformCopy("national");
+  const primary = view.primary;
+  const priorities = view.priorities.length
+    ? view.priorities
+        .map(
+          (item) => `<article class="gp-alt" data-pc-gp-priority="${esc(item.gapId)}" data-pc-gp-type="${esc(item.type)}">
+<h4>${esc(item.recommendation)}</h4>
+<div class="gp-badges">${priorityPill(item.priority.toLowerCase())}${confidencePill(item.confidence.toLowerCase())}<span class="gp-pill source">${esc(item.evidenceClass)}</span><span class="gp-pill source">${esc(item.type.replace(/_/g, " "))}</span></div>
+<p style="margin:0 0 6px;font-size:13px"><strong>Commercial objective:</strong> ${esc(item.commercialObjective)}</p>
+<p style="margin:0 0 6px;font-size:13px"><strong>Action:</strong> ${esc(item.action)}</p>
+<p style="margin:0 0 6px;font-size:13px"><strong>Evidence:</strong> ${esc(item.evidence.join(" "))}</p>
+<p style="margin:0;font-size:13px;color:#64748b"><strong>Provenance:</strong> ${esc(item.provenance)} · ${esc(item.source)}</p>
+</article>`,
+        )
+        .join("")
+    : `<div class="gp-empty">No evidence-backed Growth Intelligence gaps are ready for a recommendation.</div>`;
+
+  return `${renderExecutiveSummary(view.executiveSummary, "national")}
+${primary ? renderNationalPrimary(primary) : `<div class="ge-panel"><h2>Recommended national commercial action</h2><div class="gp-empty">${esc(copy.emptyCampaignNote)}</div></div>`}
+${renderNationalServices(view)}
+<div class="ge-panel" data-pc-gp-section="priorities">
+<h2>Top priorities</h2>
+<p class="gp-section-note">Every priority is taken from Growth Intelligence gaps. Competitor gaps are included only when current competitor keyword evidence exists.</p>
+<div data-pc-gp-priority-list>${priorities}</div>
+</div>
+<div class="ge-panel">
+<h2>Why this action?</h2>
+<p class="gp-section-note">Evidence is copied from the selected gap. Classification and gap confidence are kept separate and are not upgraded.</p>
+${
+  primary
+    ? `<ul class="gp-evidence-list">${primary.evidenceReasons
+        .map((r) => `<li class="gp-evidence-item"><strong>${esc(r)}</strong><p>Source: ${esc(primary.source)}. Gap evidence status ${esc(primary.gapEvidenceStatus)} remains ${esc(primary.gapConfidence)} confidence.</p></li>`)
+        .join("")}</ul>`
+    : `<div class="gp-empty">No primary national action to evidence.</div>`
+}
+</div>
+<div class="ge-panel" data-pc-gp-section="limitations">
+<h2>Evidence limitations</h2>
+<p class="gp-section-note">Sparse organic footprint and zero qualified commercial competitors are valid collected states. They do not block non-competitor opportunities.</p>
+${view.limitations.length
+    ? `<ul class="gp-benefits">${view.limitations.map((row) => `<li>${esc(row)}</li>`).join("")}</ul>`
+    : `<div class="gp-empty">No additional limitations recorded.</div>`}
+<p class="gp-section-note" data-pc-gp-sparse="${view.search.sparse ? "yes" : "no"}">Sparse current organic footprint: ${view.search.sparse ? "YES" : "NO"} · Customer ranking keywords: ${view.search.customerKeywords} · Qualified commercial competitors: ${view.search.qualifiedCommercialCompetitors}.</p>
+</div>
+${renderReadiness(view.readiness, view.readyToGenerate, "national")}
+<div class="ge-panel" data-pc-gp-section="approval" data-pc-gp-generation="${esc(view.generationState)}" data-pc-gp-approved="${view.planApproved ? "yes" : "no"}" data-pc-gp-ready="${view.readyToGenerate ? "yes" : "no"}">
+<h2>Approve Growth Plan</h2>
+<p class="gp-section-note">${view.planApproved
+    ? "This Growth Plan is approved. Content can now be created from the approved items only. Patient-service Campaign Builder is not the next step."
+    : "Generation stays blocked until you approve this Growth Plan. Approving records the tenant, plan version, time, and approved recommendation items."}</p>
+<form method="post" action="/api/growth-engine/${esc(view.slug)}/acknowledge/growth-plan" style="margin-top:12px">
+<button type="submit" class="ge-btn ge-btn-primary">${view.planApproved ? "Plan approved" : "Approve Growth Plan"}</button>
+</form>
+<div class="gp-cta-band">
+${view.readyToGenerate
+    ? `<a class="ge-btn ge-btn-primary" href="/api/growth-engine/generate?slug=${encodeURIComponent(view.slug)}">${esc(copy.generateCta)}</a>`
+    : `<span class="ge-btn ge-btn-primary" aria-disabled="true" style="opacity:.7;pointer-events:none">${esc(copy.generateCta)}</span>`}
+<a class="ge-btn ge-btn-ghost" href="#campaign-readiness">Review evidence</a>
+</div>
+<div class="gp-empty" style="margin-top:14px">Bounded state: ${view.planApproved ? "plan approved" : "approval required"}; generation ${view.readyToGenerate ? "unlocked for approved items" : "blocked before approval"}; patient-service generation is not the next step.</div>
+</div>`;
+}
+
+function renderLocalPlanBody(slug: string, plan: GrowthPlanIntelligence): string {
+  const campaign = plan.primaryCampaign;
+  return `${renderExecutiveSummary(plan.executiveSummary, "local")}
+${renderRecommendedCampaign(campaign)}
+${renderWhyCampaign(campaign?.evidence || [])}
+${renderWhatWillBeBuilt(campaign?.estimatedOutputs || null)}
+${renderEstimatedOutcome(campaign?.expectedBenefits || [])}
+${renderAlternatives(plan.alternatives)}
+${renderReadiness(plan.readiness, plan.readyToGenerate, "local")}
+${renderGenerateCta(slug, campaign, plan.readyToGenerate)}`;
 }
 
 export function renderGrowthPlanV1Page(
@@ -274,21 +383,12 @@ export function renderGrowthPlanV1Page(
   options?: { prevUrl?: string; nextUrl?: string },
 ): string {
   const framework = buildGrowthEngineFramework(slug);
-  const plan = buildGrowthPlanIntelligence(slug);
-  const campaign = plan.primaryCampaign;
-
-  const body = `${renderExecutiveSummary(plan.executiveSummary)}
-${renderRecommendedCampaign(campaign)}
-${renderWhyCampaign(campaign?.evidence || [])}
-${renderWhatWillBeBuilt(campaign?.estimatedOutputs || null)}
-${renderEstimatedOutcome(campaign?.expectedBenefits || [])}
-${renderStrategicGrowthPlan()}
-${renderAlternatives(plan.alternatives)}
-${renderReadiness(plan.readiness, plan.readyToGenerate)}
-${renderGenerateCta(slug, campaign, plan.readyToGenerate)}`;
-
-  const prevUrl = options?.prevUrl || framework.steps.find((s) => s.id === "website-intelligence")?.url;
-  const nextUrl = options?.nextUrl || framework.steps.find((s) => s.id === "generate")?.url;
+  const resolved = resolveGrowthPlan(slug);
+  const copy = growthEnginePlatformCopy(resolved.platform);
+  const body =
+    resolved.platform === "national"
+      ? renderNationalPlanBody(resolved.plan)
+      : renderLocalPlanBody(slug, resolved.plan);
 
   return `<!doctype html>
 <html lang="en-GB">
@@ -302,7 +402,7 @@ ${platformPlatformNavCss()}
 ${growthPlanPageCss()}
 </style>
 </head>
-<body data-slug="${esc(slug)}">
+<body data-slug="${esc(slug)}" data-growth-platform="${esc(resolved.platform)}" data-pc-gp-page="growth-plan">
 <header style="background:linear-gradient(135deg,#005eb8,#003087);color:#fff;padding:16px 24px">
 <h1 style="margin:0;font-size:20px">PharmaConnect Growth Engine</h1>
 ${renderPharmacyPlatformNavBar({ slug, activeId: "growth-engine" })}
@@ -310,12 +410,12 @@ ${renderPharmacyPlatformNavBar({ slug, activeId: "growth-engine" })}
 <div class="ge-shell">
 <div class="ge-header-band">
 <h1>Your Growth Plan</h1>
-<p>What you should do next — one evidence-backed campaign with clear rationale.</p>
+<p>${esc(copy.planStepSubtitle)}</p>
 </div>
 ${renderGrowthEngineNavBar(slug, framework, "growth-plan", {
   prevUrl: options?.prevUrl || framework.steps.find((s) => s.id === "website-intelligence")?.url,
   nextUrl: options?.nextUrl || framework.steps.find((s) => s.id === "generate")?.url,
-  nextLabel: "Continue to Create Content →",
+  nextLabel: resolved.platform === "national" ? "Campaign strategy note →" : "Continue to Create Content →",
 })}
 ${body}
 </div>

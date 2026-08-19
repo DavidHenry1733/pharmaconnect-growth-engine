@@ -85,7 +85,9 @@ function firstHtmlInDirectory(dir: string): string | null {
 }
 
 function renderReviewPreviewAsset(slug: string, campaignId: string, assetKey: string): { html: string; sourcePath: string | null; sourceRoute: string } {
-  if (assetKey === "service-page") {
+  const sections = getContentPackageReviewSections(slug, campaignId);
+  const section = sections.find((sec) => (sec.key || sec.type) === assetKey) || sections.find((sec) => sec.type === assetKey);
+  if (assetKey === "service-page" && campaignId !== "approved-growth-plan" && !section?.outputPath) {
     const file = resolveVisualExperienceHtmlPath(campaignId as never, slug);
     if (!file) throw new Error("Service page preview source missing");
     return {
@@ -95,7 +97,6 @@ function renderReviewPreviewAsset(slug: string, campaignId: string, assetKey: st
     };
   }
 
-  const section = getContentPackageReviewSections(slug, campaignId).find((sec) => sec.type === assetKey);
   const sourcePath = section?.outputPath || null;
   if (!sourcePath) throw new Error(`Review preview source missing for ${assetKey}`);
 

@@ -74,6 +74,8 @@ import {
 } from "./masterAdminServiceCampaignSummaryService.ts";
 import { buildMarketScopeSummary, isNationalMarketScope } from "./masterAdminMarketScopeService.ts";
 import { buildGenerationSetupState } from "./masterAdminGenerationSetupService.ts";
+import { isNationalGrowthPlatform, resolveGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { resolveTenantServiceCatalogue } from "./growthEngineTenantServiceCatalogue.ts";
 
 export interface MasterAdminCustomerLoadTimings {
   totalMs: number;
@@ -91,6 +93,9 @@ function resolvePrimaryServiceId(slug: string, data: ReturnType<typeof normalize
   if (data.selectedServices?.length) return String(data.selectedServices[0]);
   const session = loadCampaignBuilderSession(slug);
   if (session.selectedServiceId) return session.selectedServiceId;
+  if (isNationalGrowthPlatform(slug)) {
+    return resolveTenantServiceCatalogue(slug).services[0]?.serviceId || "";
+  }
   return "pharmacy-first";
 }
 
@@ -193,7 +198,9 @@ function buildMasterAdminCustomerRecordLiteInternal(slug: string): MasterAdminCu
       ? serviceCampaigns.find((c) => c.campaignId === activeCampaignSelection.campaignId) || null
       : null);
   const marketScopeSummary = buildMarketScopeSummary(safe, data);
-  const national = isNationalMarketScope(safe, data);
+  const growthPlatform = resolveGrowthPlatform(safe).platform;
+  const tenantServiceCatalogue = resolveTenantServiceCatalogue(safe);
+  const national = isNationalMarketScope(safe, data) || growthPlatform === "national";
   // National needs generationSetup on the live lite payload so Local Coverage does not fall back to town discovery.
   const generationSetup = national ? buildGenerationSetupState(safe) : (null as unknown as MasterAdminCustomerRecord["generationSetup"]);
 
@@ -349,6 +356,16 @@ function buildMasterAdminCustomerRecordLiteInternal(slug: string): MasterAdminCu
     serviceCampaigns: serviceCampaigns as MasterAdminServiceCampaignSummary[],
     selectedServiceCampaign: selectedServiceCampaign as MasterAdminServiceCampaignSummary | null,
     selectedCampaignId: selectedServiceCampaign?.campaignId || null,
+    growthPlatform,
+    tenantServiceCatalogue: {
+      platform: tenantServiceCatalogue.platform,
+      source: tenantServiceCatalogue.source,
+      services: tenantServiceCatalogue.services.map((s) => ({
+        serviceId: s.serviceId,
+        serviceName: s.serviceName,
+        href: s.href,
+      })),
+    },
   };
 }
 

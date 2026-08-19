@@ -15,9 +15,69 @@ import {
   type GrowthEngineWebsiteIntelligenceSnapshot,
 } from "./growthEngineWebsiteIntelligenceModel.ts";
 import { websiteImportSnapshotToGrowthEngineSnapshot } from "./growthEngineWebsiteIntelligenceImportV2Service.ts";
+import { getPharmacyProjectConfigPath, safePharmacySlug } from "./pharmacyWorkspacePaths.ts";
 
 function profilePath(slug: string): string {
-  return path.join(WORKSPACE_ROOT, "data/pharmacy-profiles", `${slug}.json`);
+  return path.join(WORKSPACE_ROOT, "data/pharmacy-profiles", `${safePharmacySlug(slug)}.json`);
+}
+
+function profileFileExists(slug: string): boolean {
+  return fs.existsSync(profilePath(slug));
+}
+
+function readProjectConfig(slug: string): Record<string, unknown> | null {
+  const file = getPharmacyProjectConfigPath(safePharmacySlug(slug));
+  if (!fs.existsSync(file)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function hrefFromUnknown(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+  const row = value as Record<string, unknown>;
+  return String(row.href || row.url || "").trim();
+}
+
+function collectProjectWebsiteSeeds(slug: string): string[] {
+  const project = readProjectConfig(slug);
+  if (!project) return [];
+  const seeds: string[] = [];
+  const push = (raw: string) => {
+    const value = raw.trim();
+    if (!value || value.startsWith("#")) return;
+    if (/^https?:\/\//i.test(value) || value.startsWith("/")) seeds.push(value);
+  };
+  for (const key of ["navItems", "footerLinks", "footerServiceLinks"] as const) {
+    const list = project[key];
+    if (!Array.isArray(list)) continue;
+    for (const item of list) push(hrefFromUnknown(item));
+  }
+  const money = project.serviceMoneyPages;
+  if (money && typeof money === "object") {
+    for (const value of Object.values(money as Record<string, unknown>)) push(String(value || "").trim());
+  }
+  for (const key of ["privacyUrl", "termsUrl", "primaryCtaUrl"] as const) {
+    push(String(project[key] || "").trim());
+  }
+  return [...new Set(seeds)];
+}
+
+export function resolveWebsiteUrlForIntelligence(slug: string): string {
+  const safe = safePharmacySlug(slug);
+  if (profileFileExists(safe)) {
+    const profile = loadProfile(safe);
+    const fromProfile = normalizeWebsiteUrl(profile.website || "");
+    if (fromProfile) return fromProfile;
+  }
+  const project = readProjectConfig(safe);
+  if (!project) return "";
+  return normalizeWebsiteUrl(
+    String(project.domain || project.website || project.canonicalWebsite || project.subjectDomain || ""),
+  );
 }
 
 function loadProfile(slug: string) {
@@ -67,22 +127,26 @@ function normalizeWebsiteUrl(raw: string): string {
 }
 
 export async function analyseWebsiteIntelligence(slug: string): Promise<GrowthEngineWebsiteIntelligenceSnapshot> {
-  const profile = loadProfile(slug);
-  const websiteUrl = normalizeWebsiteUrl(profile.website || "");
+  const safe = safePharmacySlug(slug);
+  const profile = loadProfile(safe);
+  const websiteUrl = resolveWebsiteUrlForIntelligence(safe);
 
   if (!websiteUrl) {
-    const empty = { ...emptyWebsiteSnapshot(slug), source: "no-website" as const };
+    const empty = { ...emptyWebsiteSnapshot(safe), source: "no-website" as const };
     writeWebsiteIntelligenceSnapshot(empty);
     return empty;
   }
 
-  const navSeeds = (profile.headerNavLinks || []).map((l) => l.url).filter(Boolean);
+  const navSeeds = profileFileExists(safe)
+    ? (profile.headerNavLinks || []).map((l) => l.url).filter((url) => url && !url.startsWith("#"))
+    : [];
+  const extraSeeds = [...navSeeds, ...collectProjectWebsiteSeeds(safe)];
 
-  const crawl = await crawlWebsite(websiteUrl, navSeeds);
+  const crawl = await crawlWebsite(websiteUrl, extraSeeds);
   if (!crawl.pages.length) {
     const failed = {
       version: WEBSITE_INTELLIGENCE_SNAPSHOT_VERSION,
-      slug,
+      slug: safe,
       generatedAt: new Date().toISOString(),
       source: "fetch-failed" as const,
       websiteUrl,
@@ -108,7 +172,7 @@ export async function analyseWebsiteIntelligence(slug: string): Promise<GrowthEn
 
   const snapshot: GrowthEngineWebsiteIntelligenceSnapshot = {
     version: WEBSITE_INTELLIGENCE_SNAPSHOT_VERSION,
-    slug,
+    slug: safe,
     generatedAt: new Date().toISOString(),
     source: "website-live",
     websiteUrl,
@@ -117,6 +181,32 @@ export async function analyseWebsiteIntelligence(slug: string): Promise<GrowthEn
 
   writeWebsiteIntelligenceSnapshot(snapshot);
   return snapshot;
+}
+
+/**
+ * Reuse a persisted bounded inventory when present. Otherwise run the existing
+ * website-intelligence importer once for the configured tenant website.
+ */
+export async function ensureWebsiteIntelligenceInventory(
+  slug: string,
+): Promise<GrowthEngineWebsiteIntelligenceSnapshot | null> {
+  const safe = safePharmacySlug(slug);
+  const existing = resolveWebsiteIntelligenceSnapshot(safe);
+  if (existing?.analysis?.pages?.length) return existing;
+
+  const persisted = loadWebsiteIntelligenceSnapshot(safe);
+  if (persisted?.source === "fetch-failed" || persisted?.source === "no-website" || persisted?.source === "website-live") {
+    return persisted;
+  }
+
+  const websiteUrl = resolveWebsiteUrlForIntelligence(safe);
+  if (!websiteUrl) {
+    const empty = { ...emptyWebsiteSnapshot(safe), source: "no-website" as const };
+    writeWebsiteIntelligenceSnapshot(empty);
+    return empty;
+  }
+
+  return analyseWebsiteIntelligence(safe);
 }
 
 export function refreshWebsiteIntelligenceAnalysis(

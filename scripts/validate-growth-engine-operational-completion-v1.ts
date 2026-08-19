@@ -5,13 +5,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildOperationalHome, customerReadinessLabel, isWebsiteIntelligenceComplete } from "../src/pharmacy/growthEngineOperationalActions.ts";
-import { renderGrowthEngineDashboardPage } from "../src/pharmacy/growthEnginePageRenderers.ts";
-import { renderLocalMarketPage } from "../src/pharmacy/growthEnginePageRenderers.ts";
-import { renderGrowthIntelligencePage } from "../src/pharmacy/growthEnginePageRenderers.ts";
-import { renderGeneratePage } from "../src/pharmacy/growthEnginePageRenderers.ts";
-import { buildGrowthPlanRecommendation } from "../src/pharmacy/growthEngineFrameworkService.ts";
-import { loadCompetitorSnapshot } from "../src/pharmacy/growthEngineLocalMarketService.ts";
+import * as growthEngineOperationalActions from "../src/pharmacy/growthEngineOperationalActions.ts";
+import * as growthEnginePageRenderers from "../src/pharmacy/growthEnginePageRenderers.ts";
+import * as growthEngineFrameworkService from "../src/pharmacy/growthEngineFrameworkService.ts";
+import * as growthEngineLocalMarketService from "../src/pharmacy/growthEngineLocalMarketService.ts";
+
+function exported<T extends object>(mod: T | { default: T }): T {
+  const maybe = mod as { default?: T };
+  return maybe.default ?? (mod as T);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -30,6 +32,12 @@ function record(id: string, pass: boolean, detail: string) {
 }
 
 function main() {
+  const { buildOperationalHome, customerReadinessLabel, isWebsiteIntelligenceComplete } = exported(growthEngineOperationalActions);
+  const { renderGrowthEngineDashboardPage, renderLocalMarketPage, renderGrowthIntelligencePage, renderGeneratePage } =
+    exported(growthEnginePageRenderers);
+  const { buildGrowthPlanRecommendation } = exported(growthEngineFrameworkService);
+  const { loadCompetitorSnapshot } = exported(growthEngineLocalMarketService);
+
   console.log("\n=== Growth Engine Operational Completion V1 ===\n");
 
   record("readiness-label-map", customerReadinessLabel("Generator available") === "Content creation ready", "terminology");

@@ -21,6 +21,8 @@ import {
   profileCanRunLocalMarketDiscovery,
   resolveLocalMarketYourPharmacy,
 } from "./growthEngineLocalMarketService.ts";
+import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
+import { renderNationalSearchIntelligencePage } from "./nationalSearchIntelligencePage.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -365,6 +367,9 @@ export function renderLocalMarketIntelligencePage(
   snapshot: GrowthEngineCompetitorSnapshot | null,
   nav: { prevUrl?: string; nextUrl?: string },
 ): string {
+  if (isNationalGrowthPlatform(slug)) {
+    return renderNationalSearchIntelligencePage(slug, nav);
+  }
   const framework = buildGrowthEngineFramework(slug);
   const report = buildLocalMarketReportView(snapshot);
   const competitors = snapshot?.competitors || [];

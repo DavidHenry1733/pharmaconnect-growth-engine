@@ -44,7 +44,7 @@ console.log("");
 check(
   "canonical-snapshot",
   service.includes(
-    "pharmaconnect-verified-national-competitors.json"
+    "verified-national-competitors"
   ),
   "canonical verified snapshot"
 );
@@ -52,7 +52,7 @@ check(
 check(
   "own-site-evidence",
   service.includes(
-    "pharmaconnect-competitor-evidence-enrichment-v1.json"
+    "competitor-evidence-enrichment-v1"
   ),
   "NC-03E evidence consumed"
 );
@@ -60,7 +60,7 @@ check(
 check(
   "keyword-evidence",
   service.includes(
-    "pharmaconnect-commercial-keyword-qualification-v1.json"
+    "commercial-keyword-qualification-v1"
   ),
   "DataForSEO keyword evidence consumed"
 );
