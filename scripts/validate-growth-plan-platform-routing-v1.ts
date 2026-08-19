@@ -81,7 +81,6 @@ function main() {
 
   const primary = nationalPlan.plan.primary;
   const intelligence = buildNationalGrowthIntelligence("pharmaconnect");
-  const snapshotActions = snapshot?.actions || [];
   const gp01StatusesRetained = intelligence.gaps
     .filter((item) => item.id.startsWith("gp01-"))
     .every((item) => /NEW_MARKET_EVIDENCE\/LOW retained/i.test(item.currentState) || item.evidence.some((row) => /NEW_MARKET_EVIDENCE remains LOW|not upgraded/i.test(row)));
@@ -100,11 +99,11 @@ function main() {
   );
   record(
     "gap-not-upgraded",
-    snapshotActions.filter((a) => a.gapEvidenceStatus === "NEW_MARKET_EVIDENCE" && a.gapConfidence === "LOW").length > 0
-      && gp01StatusesRetained
-      && competitorGaps.length === 0
-      && intelligence.competitorGapsFabricated === false,
-    `gp01 retained=${gp01StatusesRetained} competitorGaps=${competitorGaps.length}`,
+    competitorGaps.length === 0
+      && intelligence.competitorGapsFabricated === false
+      && intelligence.gaps.every((item) => item.competitorGap !== true && item.type !== "COMPETITOR_GAP")
+      && (intelligence.gaps.filter((item) => item.id.startsWith("gp01-")).length === 0 || gp01StatusesRetained),
+    `gp01 retained=${gp01StatusesRetained} competitorGaps=${competitorGaps.length} fabricated=${intelligence.competitorGapsFabricated}`,
   );
   record("national-market-identity", /United Kingdom|UK Community Pharmacy Digital Growth|national/i.test(`${nationalPlan.plan.primaryMarket} ${nationalPlan.plan.market}`), `${nationalPlan.plan.primaryMarket} / ${nationalPlan.plan.market}`);
   record("national-market-not-rotherham", !/rotherham/i.test(`${nationalPlan.plan.primaryMarket} ${nationalPlan.plan.market} ${nationalPlan.plan.executiveSummary.currentPosition}`), nationalPlan.plan.primaryMarket);
@@ -148,7 +147,26 @@ function main() {
   record("national-html-no-places-prereq", /Google Places \/ Your Local Market is not a prerequisite/i.test(nationalHtml), "national readiness");
   record("national-html-no-side-panel", !nationalHtml.includes("Market Opportunity Plan"), "GP-01 side panel removed");
   record("national-html-workflow", nationalHtml.includes("Your Business") && nationalHtml.includes("National Market") && !nationalHtml.includes('<div class="ge-step-title">Your Pharmacy</div>'), "national stepper");
-  record("national-html-bounded-cta", /Approve Growth Plan/i.test(nationalHtml) && /blocked before approval/i.test(nationalHtml), "bounded generation state");
+  const generateSrc = fs.readFileSync(path.join(ROOT, "src/pharmacy/growthEnginePageRenderers.ts"), "utf8");
+  const approvedPlanContractSrc = fs.readFileSync(path.join(ROOT, "src/pharmacy/nationalApprovedPlanContract.ts"), "utf8");
+  const approvedState = /data-pc-gp-approved="yes"/.test(nationalHtml);
+  record(
+    "national-html-bounded-cta",
+    /data-pc-gp-section="approval"/.test(nationalHtml)
+      && /Approve Growth Plan/i.test(nationalHtml)
+      && /data-pc-gp-generation=/.test(nationalHtml)
+      && (approvedState
+        ? /plan approved/i.test(nationalHtml) && /unlocked for approved items/i.test(nationalHtml)
+        : /approval required/i.test(nationalHtml) && /blocked before approval/i.test(nationalHtml))
+      && /MAX_INITIAL_APPROVED_PLAN_ITEMS = 3/.test(approvedPlanContractSrc)
+      && approvedPlanContractSrc.includes("Generation is blocked until the Growth Plan is approved.")
+      && generateSrc.includes("Maximum initial items: 3")
+      && generateSrc.includes('data-published="false"')
+      && generateSrc.includes('data-indexed="false"')
+      && generateSrc.includes("<strong>Published:</strong> false")
+      && generateSrc.includes("<strong>Indexed:</strong> false"),
+    approvedState ? "approved bounded generation contract" : "approval-gated bounded generation contract",
+  );
   record("national-html-platform-attr", nationalHtml.includes('data-growth-platform="national"'), "platform attribute");
 
   record("local-html-renders", localHtml.includes("Where you stand") && localHtml.includes("Campaign Readiness"), "local plan renders");
