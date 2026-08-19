@@ -8,20 +8,28 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import * as subjectResolverMod from "../src/pharmacy/nationalIntelligenceSubjectResolver.ts";
-import * as searchServiceMod from "../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
-import * as searchPageMod from "../src/pharmacy/nationalSearchIntelligencePage.ts";
-import * as storageMod from "../src/pharmacy/nationalIntelligenceStorageService.ts";
-import * as gateMod from "../src/pharmacy/nationalSearchCommercialCompetitorGate.ts";
-import * as searchLimitsMod from "../src/pharmacy/nationalSearchIntelligenceLimits.ts";
-import * as labsMod from "../src/pharmacy/dataForSeoRankedKeywordIntelligenceService.ts";
-import * as seedsMod from "../src/pharmacy/nationalSearchIntelligenceCommercialSeeds.ts";
-import * as overlapMod from "../src/pharmacy/nationalCommercialServiceOverlap.ts";
-import * as workspacePathsMod from "../src/pharmacy/pharmacyWorkspacePaths.ts";
-import * as discoveryStorageMod from "../src/pharmacy/nationalCompetitorDiscoveryStorageService.ts";
+import {
+  assertIsolatedProjectConfigPath,
+  createIsolatedNationalValidationWorkspace,
+} from "./isolatedNationalValidationWorkspace.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+
+const isolated = createIsolatedNationalValidationWorkspace({
+  prefix: "si-sparse-correction-",
+});
+
+const subjectResolverMod = await import("../src/pharmacy/nationalIntelligenceSubjectResolver.ts");
+const searchServiceMod = await import("../src/pharmacy/nationalSearchIntelligenceV1Service.ts");
+const searchPageMod = await import("../src/pharmacy/nationalSearchIntelligencePage.ts");
+const storageMod = await import("../src/pharmacy/nationalIntelligenceStorageService.ts");
+const gateMod = await import("../src/pharmacy/nationalSearchCommercialCompetitorGate.ts");
+const searchLimitsMod = await import("../src/pharmacy/nationalSearchIntelligenceLimits.ts");
+const labsMod = await import("../src/pharmacy/dataForSeoRankedKeywordIntelligenceService.ts");
+const seedsMod = await import("../src/pharmacy/nationalSearchIntelligenceCommercialSeeds.ts");
+const overlapMod = await import("../src/pharmacy/nationalCommercialServiceOverlap.ts");
+const discoveryStorageMod = await import("../src/pharmacy/nationalCompetitorDiscoveryStorageService.ts");
 
 function exported<T extends object>(mod: T | { default: T }): T {
   const maybe = mod as { default?: T };
@@ -37,7 +45,6 @@ const searchLimits = exported(searchLimitsMod);
 const labs = exported(labsMod);
 const seeds = exported(seedsMod);
 const overlap = exported(overlapMod);
-const { getPharmacyProjectConfigPath } = exported(workspacePathsMod);
 const discoveryStorage = exported(discoveryStorageMod);
 
 let pass = 0;
@@ -64,9 +71,7 @@ function check(id: string, ok: boolean, detail: string) {
 }
 
 const tenantSlug = "si-sparse-correction";
-const tenantFile = getPharmacyProjectConfigPath(tenantSlug);
-fs.mkdirSync(path.dirname(tenantFile), { recursive: true });
-fs.writeFileSync(tenantFile, JSON.stringify({
+const tenantFile = isolated.writeProjectConfig(tenantSlug, {
   clientSlug: tenantSlug,
   businessName: "National Digital Growth Tenant",
   domain: "https://example-sparse-si.co.uk",
@@ -81,7 +86,8 @@ fs.writeFileSync(tenantFile, JSON.stringify({
     "Pharmacy Website Hosting",
     "Pharmacy Growth Audits",
   ],
-}, null, 2) + "\n");
+});
+assertIsolatedProjectConfigPath(tenantFile, isolated.root, ROOT);
 
 const subject = subjectResolver.resolveNationalIntelligenceSubject(tenantSlug);
 
@@ -292,8 +298,6 @@ function competitorsPayload(items: Array<{ domain: string }>) {
   };
 }
 
-const previousLogin = process.env.DATAFORSEO_LOGIN;
-const previousPassword = process.env.DATAFORSEO_PASSWORD;
 process.env.DATAFORSEO_LOGIN = "si-sparse-login";
 process.env.DATAFORSEO_PASSWORD = "si-sparse-password";
 
@@ -307,27 +311,12 @@ const preservedDiscovery = {
 };
 
 function cleanup() {
-  for (const artifact of [
-    "search-intelligence-v1",
-    "search-intelligence-v2",
-    "ranked-keywords-customer",
-    "ranked-keywords-customer-v2",
-    "ranked-keywords-competitors",
-    "ranked-keywords-competitors-v2",
-    "competitor-keyword-gaps-v2",
-    "cost-ledger-v1",
-    "refresh-metadata-v1",
-    "competitor-discovery",
-  ] as const) {
-    const file = storage.nationalIntelligenceDataPath(tenantSlug, artifact);
-    if (fs.existsSync(file)) fs.unlinkSync(file);
-  }
-  if (fs.existsSync(tenantFile)) fs.unlinkSync(tenantFile);
-  if (previousLogin === undefined) delete process.env.DATAFORSEO_LOGIN;
-  else process.env.DATAFORSEO_LOGIN = previousLogin;
-  if (previousPassword === undefined) delete process.env.DATAFORSEO_PASSWORD;
-  else process.env.DATAFORSEO_PASSWORD = previousPassword;
+  delete process.env.DATAFORSEO_LOGIN;
+  delete process.env.DATAFORSEO_PASSWORD;
+  delete process.env.DATAFORSEO_API_LOGIN;
+  delete process.env.DATAFORSEO_API_PASSWORD;
   globalThis.fetch = originalFetch;
+  isolated.cleanup();
 }
 
 const websiteEvidenceByDomain = {
@@ -559,6 +548,12 @@ try {
     "K-dataforseo-calls-zero-during-implementation",
     dataForSeoCalls === 0,
     `DATAFORSEO_CALLS=${dataForSeoCalls}`,
+  );
+  check(
+    "isolated-workspace-removed",
+    !fs.existsSync(isolated.root)
+      && !fs.existsSync(path.join(ROOT, "config/projects", `${tenantSlug}.json`)),
+    "temporary workspace and repo config/projects fixtures are absent",
   );
 }
 

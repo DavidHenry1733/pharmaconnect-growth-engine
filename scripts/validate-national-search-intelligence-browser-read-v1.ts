@@ -8,13 +8,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import * as pageMod from "../src/pharmacy/nationalSearchIntelligencePage.ts";
-import * as storageMod from "../src/pharmacy/nationalIntelligenceStorageService.ts";
-import * as workspaceMod from "../src/pharmacy/pharmacyWorkspacePaths.ts";
-import * as pageRenderersMod from "../src/pharmacy/growthEnginePageRenderers.ts";
+import {
+  assertIsolatedProjectConfigPath,
+  createIsolatedNationalValidationWorkspace,
+} from "./isolatedNationalValidationWorkspace.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+
+const isolated = createIsolatedNationalValidationWorkspace({
+  prefix: "ni03c2-browser-read-",
+});
+
+const pageMod = await import("../src/pharmacy/nationalSearchIntelligencePage.ts");
+const storageMod = await import("../src/pharmacy/nationalIntelligenceStorageService.ts");
+const workspaceMod = await import("../src/pharmacy/pharmacyWorkspacePaths.ts");
+const pageRenderersMod = await import("../src/pharmacy/growthEnginePageRenderers.ts");
 
 function exported<T extends object>(mod: T | { default: T }): T {
   const maybe = mod as { default?: T };
@@ -112,13 +121,9 @@ check(
 );
 
 const tenantSlug = "ni03c2-browser-read";
-const tenantFile = path.join(ROOT, "config/projects", `${tenantSlug}.json`);
-const snapshotFile = storage.nationalIntelligenceDataPath(tenantSlug, "search-intelligence-v1");
-const capturedAt = "2026-08-18T13:02:53.532Z";
-
-fs.writeFileSync(tenantFile, JSON.stringify({
+const tenantFile = isolated.writeProjectConfig(tenantSlug, {
   clientSlug: tenantSlug,
-  businessName: "PharmaConnect",
+  businessName: "National Browser Read Tenant",
   domain: "https://example-ni03c2-browser-read.co.uk",
   growthPlatform: "national",
   primaryLocation: "United Kingdom",
@@ -131,7 +136,10 @@ fs.writeFileSync(tenantFile, JSON.stringify({
     "Pharmacy Website Hosting",
     "Pharmacy Growth Audits",
   ],
-}, null, 2) + "\n");
+});
+assertIsolatedProjectConfigPath(tenantFile, isolated.root, ROOT);
+const snapshotFile = storage.nationalIntelligenceDataPath(tenantSlug, "search-intelligence-v1");
+const capturedAt = "2026-08-18T13:02:53.532Z";
 
 function competitor(index: number, domain: string, role: string) {
   return {
@@ -355,10 +363,16 @@ check(
 check("routed-renderer-matches", routed.includes('data-ni03c2-page-status="collected"') && routed.includes("$0.02652"), "growthEnginePageRenderers uses the same page");
 check("no-external-calls", fetchCalls === 0, `fetchCalls=${fetchCalls} urls=${fetchUrls.join(" | ") || "none"}`);
 
-if (fs.existsSync(snapshotFile)) fs.unlinkSync(snapshotFile);
-if (fs.existsSync(tenantFile)) fs.unlinkSync(tenantFile);
-
 globalThis.fetch = originalFetch;
+isolated.cleanup();
 
+check(
+  "isolated-workspace-removed",
+  !fs.existsSync(isolated.root)
+    && !fs.existsSync(path.join(ROOT, "config/projects", `${tenantSlug}.json`)),
+  "temporary workspace and repo config/projects fixtures are absent",
+);
+
+console.log("DATAFORSEO_CALLS=0");
 console.log(`\n${fail ? "FAIL" : "PASS"} — ${pass}/${pass + fail} checks\n`);
 if (fail) process.exit(1);

@@ -8,23 +8,33 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import * as subjectResolverMod from "../src/pharmacy/nationalIntelligenceSubjectResolver.ts";
-import * as platformMod from "../src/pharmacy/growthPlatformResolverService.ts";
-import * as storageMod from "../src/pharmacy/nationalIntelligenceStorageService.ts";
-import * as provenanceMod from "../src/pharmacy/nationalIntelligenceEvidenceProvenance.ts";
-import * as searchServiceMod from "../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
-import * as searchModelMod from "../src/pharmacy/nationalSearchIntelligenceV1Model.ts";
-import * as searchPageMod from "../src/pharmacy/nationalSearchIntelligencePage.ts";
-import * as pageRenderersMod from "../src/pharmacy/growthEnginePageRenderers.ts";
-import * as frameworkMod from "../src/pharmacy/growthEngineFrameworkService.ts";
-import * as localMarketPageMod from "../src/pharmacy/growthEngineLocalMarketPage.ts";
-import * as locationResolverMod from "../src/pharmacy/dataForSeoSearchLocationResolver.ts";
-import * as searchProviderMod from "../src/pharmacy/nationalSearchProviderModel.ts";
-import * as dataForSeoHttpMod from "../src/pharmacy/dataForSeoHttp.ts";
-import * as searchLimitsMod from "../src/pharmacy/nationalSearchIntelligenceLimits.ts";
+import {
+  assertIsolatedProjectConfigPath,
+  createIsolatedNationalValidationWorkspace,
+} from "./isolatedNationalValidationWorkspace.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+
+const isolated = createIsolatedNationalValidationWorkspace({
+  prefix: "ni03b-national-search-",
+  copyCommittedProjectSlugs: ["pharmaconnect", "brook-pharmacy"],
+});
+
+const subjectResolverMod = await import("../src/pharmacy/nationalIntelligenceSubjectResolver.ts");
+const platformMod = await import("../src/pharmacy/growthPlatformResolverService.ts");
+const storageMod = await import("../src/pharmacy/nationalIntelligenceStorageService.ts");
+const provenanceMod = await import("../src/pharmacy/nationalIntelligenceEvidenceProvenance.ts");
+const searchServiceMod = await import("../src/pharmacy/nationalSearchIntelligenceV1Service.ts");
+const searchModelMod = await import("../src/pharmacy/nationalSearchIntelligenceV1Model.ts");
+const searchPageMod = await import("../src/pharmacy/nationalSearchIntelligencePage.ts");
+const pageRenderersMod = await import("../src/pharmacy/growthEnginePageRenderers.ts");
+const frameworkMod = await import("../src/pharmacy/growthEngineFrameworkService.ts");
+const localMarketPageMod = await import("../src/pharmacy/growthEngineLocalMarketPage.ts");
+const locationResolverMod = await import("../src/pharmacy/dataForSeoSearchLocationResolver.ts");
+const searchProviderMod = await import("../src/pharmacy/nationalSearchProviderModel.ts");
+const dataForSeoHttpMod = await import("../src/pharmacy/dataForSeoHttp.ts");
+const searchLimitsMod = await import("../src/pharmacy/nationalSearchIntelligenceLimits.ts");
 
 function exported<T extends object>(mod: T | { default: T }): T {
   const maybe = mod as { default?: T };
@@ -65,11 +75,14 @@ function read(rel: string): string {
 
 const originalFetch = globalThis.fetch;
 let fetchCalls = 0;
+let liveDataForSeoCalls = 0;
 const fetchUrls: string[] = [];
-globalThis.fetch = (async (input: RequestInfo | URL) => {
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   fetchCalls += 1;
-  fetchUrls.push(String(input));
-  throw new Error(`NI-03B validator blocked fetch: ${String(input)}`);
+  const url = String(input);
+  fetchUrls.push(url);
+  if (/dataforseo\.com/i.test(url)) liveDataForSeoCalls += 1;
+  throw new Error(`NI-03B validator blocked fetch: ${url}`);
 }) as typeof fetch;
 
 console.log("\n=== NI-03B NATIONAL SEARCH INTELLIGENCE V1 ===\n");
@@ -133,8 +146,7 @@ check(
 );
 
 const tenantBSlug = "ni03b-national-b";
-const tenantBFile = path.join(ROOT, "config/projects", `${tenantBSlug}.json`);
-fs.writeFileSync(tenantBFile, JSON.stringify({
+const tenantBFile = isolated.writeProjectConfig(tenantBSlug, {
   clientSlug: tenantBSlug,
   businessName: "National Search Tenant B",
   domain: "https://example-national-search-b.co.uk",
@@ -143,7 +155,8 @@ fs.writeFileSync(tenantBFile, JSON.stringify({
   country: "United Kingdom",
   languageCode: "en",
   services: ["National SEO"],
-}, null, 2) + "\n");
+});
+assertIsolatedProjectConfigPath(tenantBFile, isolated.root, ROOT);
 const tenantB = subjectResolver.resolveNationalIntelligenceSubject(tenantBSlug);
 check(
   "subject-generic-second-national-tenant",
@@ -700,8 +713,6 @@ check(
 );
 
 
-const previousLogin = process.env.DATAFORSEO_LOGIN;
-const previousPassword = process.env.DATAFORSEO_PASSWORD;
 process.env.DATAFORSEO_LOGIN = "ni03b-validator";
 process.env.DATAFORSEO_PASSWORD = "ni03b-validator";
 let mockedRequests = 0;
@@ -970,8 +981,7 @@ check(
 );
 
 function writeNationalTenant(slug: string, domain: string): string {
-  const file = path.join(ROOT, "config/projects", `${slug}.json`);
-  fs.writeFileSync(file, JSON.stringify({
+  const file = isolated.writeProjectConfig(slug, {
     clientSlug: slug,
     businessName: "National Search Tenant",
     domain: `https://${domain}`,
@@ -980,7 +990,8 @@ function writeNationalTenant(slug: string, domain: string): string {
     country: "United Kingdom",
     languageCode: "en",
     services: ["National SEO"],
-  }, null, 2) + "\n");
+  });
+  assertIsolatedProjectConfigPath(file, isolated.root, ROOT);
   return file;
 }
 
@@ -1076,6 +1087,11 @@ const extraTenantFiles = [
   writeNationalTenant(tenantTimeoutRanked, "example-national-timeout-ranked.co.uk"),
   writeNationalTenant(tenantLimit, "example-national-limit.co.uk"),
 ];
+check(
+  "resilience-tenants-isolated",
+  extraTenantFiles.every((file) => file.startsWith(isolated.root + path.sep)),
+  extraTenantFiles.map((file) => path.relative(isolated.root, file)).join(","),
+);
 
 const retryCase = await collectWithLabsQueue(tenantRetry, {
   subjectDomain: "example-national-retry.co.uk",
@@ -1242,35 +1258,26 @@ check(
   localCollectError,
 );
 
-if (previousLogin === undefined) delete process.env.DATAFORSEO_LOGIN;
-else process.env.DATAFORSEO_LOGIN = previousLogin;
-if (previousPassword === undefined) delete process.env.DATAFORSEO_PASSWORD;
-else process.env.DATAFORSEO_PASSWORD = previousPassword;
-
-for (const slug of [tenantBSlug, tenantRetry, tenantPartial, tenantAllFail, tenantAuth, tenantTimeoutCompetitors, tenantTimeoutRanked, tenantLimit]) {
-  for (const artifact of [
-    "search-intelligence-v1",
-    "search-intelligence-v2",
-    "ranked-keywords-customer",
-    "ranked-keywords-customer-v2",
-    "ranked-keywords-competitors",
-    "ranked-keywords-competitors-v2",
-    "competitor-keyword-gaps-v2",
-    "cost-ledger-v1",
-    "refresh-metadata-v1",
-    "competitor-discovery",
-  ] as const) {
-    const dataFile = storage.nationalIntelligenceDataPath(slug, artifact);
-    if (fs.existsSync(dataFile)) fs.unlinkSync(dataFile);
-  }
-}
-if (fs.existsSync(fixtureFile)) fs.unlinkSync(fixtureFile);
-if (fs.existsSync(tenantBFile)) fs.unlinkSync(tenantBFile);
-for (const file of extraTenantFiles) {
-  if (fs.existsSync(file)) fs.unlinkSync(file);
-}
+delete process.env.DATAFORSEO_LOGIN;
+delete process.env.DATAFORSEO_PASSWORD;
+delete process.env.DATAFORSEO_API_LOGIN;
+delete process.env.DATAFORSEO_API_PASSWORD;
 
 globalThis.fetch = originalFetch;
+isolated.cleanup();
 
+check(
+  "isolated-workspace-removed",
+  !fs.existsSync(isolated.root)
+    && !fs.existsSync(path.join(ROOT, "config/projects", `${tenantBSlug}.json`)),
+  "temporary workspace and repo config/projects fixtures are absent",
+);
+check(
+  "dataforseo-calls-zero",
+  liveDataForSeoCalls === 0,
+  `DATAFORSEO_CALLS=${liveDataForSeoCalls} fetchCalls=${fetchCalls}`,
+);
+
+console.log(`DATAFORSEO_CALLS=${liveDataForSeoCalls}`);
 console.log(`\n${fail ? "FAIL" : "PASS"} — ${pass}/${pass + fail} checks\n`);
 if (fail) process.exit(1);
