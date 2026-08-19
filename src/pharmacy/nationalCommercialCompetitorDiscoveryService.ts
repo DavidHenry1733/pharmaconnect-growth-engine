@@ -127,6 +127,10 @@ function businessNameFromTitle(title: string, domain: string): string {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function unique(values: string[]): string[] {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
 function mapQualification(gate: NationalSearchCommercialGateResult): NationalCompetitorDiscoveryCandidate["qualification"] {
   if (gate.qualification === "qualified" && gate.role === "commercial_competitor") return "qualified";
   if (gate.qualification === "rejected") return "rejected";
@@ -309,7 +313,12 @@ export function assembleCommercialCompetitorDiscovery(
       overlappingServices: gate.overlappingServices,
       nonOverlappingServices: gate.nonOverlappingServices,
       discoveryEvidence: raw.discoveryEvidence || `Discovered via ${source}.`,
-      qualificationReason: gate.nonSelectionReason || gate.reasons[0] || "Commercial gate assessed from website and discovery evidence.",
+      qualificationReason: gate.qualification === "qualified" && gate.role === "commercial_competitor"
+        ? unique([
+          "Direct commercial competitor: same target customer market, commercial provider, material configured-service overlap, and market relevance.",
+          ...gate.reasons.filter((reason) => /overlap|commercial provider|target-market|market evidence/i.test(reason)),
+        ]).join(" ")
+        : (gate.nonSelectionReason || gate.reasons[0] || "Commercial gate assessed from website and discovery evidence."),
     };
     mapped.push(candidate);
   }

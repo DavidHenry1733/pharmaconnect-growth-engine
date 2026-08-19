@@ -4,6 +4,7 @@
  * existing national market / Search Intelligence page. No paid APIs.
  */
 import { chromium } from "playwright";
+import fs from "node:fs";
 
 import * as pageMod from "../src/pharmacy/nationalSearchIntelligencePage.ts";
 import * as discovery from "../src/pharmacy/nationalCommercialCompetitorDiscoveryService.ts";
@@ -16,7 +17,7 @@ function exported<T extends object>(mod: T | { default: T }): T {
 
 const { renderNationalSearchIntelligencePage } = exported(pageMod);
 const { qualifyInjectedCommercialCandidates } = exported(discovery);
-const { writeNationalCompetitorDiscovery } = exported(storage);
+const { writeNationalCompetitorDiscovery, nationalCompetitorDiscoveryPath } = exported(storage);
 
 const items: Array<{ id: string; pass: boolean; detail: string }> = [];
 function check(id: string, pass: boolean, detail: string) {
@@ -48,6 +49,8 @@ const result = qualifyInjectedCommercialCandidates("pharmaconnect", [
   { domain: "pharmacy-trade-press.co.uk", name: "Trade Press", websiteText: publisherText, discoverySource: "search-engine", discoveryEvidence: "SERP discovery." },
   { domain: "high-authority-overlap.example", name: "Overlap Only", websiteText: "", discoverySource: "organic-overlap", discoveryEvidence: "Organic overlap only.", sharedKeywordCount: 90 },
 ]);
+const discoveryFile = nationalCompetitorDiscoveryPath("pharmaconnect");
+const previousDiscovery = fs.existsSync(discoveryFile) ? fs.readFileSync(discoveryFile, "utf8") : null;
 writeNationalCompetitorDiscovery(result);
 
 const page = await visiblePage(renderNationalSearchIntelligencePage("pharmaconnect"));
@@ -61,6 +64,12 @@ check("qualification-reasoning", /Qualification: PASS/i.test(page.text) && /Qual
 check("overlap-not-sole-qualification", page.text.includes("high-authority-overlap.example") && page.html.includes('data-cp02-qualified="no"'), "organic overlap not qualified");
 check("ranked-keywords-zero", /COMPETITOR_RANKED_KEYWORD_REQUESTS=0/.test(page.text), "no ranked keyword expansion");
 check("search-intelligence-page-still-present", /Search Intelligence/i.test(page.text), "existing page retained");
+
+if (previousDiscovery == null) {
+  try { fs.unlinkSync(discoveryFile); } catch { /* ignore */ }
+} else {
+  fs.writeFileSync(discoveryFile, previousDiscovery, "utf8");
+}
 
 const passed = items.filter((row) => row.pass).length;
 console.log(`\n${passed === items.length ? "PASS" : "FAIL"} — ${passed}/${items.length} checks\n`);

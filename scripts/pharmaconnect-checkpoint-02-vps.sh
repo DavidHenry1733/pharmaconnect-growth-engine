@@ -27,6 +27,7 @@ pnpm install --frozen-lockfile || pnpm install
 pnpm --filter ./artifacts/api-server run build
 npx tsx scripts/validate-national-business-intelligence-checkpoint-01.ts
 npx tsx scripts/browser-national-business-intelligence-checkpoint-01.ts
+echo "Validators restore any fixture competitor-discovery snapshot; they do not promote fixtures into production data."
 npx tsx scripts/validate-checkpoint-02-commercial-competitor-discovery.ts
 npx tsx scripts/validate-national-search-commercial-gate-v1.ts
 npx tsx scripts/validate-national-competitor-discovery-v1.ts
@@ -34,7 +35,7 @@ npx tsx scripts/validate-growth-plan-platform-routing-v1.ts
 npx tsx scripts/browser-checkpoint-02-commercial-competitor-discovery.ts
 npx tsx scripts/run-checkpoint-02-commercial-discovery.ts pharmaconnect
 if [ "${CHECKPOINT_02_LIVE:-0}" = "1" ]; then
-  echo "ONE bounded live commercial competitor discovery run"
+  echo "ONE bounded live commercial competitor discovery run (SERP discovery evidence only; ranked-keyword expansion remains 0)"
   npx tsx scripts/run-checkpoint-02-commercial-discovery.ts pharmaconnect --live
 fi
 echo "BROWSER_URL=http://127.0.0.1:${PORT}/api/growth-engine/search-intelligence?slug=pharmaconnect"

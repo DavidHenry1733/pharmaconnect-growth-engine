@@ -45,7 +45,7 @@ const {
 const { buildNationalCompetitorDiscoveryQueries } = exported(queryService);
 const { renderNationalSearchIntelligencePage } = exported(pageMod);
 const { buildNationalBusinessIntelligenceView } = exported(biMod);
-const { writeNationalCompetitorDiscovery } = exported(storageMod);
+const { writeNationalCompetitorDiscovery, nationalCompetitorDiscoveryPath } = exported(storageMod);
 const { resolveTenantServiceCatalogue } = exported(catalogueMod);
 
 console.log("\n=== CHECKPOINT 02 COMMERCIAL COMPETITOR DISCOVERY ===\n");
@@ -133,6 +133,8 @@ const result = qualifyInjectedCommercialCandidates("pharmaconnect", [
   { domain: "broad-vocab.example", name: "Broad Vocab", websiteText: broadText, discoverySource: "search-engine", discoveryEvidence: "Broad vocabulary only." },
 ]);
 
+const discoveryFile = nationalCompetitorDiscoveryPath("pharmaconnect");
+const previousDiscovery = fs.existsSync(discoveryFile) ? fs.readFileSync(discoveryFile, "utf8") : null;
 writeNationalCompetitorDiscovery(result);
 
 const byDomain = Object.fromEntries(result.candidates.map((row) => [row.domain, row]));
@@ -265,6 +267,11 @@ try {
 } catch {
   /* ignore */
 }
+if (previousDiscovery == null) {
+  try { fs.unlinkSync(discoveryFile); } catch { /* ignore */ }
+} else {
+  fs.writeFileSync(discoveryFile, previousDiscovery, "utf8");
+}
 
 const passed = checks.filter((row) => row.pass).length;
 console.log(`\n${passed === checks.length ? "✅" : "❌"} ${passed}/${checks.length} checks passed\n`);
@@ -272,6 +279,19 @@ console.log(`DISCOVERY_STATUS=${result.status}`);
 console.log(`CANDIDATES_DISCOVERED=${result.candidates.length}`);
 console.log(`DIRECT_COMMERCIAL_COMPETITORS=${result.directCommercialCompetitors}`);
 console.log(`ADJACENT_COMMERCIAL_PROVIDERS=${result.adjacentCommercialProviders}`);
+console.log(`NON_COMMERCIAL_OR_REJECTED=${result.candidates.filter((row) => row.role !== "commercial_competitor" || row.qualification !== "qualified").length}`);
 console.log(`FETCH_CALLS=${fetchCalls}`);
+for (const row of result.candidates) {
+  console.log(`DOMAIN=${row.domain}`);
+  console.log(`CLASSIFICATION=${row.role || ""}`);
+  console.log(`DISCOVERY_SOURCE=${row.source}`);
+  console.log(`TARGET_MARKET_RELEVANCE=${row.targetMarketRelevance ? "YES" : "NO"}`);
+  console.log(`COMMERCIAL_PROVIDER=${row.commercialProvider ? "YES" : "NO"}`);
+  console.log(`DETECTED_SERVICES=${(row.detectedServices || []).join(", ")}`);
+  console.log(`OVERLAPPING_SERVICES=${(row.overlappingServices || []).join(", ")}`);
+  console.log(`MARKET_RELEVANCE=${row.marketRelevance ? "YES" : "NO"}`);
+  console.log(`QUALIFIED=${row.qualification === "qualified" && row.role === "commercial_competitor" ? "YES" : "NO"}`);
+  console.log(`REASON=${row.qualificationReason || row.qualificationReasons[0] || ""}`);
+}
 globalThis.fetch = originalFetch;
 if (passed !== checks.length) process.exit(1);

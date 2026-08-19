@@ -17,6 +17,7 @@ import type {
 } from "./nationalSearchIntelligenceV1Model.ts";
 import { PARTIAL_COLLECTION_CUSTOMER_MESSAGE } from "./nationalSearchIntelligenceV1Model.ts";
 import { readCommercialCompetitorDiscovery } from "./nationalCommercialCompetitorDiscoveryService.ts";
+import { buildNationalBusinessIntelligenceView } from "./growthEngineNationalBusinessIntelligenceService.ts";
 import type { NationalCompetitorDiscoveryCandidate, NationalCompetitorDiscoveryResult } from "./nationalCompetitorDiscoveryModel.ts";
 
 function esc(v: unknown): string {
@@ -186,12 +187,20 @@ function commercialDiscoveryCard(row: NationalCompetitorDiscoveryCandidate): str
 
 function renderCommercialCompetitorDiscoveryPanel(slug: string): string {
   const result: NationalCompetitorDiscoveryResult | null = readCommercialCompetitorDiscovery(slug);
+  const bi = buildNationalBusinessIntelligenceView(slug);
   const candidates = result?.candidates || [];
   const direct = result?.directCommercialCompetitors ?? candidates.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified").length;
   const adjacent = result?.adjacentCommercialProviders ?? candidates.filter((row) => row.role === "adjacent_commercial_provider").length;
   const rejected = Math.max(0, candidates.length - direct - adjacent);
   const status = result?.status || "draft";
-  const services = (result?.commercialServices || []).join(" | ") || "—";
+  const businessName = result?.businessName || bi.identity.businessName.value || "";
+  const targetCustomer = result?.targetCustomerMarket || bi.targetCustomer.value || "";
+  const marketCountry = result?.marketCountry || bi.marketCountry.value || "";
+  const marketScope = result?.marketScope || bi.marketScope.value || "";
+  const serviceList = result?.commercialServices?.length
+    ? result.commercialServices
+    : bi.services.map((row) => row.serviceName);
+  const services = serviceList.join(" | ") || "—";
   const limitations = (result?.evidenceLimitations || []).join(" ");
   const cards = candidates.length
     ? candidates.map(commercialDiscoveryCard).join("")
@@ -201,9 +210,9 @@ function renderCommercialCompetitorDiscoveryPanel(slug: string): string {
 <p class="ge-lead">Which real businesses compete for substantially the same customers by selling materially overlapping commercial services? Organic keyword overlap is discovery evidence only and cannot pass this gate.</p>
 <div class="ge-grid-2" data-cp02-section="summary">
 <div class="ge-card"><h3>DISCOVERY STATUS</h3><p data-cp02-discovery-status="${esc(status)}">${esc(status.toUpperCase())}</p></div>
-<div class="ge-card"><h3>Business</h3><p data-cp02-business="${esc(result?.businessName || "")}">${esc(result?.businessName || "Not discovered yet")}</p></div>
-<div class="ge-card"><h3>Target customer</h3><p data-cp02-target-customer="${esc(result?.targetCustomerMarket || "")}">${esc(result?.targetCustomerMarket || "—")}</p></div>
-<div class="ge-card"><h3>Market</h3><p data-cp02-market="${esc(result?.marketCountry || "")}">${esc([result?.marketCountry, result?.marketScope].filter(Boolean).join(" · ") || "—")}</p></div>
+<div class="ge-card"><h3>Business</h3><p data-cp02-business="${esc(businessName)}">${esc(businessName || "Not discovered yet")}</p></div>
+<div class="ge-card"><h3>Target customer</h3><p data-cp02-target-customer="${esc(targetCustomer)}">${esc(targetCustomer || "—")}</p></div>
+<div class="ge-card"><h3>Market</h3><p data-cp02-market="${esc(marketCountry)}">${esc([marketCountry, marketScope].filter(Boolean).join(" · ") || "—")}</p></div>
 <div class="ge-card"><h3>Commercial services</h3><p data-cp02-services="${esc(services)}">${esc(services)}</p></div>
 <div class="ge-card"><h3>Candidates discovered</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-candidate-count="${candidates.length}">${candidates.length}</p></div>
 <div class="ge-card"><h3>Direct commercial competitors</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-direct-count="${direct}">${direct}</p></div>
