@@ -70,9 +70,15 @@ check(
 );
 
 check(
-  "queries-pharmacy-market",
-  queries.every((q) => /pharmac/i.test(q.query)),
+  "queries-from-configured-services",
+  context.services.every((service) => queries.some((q) => q.query.toLowerCase().includes(service.toLowerCase()))),
   queries.map((q) => q.query).join(" | "),
+);
+
+check(
+  "queries-include-market-or-country",
+  queries.every((q) => q.marketCountry === "United Kingdom" && q.targetCustomerMarket.length > 0),
+  queries.map((q) => q.targetCustomerMarket).join(" | "),
 );
 
 check(

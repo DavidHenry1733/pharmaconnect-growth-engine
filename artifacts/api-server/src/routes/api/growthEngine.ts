@@ -32,6 +32,11 @@ import {
   planNationalSearchIntelligenceCollection,
   readNationalSearchIntelligence,
 } from "../../../../../src/pharmacy/nationalSearchIntelligenceV1Service.ts";
+import {
+  buildCommercialCompetitorDiscoveryPlan,
+  readCommercialCompetitorDiscovery,
+  runCommercialCompetitorDiscovery,
+} from "../../../../../src/pharmacy/nationalCommercialCompetitorDiscoveryService.ts";
 import { generateApprovedGrowthPlanContent } from "../../../../../src/pharmacy/nationalApprovedPlanGenerationService.ts";
 import {
   loadLiveIntegrationProof,
@@ -185,6 +190,39 @@ router.get("/growth-engine/:slug/search-intelligence/plan", (req, res) => {
   }
   res.setHeader("Cache-Control", "no-store");
   res.json({ ok: true, plan: planNationalSearchIntelligenceCollection(slug) });
+});
+
+router.post("/growth-engine/:slug/commercial-competitors/discover", async (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  if (!isNationalGrowthPlatform(slug)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Commercial competitor discovery is available for NATIONAL Growth Platform tenants only.",
+    });
+  }
+  try {
+    const live = req.body?.live === true || req.body?.live === "true" || req.query.live === "1";
+    const plan = buildCommercialCompetitorDiscoveryPlan(slug);
+    console.log("COMMERCIAL_COMPETITOR_DISCOVERY_PLAN " + JSON.stringify(plan, null, 2));
+    const result = await runCommercialCompetitorDiscovery({ slug, live, persist: true });
+    res.json({
+      ok: result.status === "complete" || result.status === "insufficient-evidence",
+      plan,
+      result,
+      rankedKeywordRequests: result.rankedKeywordRequests ?? 0,
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.get("/growth-engine/:slug/commercial-competitors", (req, res) => {
+  const slug = resolveSlug(req.params.slug);
+  if (!slug) return res.status(400).json({ ok: false, error: "Invalid slug" });
+  const plan = buildCommercialCompetitorDiscoveryPlan(slug);
+  const result = readCommercialCompetitorDiscovery(slug);
+  res.json({ ok: true, plan, result, rankedKeywordRequests: result?.rankedKeywordRequests ?? 0 });
 });
 
 router.post("/growth-engine/:slug/search-intelligence/collect", async (req, res) => {

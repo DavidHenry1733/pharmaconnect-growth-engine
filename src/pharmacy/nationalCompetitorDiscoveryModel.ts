@@ -12,10 +12,15 @@
  * - local map ranking
  */
 
+export const COMMERCIAL_DISCOVERY_CANDIDATE_LIMIT = 20;
+export const COMMERCIAL_DISCOVERY_SERP_DEPTH = 10;
+
 export type NationalCompetitorDiscoverySource =
   | "search-engine"
-  | "known-market-competitor"
+  | "organic-overlap"
   | "website-evidence"
+  | "business-intelligence"
+  | "known-market-competitor"
   | "operator-confirmed";
 
 export type NationalCompetitorQualification =
@@ -62,6 +67,17 @@ export interface NationalCompetitorDiscoveryCandidate {
 
   evidenceUrls: string[];
   capturedAt: string;
+
+  role?: string;
+  commercialProvider?: boolean;
+  targetMarketRelevance?: boolean;
+  marketRelevance?: boolean;
+  serviceOverlap?: boolean;
+  detectedServices?: string[];
+  overlappingServices?: string[];
+  nonOverlappingServices?: string[];
+  discoveryEvidence?: string;
+  qualificationReason?: string;
 }
 
 export interface NationalCompetitorDiscoveryResult {
@@ -88,12 +104,24 @@ export interface NationalCompetitorDiscoveryResult {
     | "failed";
 
   errors: string[];
+
+  businessName?: string;
+  domain?: string;
+  businessType?: string;
+  marketScope?: string;
+  commercialServices?: string[];
+  collectionPlan?: Record<string, unknown>;
+  rankedKeywordRequests?: number;
+  directCommercialCompetitors?: number;
+  adjacentCommercialProviders?: number;
+  evidenceLimitations?: string[];
+  sparseOrganicFootprint?: boolean;
 }
 
 export function emptyNationalCompetitorDiscoveryResult(
   slug: string,
   marketCountry = "United Kingdom",
-  targetCustomerMarket = "UK community pharmacies",
+  targetCustomerMarket = "",
 ): NationalCompetitorDiscoveryResult {
   return {
     version: 1,
@@ -114,5 +142,11 @@ export function emptyNationalCompetitorDiscoveryResult(
     status: "draft",
 
     errors: [],
+    rankedKeywordRequests: 0,
+    directCommercialCompetitors: 0,
+    adjacentCommercialProviders: 0,
+    evidenceLimitations: [],
+    sparseOrganicFootprint: false,
+    commercialServices: [],
   };
 }

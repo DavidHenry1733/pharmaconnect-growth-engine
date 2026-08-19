@@ -39,6 +39,14 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, renderWebsiteIntelligencePage(slug));
       return;
     }
+    if (
+      url.pathname === "/api/growth-engine/search-intelligence" ||
+      url.pathname === "/api/growth-engine/local-market"
+    ) {
+      const { renderSearchIntelligencePage, renderLocalMarketPage } = await import("../src/pharmacy/growthEnginePageRenderers.ts");
+      send(res, 200, url.pathname.endsWith("local-market") ? renderLocalMarketPage(slug, null) : renderSearchIntelligencePage(slug));
+      return;
+    }
     send(res, 404, "<pre>Not found</pre>");
   } catch (err) {
     send(res, 500, `<pre>${String(err instanceof Error ? err.stack || err.message : err)}</pre>`);

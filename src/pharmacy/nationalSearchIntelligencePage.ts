@@ -16,6 +16,8 @@ import type {
   NationalSearchIntelligenceSnapshot,
 } from "./nationalSearchIntelligenceV1Model.ts";
 import { PARTIAL_COLLECTION_CUSTOMER_MESSAGE } from "./nationalSearchIntelligenceV1Model.ts";
+import { readCommercialCompetitorDiscovery } from "./nationalCommercialCompetitorDiscoveryService.ts";
+import type { NationalCompetitorDiscoveryCandidate, NationalCompetitorDiscoveryResult } from "./nationalCompetitorDiscoveryModel.ts";
 
 function esc(v: unknown): string {
   return String(v ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m] || m));
@@ -158,6 +160,63 @@ function competitorCard(row: NationalOrganicSearchCompetitor): string {
 </article>`;
 }
 
+function commercialDiscoveryCard(row: NationalCompetitorDiscoveryCandidate): string {
+  const qualified = row.qualification === "qualified" && row.role === "commercial_competitor";
+  const role = (row.role || "insufficient_evidence").replace(/_/g, " ");
+  return `<article class="ge-competitor" data-cp02-candidate="${esc(row.domain)}" data-cp02-role="${esc(row.role || "")}" data-cp02-qualified="${qualified ? "yes" : "no"}">
+<div class="ge-competitor-head">
+<div>
+<p class="ge-competitor-name">${esc(row.name)}</p>
+<p class="ge-meta">${esc(row.domain)} · ${esc(role)} · ${esc(row.qualification)}</p>
+</div>
+<span class="ge-pill">${esc(qualified ? "direct commercial competitor" : role)}</span>
+</div>
+<p class="ge-meta">Classification: ${esc(role)}</p>
+<p class="ge-meta">Discovery source: ${esc(row.source)} · ${esc(row.discoveryEvidence || row.sourceQuery || "—")}</p>
+<p class="ge-meta">Target customer relevance: ${esc(row.targetMarketRelevance ? "YES" : "NO")}</p>
+<p class="ge-meta">Commercial provider: ${esc(row.commercialProvider ? "YES" : "NO")}</p>
+<p class="ge-meta">Detected commercial services: ${esc((row.detectedServices || []).join(", ") || "—")}</p>
+<p class="ge-meta">Material overlapping services: ${esc((row.overlappingServices || []).join(", ") || "—")}</p>
+<p class="ge-meta">Market relevance: ${esc(row.marketRelevance ? "YES" : "NO")}</p>
+<p class="ge-meta">Qualification: ${esc(qualified ? "PASS" : "FAIL")}</p>
+<p class="ge-meta">Why: ${esc(row.qualificationReason || row.qualificationReasons.join(" ") || "Commercial gate assessed.")}</p>
+<p class="ge-meta">Discovered is not the same as commercially qualified.</p>
+</article>`;
+}
+
+function renderCommercialCompetitorDiscoveryPanel(slug: string): string {
+  const result: NationalCompetitorDiscoveryResult | null = readCommercialCompetitorDiscovery(slug);
+  const candidates = result?.candidates || [];
+  const direct = result?.directCommercialCompetitors ?? candidates.filter((row) => row.role === "commercial_competitor" && row.qualification === "qualified").length;
+  const adjacent = result?.adjacentCommercialProviders ?? candidates.filter((row) => row.role === "adjacent_commercial_provider").length;
+  const rejected = Math.max(0, candidates.length - direct - adjacent);
+  const status = result?.status || "draft";
+  const services = (result?.commercialServices || []).join(" | ") || "—";
+  const limitations = (result?.evidenceLimitations || []).join(" ");
+  const cards = candidates.length
+    ? candidates.map(commercialDiscoveryCard).join("")
+    : `<p class="ge-lead">No commercial competitor candidates have been discovered yet. Discovery uses Business Intelligence services and market, not the tenant's organic ranking footprint alone.</p>`;
+  return `<div class="ge-panel" data-cp02-page="commercial-competitor-discovery" data-cp02-status="${esc(status)}" data-cp02-candidates="${candidates.length}" data-cp02-direct="${direct}" data-cp02-adjacent="${adjacent}" data-cp02-rejected="${rejected}" data-cp02-ranked-keywords="${result?.rankedKeywordRequests ?? 0}">
+<h2>Commercial competitor discovery</h2>
+<p class="ge-lead">Which real businesses compete for substantially the same customers by selling materially overlapping commercial services? Organic keyword overlap is discovery evidence only and cannot pass this gate.</p>
+<div class="ge-grid-2" data-cp02-section="summary">
+<div class="ge-card"><h3>DISCOVERY STATUS</h3><p data-cp02-discovery-status="${esc(status)}">${esc(status.toUpperCase())}</p></div>
+<div class="ge-card"><h3>Business</h3><p data-cp02-business="${esc(result?.businessName || "")}">${esc(result?.businessName || "Not discovered yet")}</p></div>
+<div class="ge-card"><h3>Target customer</h3><p data-cp02-target-customer="${esc(result?.targetCustomerMarket || "")}">${esc(result?.targetCustomerMarket || "—")}</p></div>
+<div class="ge-card"><h3>Market</h3><p data-cp02-market="${esc(result?.marketCountry || "")}">${esc([result?.marketCountry, result?.marketScope].filter(Boolean).join(" · ") || "—")}</p></div>
+<div class="ge-card"><h3>Commercial services</h3><p data-cp02-services="${esc(services)}">${esc(services)}</p></div>
+<div class="ge-card"><h3>Candidates discovered</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-candidate-count="${candidates.length}">${candidates.length}</p></div>
+<div class="ge-card"><h3>Direct commercial competitors</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-direct-count="${direct}">${direct}</p></div>
+<div class="ge-card"><h3>Adjacent commercial providers</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-adjacent-count="${adjacent}">${adjacent}</p></div>
+<div class="ge-card"><h3>Rejected / non-competitors</h3><p style="font-size:28px;font-weight:900;margin:0" data-cp02-rejected-count="${rejected}">${rejected}</p></div>
+<div class="ge-card"><h3>Evidence limitations</h3><p data-cp02-limitations="${esc(limitations)}">${esc(limitations || "None recorded.")}</p></div>
+<div class="ge-card"><h3>Ranked-keyword expansion</h3><p data-cp02-ranked-keyword-requests="${result?.rankedKeywordRequests ?? 0}">COMPETITOR_RANKED_KEYWORD_REQUESTS=${result?.rankedKeywordRequests ?? 0}</p></div>
+</div>
+${direct === 0 && status === "complete" ? `<p class="ge-lead" data-cp02-zero-direct>0 DIRECT COMMERCIAL COMPETITORS QUALIFIED. ${esc(limitations || "Current evidence did not prove all commercial conditions.")}</p>` : ""}
+<div data-cp02-section="candidates">${cards}</div>
+</div>`;
+}
+
 function competitorKeywordSection(universe: NationalCompetitorKeywordUniverse): string {
   const rows = universe.keywords.slice(0, 100);
   const empty = universe.status === "error"
@@ -251,7 +310,8 @@ export function renderNationalSearchIntelligencePage(
     ? snapshot.competitorKeywordUniverses.map(competitorKeywordSection).join("")
     : `<p class="ge-lead" data-ni03c2-section="zero-paid-expansion">${snapshot.status === "not_collected" ? "Competitor keyword universes will appear after collection." : "Paid competitor expansions: 0. No commercially qualified competitors were selected for ranked-keyword expansion."}</p>`;
 
-  const body = `<div class="ge-panel" data-ni03b-section="search-intelligence">
+  const body = `${renderCommercialCompetitorDiscoveryPanel(slug)}
+<div class="ge-panel" data-ni03b-section="search-intelligence">
 <h2>Search Intelligence</h2>
 <p class="ge-lead">What Google already knows about this national digital-growth business — organic rankings and search competitors, not nearby pharmacies.</p>
 <div class="ge-grid-2" data-ni03b-section="collection-meta">
