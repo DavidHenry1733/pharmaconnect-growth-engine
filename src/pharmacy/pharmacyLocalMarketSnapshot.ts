@@ -184,15 +184,20 @@ export function loadFrozenCampaignSelectedAreas(
   const raw = readJson<{ generationContext?: { selectedAreas?: Array<Record<string, unknown>> } }>(file);
   const areas = raw?.generationContext?.selectedAreas;
   if (!areas?.length) return null;
-  return areas
-    .map((a) => ({
-      areaName: String(a.areaName || "").trim(),
-      areaSlug: String(a.areaSlug || "").trim(),
-      selected: a.selected !== false,
-      order: typeof a.order === "number" ? a.order : undefined,
-      priority: typeof a.priority === "number" ? a.priority : undefined,
-    }))
-    .filter((a) => a.areaName && a.areaSlug);
+  const mapped = areas
+    .map((a) => {
+      const areaName = String(a.areaName || "").trim();
+      const areaSlug = String(a.areaSlug || "").trim() || areaName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      return {
+        areaName,
+        areaSlug,
+        selected: a.selected !== false,
+        order: typeof a.order === "number" ? a.order : undefined,
+        priority: typeof a.priority === "number" ? a.priority : undefined,
+      };
+    })
+    .filter((a) => a.areaName && a.areaSlug && a.selected);
+  return mapped.length ? mapped : null;
 }
 
 const NON_GP_HEALTHCARE_NAME =
