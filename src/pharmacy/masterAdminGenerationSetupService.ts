@@ -13,6 +13,8 @@ import {
 } from "./pharmacyAreaDiscoveryService.ts";
 import { loadCityAreaData } from "../area/loadCityAreaData.ts";
 import type { PharmacyProfileData, ProfileAreaEntry } from "./pharmacyProfileSchema.ts";
+import { slugifyArea } from "./pharmacyAreaNarrativeProfiles.ts";
+import { projectCanonicalSelectionOntoCampaign } from "./masterAdminSavedLocalitySelectionService.ts";
 import { getPharmacyProfilePath, safePharmacySlug, WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
 import {
   ensureComponentDnaPersisted,
@@ -303,8 +305,16 @@ export function saveGenerationSetupLocalAreas(
     .filter((a) => text(a.areaName))
     .map((a, idx) => {
       const known = byName.get(a.areaName.toLowerCase());
+      const areaName = a.areaName.trim();
+      const knownRec = known as (typeof known & {
+        latitude?: number | null;
+        longitude?: number | null;
+        distanceMethod?: string;
+        distanceProvenance?: Record<string, unknown>;
+      }) | undefined;
       return {
-        areaName: a.areaName.trim(),
+        areaName,
+        areaId: slugifyArea(areaName),
         areaType: known?.areaType || "neighbourhood",
         priority: idx + 1,
         order: idx + 1,
@@ -312,6 +322,12 @@ export function saveGenerationSetupLocalAreas(
         source: known?.evidenceSource || "generation-setup",
         confidence: known?.confidence ?? 70,
         tier: "secondary",
+        distanceKm: known?.distanceKm ?? null,
+        distanceLabel: known?.distanceLabel || "Distance unavailable",
+        distanceMethod: knownRec?.distanceMethod,
+        latitude: knownRec?.latitude ?? null,
+        longitude: knownRec?.longitude ?? null,
+        distanceProvenance: knownRec?.distanceProvenance,
       } satisfies ProfileAreaEntry;
     });
 
@@ -328,6 +344,7 @@ export function saveGenerationSetupLocalAreas(
   });
 
   writeSetupProfile(safe, synced as PharmacyProfileData);
+  projectCanonicalSelectionOntoCampaign(safe);
   return buildGenerationSetupState(safe);
 }
 

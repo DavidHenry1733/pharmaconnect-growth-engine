@@ -1310,9 +1310,21 @@ router.post("/master-admin-platform/customers/:slug/locality-pages/generate", (r
     serviceId: req.body?.serviceId ? String(req.body.serviceId) : undefined,
   });
   if (!outcome.ok) {
-    return res.status(409).json({ ok: false, error: outcome.error, blockers: outcome.blockers, jobId: outcome.jobId });
+    return res.status(409).json({
+      ok: false,
+      error: outcome.error,
+      blockers: outcome.blockers,
+      jobId: outcome.jobId,
+      selectedCount: outcome.selectedCount,
+    });
   }
-  res.json({ ok: true, async: true, jobId: outcome.jobId, customer: buildMasterAdminCustomerRecordLite(slug) });
+  res.json({
+    ok: true,
+    async: true,
+    jobId: outcome.jobId,
+    selectedCount: outcome.selectedCount,
+    customer: buildMasterAdminCustomerRecordLite(slug),
+  });
 });
 
 router.post("/master-admin-platform/customers/:slug/locality-pages/regenerate-all", (req, res) => {

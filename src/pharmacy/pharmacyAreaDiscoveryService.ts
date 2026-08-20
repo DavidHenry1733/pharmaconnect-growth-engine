@@ -125,7 +125,7 @@ export function syncProfileAreaCompatibility(data: Partial<PharmacyProfileData>)
   }
 
   const merged = [...byName.values()].sort((a, b) => a.order - b.order || a.priority - b.priority);
-  const selected = merged.filter((a) => a.selected);
+  const selected = merged.filter((a) => a.selected !== false);
   const allNames = merged.map((a) => a.areaName).filter(Boolean);
   const selectedNames = selected.map((a) => a.areaName);
   const manualNames = (data.manualAreas || []).filter(Boolean);
@@ -174,7 +174,7 @@ export function resolveProfileCampaignAreas(
 ): Array<{ areaName: string; selected: boolean; source: string; priority: number }> {
   const synced = syncProfileAreaCompatibility(profile);
   const entries = synced.selectedAreas?.length
-    ? synced.selectedAreas.filter((a) => a.selected)
+    ? synced.selectedAreas.filter((a) => a.selected !== false)
     : (synced.rankingAreas || []).map((name, i) => ({
         areaName: name,
         selected: true,
