@@ -321,6 +321,8 @@ function applyBranchToSnapshot(snapshot: WebsiteImportSnapshot, branch: Detected
         ...intel,
         identity: {
           ...intel.identity,
+          websiteUrl: branch.branchUrl || intel.identity.websiteUrl,
+          resolvedUrl: branch.branchUrl || intel.identity.resolvedUrl,
           logoUrl: branch.logoUrl || parentBrand.logoUrl || intel.identity.logoUrl,
           brandPrimaryColor: parentBrand.brandPrimaryColor || intel.identity.brandPrimaryColor,
           brandSecondaryColor: parentBrand.brandSecondaryColor || intel.identity.brandSecondaryColor,
@@ -346,6 +348,7 @@ function applyBranchToSnapshot(snapshot: WebsiteImportSnapshot, branch: Detected
     ...snapshot,
     status: "imported",
     message: `Branch selected: ${branch.branchName}`,
+    websiteUrl: branch.branchUrl || snapshot.websiteUrl,
     phone: branch.phone,
     email: branch.email,
     address: branch.addressLine1,
@@ -458,6 +461,8 @@ function syncSetupProfileFromSelectedBranch(
     postcode: branch.postcode || data.postcode,
     openingHours: branch.openingHours || data.openingHours,
     logoUrl: snapshot.logoUrl || branch.logoUrl || data.logoUrl,
+    website: branch.branchUrl || data.website,
+    googlePlaceId: branch.googlePlaceId || data.googlePlaceId,
     websiteImportSnapshot: snapshot,
   };
 }
