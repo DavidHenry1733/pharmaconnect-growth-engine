@@ -20,9 +20,17 @@ function sendHtml(res: import("express").Response, html: string): void {
   res.status(200).send(html);
 }
 
+function queryParamString(raw: unknown): string | undefined {
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw) && typeof raw[0] === "string") return raw[0];
+  return undefined;
+}
+
 function previewSlug(req: import("express").Request): string {
-  const raw = req.query.slug ?? req.query.tenant;
-  const value = typeof raw === "string" ? raw : Array.isArray(raw) && typeof raw[0] === "string" ? raw[0] : undefined;
+  const value =
+    queryParamString(req.query.slug) ??
+    queryParamString(req.query.tenant) ??
+    queryParamString(req.query.customer);
   return resolvePreviewTenantSlug(value);
 }
 
@@ -71,7 +79,7 @@ function registerServiceRoutes(serviceId: string): void {
     sendHtml(res, renderBenchmarkPagePreviewHtml(file, serviceId, slug, pageSlug));
   });
 
-  router.get(`${base}/local/:areaSlug`, (req, res) => {
+  const sendLocalPage = (req: import("express").Request, res: import("express").Response): void => {
     const slug = previewSlug(req);
     const areaSlug = sanitisePreviewPageSlug(req.params.areaSlug);
     if (!areaSlug) {
@@ -84,22 +92,10 @@ function registerServiceRoutes(serviceId: string): void {
       return;
     }
     sendHtml(res, renderBenchmarkPagePreviewHtml(file, serviceId, slug, areaSlug));
-  });
+  };
 
-  router.get(`${base}/local/:areaSlug/`, (req, res) => {
-    const slug = previewSlug(req);
-    const areaSlug = sanitisePreviewPageSlug(req.params.areaSlug);
-    if (!areaSlug) {
-      res.status(400).send("Invalid area slug");
-      return;
-    }
-    const file = resolveBenchmarkPageHtmlPath(serviceId, areaSlug, slug);
-    if (!file) {
-      res.status(404).send("Local cluster page not found");
-      return;
-    }
-    sendHtml(res, renderBenchmarkPagePreviewHtml(file, serviceId, slug, areaSlug));
-  });
+  router.get(`${base}/local/:areaSlug`, sendLocalPage);
+  router.get(`${base}/local/:areaSlug/`, sendLocalPage);
 
   router.get(`${base}/packs/:packId`, (req, res) => {
     const slug = previewSlug(req);
