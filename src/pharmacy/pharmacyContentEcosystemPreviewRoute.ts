@@ -9,8 +9,11 @@ import { buildPharmacyServicePageProfile } from "./pharmacyServicePageProfileCon
 import {
   resolveClusterPageSlug,
   resolveClusterPageFilesystemRelativePath,
+  buildContentEcosystemLocalPreviewUrl,
 } from "./pharmacyClusterPageUrlResolver.ts";
 import { PHARMACY_WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
+
+export { buildContentEcosystemLocalPreviewUrl };
 
 
 type EcosystemAsset = {
@@ -545,19 +548,6 @@ function compactSlugKey(value: string): string {
   return String(value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
-}
-
-/** Shared locality-review / ecosystem-preview URL builder. Always carries tenant slug when supplied. */
-export function buildContentEcosystemLocalPreviewUrl(
-  serviceId: string,
-  areaSlug: string,
-  tenantSlug?: string | null,
-): string {
-  const service = encodeURIComponent(String(serviceId || "").trim());
-  const area = encodeURIComponent(String(areaSlug || "").trim());
-  const cleaned = String(tenantSlug || "").trim();
-  const slugQ = cleaned ? `?slug=${encodeURIComponent(cleaned)}` : "";
-  return `/api/pharmacy-content-ecosystem-preview/${service}/local/${area}/${slugQ}`;
 }
 
 /** Inject the active customer slug into ecosystem-preview links that omitted it. */

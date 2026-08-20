@@ -48,7 +48,7 @@ import {
 } from "./masterAdminServicePageGenerationIdentity.ts";
 import { readActiveServiceCampaignSelection } from "./masterAdminActiveServiceCampaignStore.ts";
 import { readPharmacyCampaignStore } from "./pharmacyCampaignService.ts";
-import { buildContentEcosystemLocalPreviewUrl } from "./pharmacyContentEcosystemPreviewRoute.ts";
+import { buildContentEcosystemLocalPreviewUrl } from "./pharmacyClusterPageUrlResolver.ts";
 import {
   finishWorkflowExecution,
   getLastRecordedWorkflowStage,
