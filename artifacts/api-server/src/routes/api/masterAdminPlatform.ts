@@ -75,6 +75,7 @@ import { buildImportedEvidenceReview } from "../../../../../src/pharmacy/masterA
 import {
   buildWebsiteBranchSelectionPayload,
   confirmManualWebsiteBranch,
+  isBranchSelectionBlocking,
   markNoneOfTheseBranches,
   resetCustomerBranchSelection,
   selectWebsiteBranch,
@@ -1107,6 +1108,12 @@ router.post("/master-admin-platform/customers/:slug/google-candidates/select", a
   const user = resolveUser(req);
   const placeId = String(req.body?.placeId || "").trim();
   if (!placeId) return res.status(400).json({ ok: false, error: "placeId required" });
+  if (isBranchSelectionBlocking(slug)) {
+    return res.status(409).json({
+      ok: false,
+      error: "Website branch selection is required before Google listing selection.",
+    });
+  }
   try {
     const { selectGoogleCandidateByPlaceId } = await import("../../../../../src/pharmacy/masterAdminCanonicalGoogleService.ts");
     const result = await selectGoogleCandidateByPlaceId(slug, placeId, user);

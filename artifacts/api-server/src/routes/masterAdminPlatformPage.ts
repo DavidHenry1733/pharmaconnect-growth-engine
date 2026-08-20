@@ -1621,7 +1621,22 @@ function copyCustomerCredentials(){
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function fmt(iso){if(!iso)return'—';try{return new Date(iso).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}catch{return iso}}
 function healthDot(l){return l==='healthy'?'health-healthy':l==='warning'?'health-warning':'health-offline'}
-function toast(msg,isError){const el=document.getElementById('toast');el.textContent=msg;el.style.borderColor=isError?'#ef4444':'#475569';el.classList.add('show');setTimeout(()=>el.classList.remove('show'),4000)}
+function apiErrorMessage(err,fallback){
+  if(err==null||err==='')return fallback||'Request failed';
+  if(typeof err==='string')return err;
+  if(typeof err.error==='string')return err.error;
+  if(err.error&&typeof err.error.message==='string')return err.error.message;
+  if(typeof err.message==='string'&&err.message)return err.message;
+  try{return String(err)}catch(_e){return fallback||'Request failed'}
+}
+function toast(msg,isError){
+  const el=document.getElementById('toast');
+  if(!el)return;
+  el.textContent=apiErrorMessage(msg,isError?'Request failed':'Done');
+  el.style.borderColor=isError?'#ef4444':'#475569';
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),4000);
+}
 /** CPR-SERVICE-PREVIEW-01 — Product Owner preview links must carry login handoff (_t) when cookies are absent. */
 function withAuthHandoff(href){
   if(!href||href==='#')return href;
@@ -1654,7 +1669,13 @@ async function api(path,opts){
     const data=ct.includes('application/json')?await res.json().catch(()=>({})):null;
     if(!res.ok){
       if(res.redirected&&String(res.url||'').includes('/api/login'))throw new Error('Authentication required — sign in again.');
-      throw new Error((data&&(data.message||data.error))||res.statusText||('HTTP '+res.status));
+      let errMsg='';
+      if(data){
+        if(typeof data.error==='string')errMsg=data.error;
+        else if(data.error&&typeof data.error.message==='string')errMsg=data.error.message;
+        else if(typeof data.message==='string')errMsg=data.message;
+      }
+      throw new Error(errMsg||res.statusText||('HTTP '+res.status));
     }
     if(!data)throw new Error('Expected JSON response but received '+ct);
     return data;
@@ -5098,30 +5119,20 @@ function renderBranchSelectionPanel(branchSelection){
     }
   }
   if(branches.length){
-    html+='<table class="local-coverage-area-table" style="font-size:.72rem;margin-top:10px"><thead><tr><th>Pharmacy name</th><th>Address</th><th>Town/City</th><th>Postcode</th><th>Telephone</th><th>Website URL</th><th>Confidence</th><th>Source</th><th>Google candidate</th><th></th></tr></thead><tbody>';
+    html+='<div style="overflow:auto;max-width:100%;margin-top:10px"><table class="local-coverage-area-table" style="font-size:.72rem;min-width:960px"><thead><tr><th>Action</th><th>Pharmacy name</th><th>Address</th><th>Town/City</th><th>Postcode</th><th>Telephone</th><th>Website URL</th><th>Confidence</th><th>Source</th><th>Google candidate</th></tr></thead><tbody>';
     html+=branches.map(b=>{
       const selected=resolution.selectedBranchId===b.branchId;
-      const pending=pendingWebsiteBranchId===b.branchId;
-      const googleLabel=b.googleBusinessName?esc(b.googleBusinessName)+' ('+esc(b.googlePlaceId||'—')+')':'—';
+      const googleLabel=b.googleBusinessName?esc(b.googleBusinessName)+' ('+esc(b.googlePlaceId||'—')+')':(b.googlePlaceId?esc(b.googlePlaceId):'—');
       const sourceLabel=(b.evidenceSources&&b.evidenceSources.length)?esc(b.evidenceSources.map(s=>s.detectionMethod).join(', ')):'website-import';
       const conf=b.googleMatchConfidence!=null?String(b.googleMatchConfidence):(b.detectionSignals&&b.detectionSignals.length?'85':'—');
       const actionCell=selected
-        ?'<span style="color:#4ade80">Confirmed</span>'
-        :pending
-          ?'<span style="color:#fbbf24">Pending confirm</span>'
-          :requires
-            ?'<button class="btn secondary" type="button" style="font-size:.62rem;padding:4px 8px" data-ier-branch-select="1" data-branch-id="'+esc(b.branchId)+'">Select branch</button>'
-            :'';
-      return '<tr'+(selected||pending?' style="background:#0f2f23"':'')+'><td><strong>'+esc(b.branchName||'Unnamed branch')+'</strong><div style="color:#64748b">'+esc(b.parentBrandName||'')+'</div></td><td>'+esc(b.addressLine1||'—')+(b.addressLine2?('<div>'+esc(b.addressLine2)+'</div>'):'')+'</td><td>'+esc(b.town||'—')+'</td><td>'+esc(b.postcode||'—')+'</td><td>'+esc(b.phone||'—')+'</td><td>'+(b.branchUrl?'<a href="'+esc(b.branchUrl)+'" target="_blank" rel="noopener">'+esc(b.branchUrl)+'</a>':'—')+'</td><td>'+esc(conf)+'</td><td style="font-size:.65rem">'+sourceLabel+'</td><td>'+googleLabel+'</td><td>'+actionCell+'</td></tr>';
+        ?'<span style="color:#4ade80;white-space:nowrap">Confirmed</span>'
+        :requires
+          ?'<button class="btn" type="button" style="font-size:.72rem;padding:6px 10px;white-space:nowrap" data-ier-branch-select="1" data-branch-id="'+esc(b.branchId)+'">Use This Pharmacy</button>'
+          :'';
+      return '<tr'+(selected?' style="background:#0f2f23"':'')+'><td>'+actionCell+'</td><td><strong>'+esc(b.branchName||'Unnamed branch')+'</strong><div style="color:#64748b">'+esc(b.parentBrandName||'')+'</div></td><td>'+esc(b.addressLine1||'—')+(b.addressLine2?('<div>'+esc(b.addressLine2)+'</div>'):'')+'</td><td>'+esc(b.town||'—')+'</td><td>'+esc(b.postcode||'—')+'</td><td>'+esc(b.phone||'—')+'</td><td>'+(b.branchUrl?'<a href="'+esc(b.branchUrl)+'" target="_blank" rel="noopener">'+esc(b.branchUrl)+'</a>':'—')+'</td><td>'+esc(conf)+'</td><td style="font-size:.65rem">'+sourceLabel+'</td><td>'+googleLabel+'</td></tr>';
     }).join('');
-    html+='</tbody></table>';
-    if(requires&&pendingWebsiteBranchId){
-      const pendingBranch=branches.find(b=>b.branchId===pendingWebsiteBranchId);
-      if(pendingBranch){
-        html+='<div class="cqr-overall ready" style="margin-top:12px;font-size:.78rem"><div style="font-weight:800;margin-bottom:6px">Selected for confirmation</div><div><strong>'+esc(pendingBranch.branchName||'Unnamed branch')+'</strong></div><div style="color:#94a3b8;margin-top:4px">'+esc(pendingBranch.addressLine1||'—')+(pendingBranch.addressLine2?(', '+esc(pendingBranch.addressLine2)):'')+'</div><div style="color:#94a3b8">'+esc(pendingBranch.town||'—')+' · '+esc(pendingBranch.postcode||'—')+'</div><div style="color:#94a3b8;margin-top:4px">'+esc(pendingBranch.phone||'—')+'</div></div>';
-      }
-      html+='<div style="margin-top:12px"><button class="btn" type="button" onclick="confirmStagedWebsiteBranch()">Use this pharmacy branch</button> <button class="btn secondary" type="button" onclick="pendingWebsiteBranchId=null;renderBranchSelectionPanel(lastRenderedBranchSelection)">Cancel</button></div>';
-    }
+    html+='</tbody></table></div>';
   }else if(requires){
     html+='<div class="bpr-error-panel" style="margin-top:10px"><p style="margin:0 0 8px">No reliable branch list was detected. Enter the branch details from imported evidence.</p></div>';
     html+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:8px;font-size:.72rem">'+
@@ -5156,7 +5167,8 @@ function renderImportedEvidenceReview(review){
     '<p class="ci-narrative" style="margin-bottom:8px">Search for the pharmacy Google listing. Paste a Maps URL or leave blank to search by business name and postcode.</p>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="ierGoogleSearchInput" placeholder="Google Maps URL (optional)" style="flex:1;min-width:200px"/><button class="btn secondary" type="button" onclick="runGoogleCandidateSearch()">Search Google Listings</button></div>';
   const candidates=review.googleCandidates||[];
-  document.getElementById('ierGoogleCandidates').innerHTML=candidates.length?('<table class="local-coverage-area-table" style="font-size:.72rem"><thead><tr><th>Business</th><th>Address</th><th>Place ID</th><th>Rating</th><th></th></tr></thead><tbody>'+candidates.map(c=>'<tr><td>'+esc(c.businessName)+'</td><td>'+esc(c.address)+'</td><td><code>'+esc(c.placeId)+'</code></td><td>'+(c.rating!=null?esc(String(c.rating)):'—')+'</td><td><button class="btn secondary" type="button" style="font-size:.62rem;padding:4px 8px" data-place-id="'+esc(c.placeId)+'" onclick="selectGoogleCandidate(this.dataset.placeId)">Select</button></td></tr>').join('')+'</tbody></table>'):'<p class="ci-narrative">No search results yet — run Search Google Listings.</p>';
+  const branchBlocked=Boolean(review.branchSelection&&review.branchSelection.requiresSelection);
+  document.getElementById('ierGoogleCandidates').innerHTML=candidates.length?('<table class="local-coverage-area-table" style="font-size:.72rem"><thead><tr><th>Business</th><th>Address</th><th>Place ID</th><th>Rating</th><th></th></tr></thead><tbody>'+candidates.map(c=>'<tr><td>'+esc(c.businessName)+'</td><td>'+esc(c.address)+'</td><td><code>'+esc(c.placeId)+'</code></td><td>'+(c.rating!=null?esc(String(c.rating)):'—')+'</td><td>'+(branchBlocked?'<button class="btn secondary" type="button" style="font-size:.62rem;padding:4px 8px" disabled title="Website branch selection is required before Google listing selection.">Select</button>':'<button class="btn secondary" type="button" style="font-size:.62rem;padding:4px 8px" data-place-id="'+esc(c.placeId)+'" onclick="selectGoogleCandidate(this.dataset.placeId)">Select</button>')+'</td></tr>').join('')+'</tbody></table>'):'<p class="ci-narrative">No search results yet — run Search Google Listings.</p>';
   const cmp=review.comparison||[];
   const cmpState=review.comparisonState||(cmp.length?'available':'suppressed');
   document.getElementById('ierComparison').innerHTML=cmpState==='not_applicable'
@@ -5233,7 +5245,7 @@ function bindIerBranchSelectionControls(){
     const btn=e.target&&e.target.closest?e.target.closest('[data-ier-branch-select]'):null;
     if(!btn||btn.disabled)return;
     const branchId=btn.getAttribute('data-branch-id');
-    stageWebsiteBranch(branchId);
+    selectWebsiteBranch(branchId);
   });
 }
 async function openImportedEvidenceReview(){
@@ -5310,7 +5322,7 @@ async function selectWebsiteBranch(branchId){
     if(data.review)renderImportedEvidenceReview(data.review);
     if(data.customer){activeCustomer=data.customer;renderCustomerDetail(data.customer)}
     if(data.workflow){activeCustomer.workflow=data.workflow}
-  }catch(e){toast(e.message,true)}
+  }catch(e){toast(e,true)}
 }
 async function markNoneOfTheseBranches(){
   if(!activeCustomer)return;
@@ -5325,13 +5337,17 @@ async function markNoneOfTheseBranches(){
 }
 async function selectGoogleCandidate(placeId){
   if(!activeCustomer||!placeId)return;
+  if(activeImportedEvidenceReview&&activeImportedEvidenceReview.branchSelection&&activeImportedEvidenceReview.branchSelection.requiresSelection){
+    toast('Website branch selection is required before Google listing selection.',true);
+    return;
+  }
   try{
     const data=await api('/api/master-admin-platform/customers/'+encodeURIComponent(activeCustomer.slug)+'/google-candidates/select',{method:'POST',body:JSON.stringify({placeId:placeId})});
     toast('Google listing selected — confirm in Google Business Profile panel');
     if(data.review)renderImportedEvidenceReview(data.review);
     if(data.customer){activeCustomer=data.customer;renderCustomerDetail(data.customer)}
     if(data.workflow){activeCustomer.workflow=data.workflow}
-  }catch(e){toast(e.message,true)}
+  }catch(e){toast(e,true)}
 }
 function renderBusinessProfileReview(review){
   review=normalizeBusinessProfileReviewPayload(review);
