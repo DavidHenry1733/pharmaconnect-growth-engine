@@ -44,6 +44,9 @@ export interface ProfileAreaEntry {
   score?: number;
   tier?: string;
   postcode?: string;
+  distanceKm?: number | null;
+  distanceLabel?: string;
+  distanceMethod?: string;
 }
 
 /** Wizard V2 competitor selection — stored on profile; not wired to generators. */
@@ -593,6 +596,9 @@ function normalizeAreaEntries(raw: unknown): ProfileAreaEntry[] {
         score: row.score != null ? Number(row.score) : undefined,
         tier: str(row.tier),
         postcode: str(row.postcode),
+        distanceKm: row.distanceKm == null || row.distanceKm === "" ? undefined : Number(row.distanceKm),
+        distanceLabel: str(row.distanceLabel) || undefined,
+        distanceMethod: str(row.distanceMethod) || undefined,
       } satisfies ProfileAreaEntry;
     })
     .filter(Boolean) as ProfileAreaEntry[];

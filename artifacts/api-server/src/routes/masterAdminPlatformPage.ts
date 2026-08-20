@@ -1181,7 +1181,7 @@ let localCoverageSavedConfirmed=false;
 const LOCAL_COVERAGE_MINIMUM=3;
 function formatLocalCoverageDistance(label){
   const text=String(label||'').trim();
-  if(!text||text==='Distance unavailable')return '—';
+  if(!text||text==='Distance unavailable')return 'Distance unavailable';
   const match=text.match(/([\d.]+)\s*km/i);
   return match?match[1]+' km':text;
 }
