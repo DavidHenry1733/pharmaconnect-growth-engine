@@ -4992,7 +4992,60 @@ async function approveCommercialQualityReview(){
 }
 function importStatusLabel(status){return status==='Complete'?'✓ Complete':status==='Failed'?'✗ Failed':'— '+String(status||'Missing')}
 function bprJsStr(v){return String(v??'').replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\'").replace(/[\\r\\n]/g,' ')}
+function bprHoursRowsHtml(days,editable){
+  const rows=days&&days.length?days:[{day:'Monday',hours:''},{day:'Tuesday',hours:''},{day:'Wednesday',hours:''},{day:'Thursday',hours:''},{day:'Friday',hours:''},{day:'Saturday',hours:''},{day:'Sunday',hours:''}];
+  return '<table class="local-coverage-area-table" style="font-size:.78rem;margin:8px 0"><thead><tr><th>Day</th><th>Opening hours</th></tr></thead><tbody>'+
+    rows.map(function(row){
+      const day=row.day||'';
+      const hours=row.hours||'';
+      const cell=editable
+        ?'<input type="text" id="bpr-hours-'+esc(String(day).toLowerCase())+'" placeholder="Closed or opening hours" value="'+esc(hours)+'" style="width:100%"/>'
+        :esc(hours||'—');
+      return '<tr><td>'+esc(day)+'</td><td>'+cell+'</td></tr>';
+    }).join('')+
+    '</tbody></table>';
+}
+function bprOpeningHoursCard(f){
+  const weekly=f.weeklyHours||{};
+  const source=weekly.source||'none';
+  const badge=weekly.sourceBadge||(source==='google'?'Imported from Google':source==='website'?'Imported from website':'');
+  let html='';
+  if(badge) html+='<div style="margin-bottom:8px"><span class="pill">'+esc(badge)+'</span></div>';
+  if(source==='conflict'){
+    html+='<p class="ci-narrative">Google and website hours differ. Confirm which schedule to use. Hours are not combined.</p>';
+    html+='<div class="lbl" style="margin-top:8px">Google</div>'+bprHoursRowsHtml(weekly.googleDays||weekly.days,false);
+    html+='<div class="lbl" style="margin-top:8px">Website</div>'+bprHoursRowsHtml(weekly.websiteDays||[],false);
+    html+='<div class="bpr-card-actions">'+
+      '<button type="button" onclick="bprChooseField(\\''+f.id+'\\',\\'use_google\\',\\''+bprJsStr(f.googleValue||weekly.googleSummary||'')+'\\')">Use Google hours</button>'+
+      '<button type="button" onclick="bprChooseField(\\''+f.id+'\\',\\'use_website\\',\\''+bprJsStr(f.websiteValue||weekly.websiteSummary||'')+'\\')">Use website hours</button>'+
+      '</div>';
+    return html;
+  }
+  const editable=f.reviewTier==='missing'||source==='none';
+  html+=bprHoursRowsHtml(weekly.days,editable);
+  if(editable){
+    html+='<div class="bpr-card-actions"><button type="button" onclick="bprSaveWeeklyHours()">Save hours</button></div>';
+    return html;
+  }
+  if(f.requiresAction){
+    html+='<div class="bpr-card-actions"><button type="button" onclick="bprChooseField(\\''+f.id+'\\',\\'confirm\\',\\''+bprJsStr(f.recommendedValue||f.finalValue||weekly.recommendedSummary||'')+'\\')">Confirm hours</button></div>';
+  }
+  return html;
+}
+function bprSaveWeeklyHours(){
+  const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const parts=days.map(function(day){
+    const el=document.getElementById('bpr-hours-'+day.toLowerCase());
+    const value=el&&el.value?String(el.value).trim():'';
+    return value?day+': '+value:'';
+  }).filter(Boolean);
+  if(!parts.length){toast('Enter at least one day of opening hours',true);return;}
+  bprSaveField('openingHoursSummary','manual',parts.join('; '));
+}
 function bprFieldCardBody(f,showEvidence){
+  if(f.id==='openingHoursSummary'||f.inputType==='opening_hours'){
+    return bprOpeningHoursCard(f);
+  }
   const inputType=f.inputType||'text';
   let actionHtml='';
   if(f.reviewTier==='missing'){

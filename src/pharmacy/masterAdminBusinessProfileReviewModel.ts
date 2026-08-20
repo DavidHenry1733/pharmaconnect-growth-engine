@@ -81,6 +81,7 @@ export interface BusinessProfileReviewField {
   reviewTier: ReviewFieldTier;
   /** Context-aware applicability — approval readiness uses required only. */
   applicability?: ReviewFieldApplicability;
+  weeklyHours?: import("./masterAdminBusinessProfileOpeningHoursService.ts").WeeklyOpeningHoursEvidence;
 }
 
 export interface CompletenessSection {
