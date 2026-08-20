@@ -64,7 +64,6 @@ export const IMPORT_PROVEN_FIELD_IDS = new Set([
   "googlePlaceId",
   "googleMapsUrl",
   "primaryCategory",
-  "openingHoursSummary",
   "logo",
   "brandPrimaryColor",
 ]);
@@ -178,7 +177,14 @@ export function classifyEvidence(
   canonicalValue: string | null,
   meta: FieldMeta,
 ): { classification: ConflictClassification; normalisationApplied: string | null } {
-  const website = isGarbageWebsiteValue(websiteValue) ? null : websiteValue;
+  const website =
+    fieldId === "openingHoursSummary"
+      ? websiteValue && /wptestimonial|\.css/i.test(websiteValue)
+        ? null
+        : websiteValue
+      : isGarbageWebsiteValue(websiteValue)
+        ? null
+        : websiteValue;
   const hasW = Boolean(website);
   const hasG = Boolean(googleValue);
   const hasC = Boolean(canonicalValue);
@@ -256,7 +262,7 @@ export function isSafeToAutoAccept(
   if (meta.lowRiskAutoAccept && (classification === "WEBSITE_ONLY" || classification === "GOOGLE_ONLY")) return true;
   if (
     classification === "GOOGLE_ONLY" &&
-    ["postcode", "googlePlaceId", "googleMapsUrl", "primaryCategory", "email", "address", "openingHoursSummary"].includes(fieldId)
+    ["postcode", "googlePlaceId", "googleMapsUrl", "primaryCategory", "email", "address"].includes(fieldId)
   ) {
     return fieldId !== "address" || true;
   }
@@ -293,7 +299,7 @@ export function pickTrustedValue(
     if (website && google && valuesMateriallyMatch(website, google, FIELD_META[fieldId]?.matchKind || "text").match) {
       return google || website;
     }
-    if (google && ["telephone", "address", "postcode", "openingHoursSummary", "primaryCategory", "googlePlaceId", "googleMapsUrl"].includes(fieldId)) {
+    if (google && ["telephone", "address", "postcode", "primaryCategory", "googlePlaceId", "googleMapsUrl"].includes(fieldId)) {
       return google;
     }
     if (website && !google) return website;
@@ -344,6 +350,19 @@ export function resolveReviewTier(input: {
 
   if (fieldId.startsWith("openingHours_")) {
     return { tier: "verified", requiresAction: false, autoResolved: true };
+  }
+
+  if (fieldId === "openingHoursSummary") {
+    const hoursDecision = Boolean(
+      decision &&
+        ["confirm", "use_website", "use_google", "manual", "auto_accept"].includes(decision.action) &&
+        (normText(decision.finalValue) || googleValue || websiteValue),
+    );
+    if (hoursDecision) return { tier: "verified", requiresAction: false, autoResolved: true };
+    if (!googleValue && !websiteValue && !canonicalValue) {
+      return { tier: "missing", requiresAction: true, autoResolved: false };
+    }
+    return { tier: "needs_confirmation", requiresAction: true, autoResolved: false };
   }
 
   if (classification === "MATCH" || input.autoResolved || IMPORT_PROVEN_FIELD_IDS.has(fieldId)) {
@@ -419,6 +438,11 @@ export function fieldApprovalBlockReason(field: {
   classification: ConflictClassification;
 }): string | null {
   if (!field.blocking || !field.requiresAction) return null;
+  if (field.id === "openingHoursSummary") {
+    if (field.classification === "MISSING") return "Enter opening hours (full week).";
+    if (field.classification === "CONFLICT") return "Review opening hours — sources disagree.";
+    return "Confirm hours.";
+  }
   if (!BUSINESS_DECISION_FIELD_IDS.has(field.id)) return null;
   if (field.id === "pharmacyFirstAvailability") return "Confirm Pharmacy First availability.";
   if (field.id === "consultationRoom") return "Confirm consultation room availability.";

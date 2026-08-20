@@ -70,6 +70,12 @@ import {
   resolveBprFieldApplicability,
   type BprApplicabilityContext,
 } from "./masterAdminBusinessProfileReviewApplicability.ts";
+import {
+  chosenWeeklyDays,
+  resolveBusinessProfileWeeklyHours,
+  weeklyDaysToProfilePatch,
+  type WeeklyOpeningHoursEvidence,
+} from "./masterAdminBusinessProfileOpeningHoursService.ts";
 
 const REVIEW_DIR = path.join(WORKSPACE_ROOT, "data/pharmacy-master-admin/business-profile-review");
 const APPROVAL_DIR = path.join(WORKSPACE_ROOT, "data/pharmacy-master-admin/business-profile-approvals");
@@ -254,13 +260,44 @@ function pickAutoValue(field: Pick<BusinessProfileReviewField, "websiteValue" | 
   return field.recommendedValue || field.canonicalValue || field.googleValue || field.websiteValue;
 }
 
-function openingHoursFromGoogle(hours: string[] | undefined): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of hours || []) {
-    const m = normText(line).match(/^([A-Za-z]+):\s*(.+)$/);
-    if (m) out[m[1]!.toLowerCase()] = m[2]!;
-  }
-  return out;
+function resolveWeeklyHoursForCtx(ctx: EvidenceContext): WeeklyOpeningHoursEvidence {
+  const googleSnap = ctx.profile.googleImportSnapshot as { openingHours?: unknown } | null | undefined;
+  const intel = ctx.websiteSnap.intelligence as
+    | { business?: { openingHours?: unknown } }
+    | null
+    | undefined;
+  return resolveBusinessProfileWeeklyHours({
+    googleIntelOpeningHours: ctx.googleIntel?.openingHours,
+    googleSnapshotOpeningHours: googleSnap?.openingHours,
+    websiteSnapshotOpeningHours: ctx.websiteSnap.openingHours,
+    websiteIntelligenceOpeningHours: intel?.business?.openingHours,
+    websiteDayHours: {
+      openingHoursMonday: ctx.profile.openingHoursMonday,
+      openingHoursTuesday: ctx.profile.openingHoursTuesday,
+      openingHoursWednesday: ctx.profile.openingHoursWednesday,
+      openingHoursThursday: ctx.profile.openingHoursThursday,
+      openingHoursFriday: ctx.profile.openingHoursFriday,
+      openingHoursSaturday: ctx.profile.openingHoursSaturday,
+      openingHoursSunday: ctx.profile.openingHoursSunday,
+    },
+  });
+}
+
+function persistConfirmedWeeklyHours(
+  slug: string,
+  decisions: Record<string, ReviewFieldDecision>,
+): void {
+  const decision = decisions.openingHoursSummary;
+  if (!decision) return;
+  if (!["confirm", "use_google", "use_website", "manual", "auto_accept"].includes(decision.action)) return;
+  const ctx = buildEvidenceContext(slug);
+  const days = chosenWeeklyDays(resolveWeeklyHoursForCtx(ctx), decision.action, decision.finalValue);
+  if (!days.some((row) => row.hours)) return;
+  const data = readSetupProfile(slug);
+  writeSetupProfile(slug, {
+    ...data,
+    ...weeklyDaysToProfilePatch(days),
+  });
 }
 
 function buildEvidenceContext(slug: string): EvidenceContext {
@@ -492,15 +529,24 @@ const FIELD_SPECS: FieldSpec[] = [
     category: "opening_hours",
     blocking: true,
     regulatory: false,
-    website: (c) => {
-      const raw = normText(c.websiteSnap.openingHours);
-      return raw && raw.length > 20 && !raw.includes("wptestimonial") ? raw : null;
-    },
-    google: (c) => (c.googleIntel?.openingHours || []).join(" | ") || null,
+    website: (c) => resolveWeeklyHoursForCtx(c).websiteSummary,
+    google: (c) => resolveWeeklyHoursForCtx(c).googleSummary,
     canonical: (c) => normText(c.profile.openingHours || c.profile.displayOpeningHours) || null,
     recommend: (c) => {
-      const google = (c.googleIntel?.openingHours || []).join(" | ");
-      if (google) return { value: google, source: "Google opening hours — freshest structured evidence", confidence: 88 };
+      const weekly = resolveWeeklyHoursForCtx(c);
+      if (weekly.source === "conflict") {
+        return {
+          value: weekly.recommendedSummary,
+          source: "Google and website hours differ — confirm which schedule to use",
+          confidence: 70,
+        };
+      }
+      if (weekly.source === "google") {
+        return { value: weekly.googleSummary, source: "Imported from Google", confidence: 88 };
+      }
+      if (weekly.source === "website") {
+        return { value: weekly.websiteSummary, source: "Imported from website", confidence: 80 };
+      }
       return { value: null, source: "Opening hours require operator review", confidence: null };
     },
   },
@@ -759,7 +805,9 @@ function enrichReviewField(
 }
 
 function buildDayFields(ctx: EvidenceContext, store: BusinessProfileReviewStore | null): BusinessProfileReviewField[] {
-  const googleHours = openingHoursFromGoogle(ctx.googleIntel?.openingHours);
+  const weekly = resolveWeeklyHoursForCtx(ctx);
+  const googleHours = Object.fromEntries((weekly.googleDays || []).map((row) => [row.day.toLowerCase(), row.hours]));
+  const websiteHours = Object.fromEntries((weekly.websiteDays || []).map((row) => [row.day.toLowerCase(), row.hours]));
   const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
   const daySpec = (day: string): FieldSpec => ({
     id: `openingHours_${day}`,
@@ -767,16 +815,23 @@ function buildDayFields(ctx: EvidenceContext, store: BusinessProfileReviewStore 
     category: "opening_hours",
     blocking: true,
     regulatory: false,
-    website: () => null,
+    website: () => websiteHours[day] || null,
     google: () => googleHours[day] || null,
     canonical: (c) => {
       const label = day.charAt(0).toUpperCase() + day.slice(1);
       return normText(c.profile[`openingHours${label}` as keyof typeof c.profile]) || null;
     },
-    recommend: () =>
-      googleHours[day]
-        ? { value: googleHours[day]!, source: "Google day schedule", confidence: 88 }
-        : { value: null, source: "Missing day hours", confidence: null },
+    recommend: () => {
+      const preferred = googleHours[day] || websiteHours[day] || null;
+      if (preferred) {
+        return {
+          value: preferred,
+          source: googleHours[day] ? "Imported from Google" : "Imported from website",
+          confidence: googleHours[day] ? 88 : 80,
+        };
+      }
+      return { value: null, source: "Missing day hours", confidence: null };
+    },
   });
   return days.map((day) => enrichReviewField(daySpec(day), ctx, store));
 }
@@ -846,6 +901,9 @@ function mergeCanonicalProfileFromImports(slug: string, fields: BusinessProfileR
   };
 
   for (const field of fields) {
+    if (field.id === "openingHoursSummary" || field.id.startsWith("openingHours_")) {
+      if (!field.decision) continue;
+    }
     if (field.reviewTier !== "verified" && field.reviewTier !== "recommended") continue;
     const value = normText(field.finalValue);
     if (!value) continue;
@@ -940,7 +998,12 @@ function stampFieldApplicability(
 function buildFields(ctx: EvidenceContext, store: BusinessProfileReviewStore | null): BusinessProfileReviewField[] {
   const proposal = buildServiceReconciliationProposal(ctx.slug);
   const applicabilityCtx = buildApplicabilityContext(ctx, proposal);
-  const fields = FIELD_SPECS.map((spec) => stampFieldApplicability(enrichReviewField(spec, ctx, store), applicabilityCtx));
+  const weekly = resolveWeeklyHoursForCtx(ctx);
+  const fields = FIELD_SPECS.map((spec) => {
+    const field = stampFieldApplicability(enrichReviewField(spec, ctx, store), applicabilityCtx);
+    if (field.id === "openingHoursSummary") field.weeklyHours = weekly;
+    return field;
+  });
   const dayFields = buildDayFields(ctx, store).map((field) => stampFieldApplicability(field, applicabilityCtx));
   return [...fields, ...dayFields];
 }
@@ -1273,6 +1336,7 @@ export function saveBusinessProfileReview(
     googleEvidenceVersion: ctx.googleIntel?.importedAt || null,
   };
   writeReviewStore(store);
+  persistConfirmedWeeklyHours(slug, decisions);
 
   recordMasterAdminAudit({
     user: operator,
@@ -1309,6 +1373,7 @@ export function acceptAllSafeRecommendations(slug: string, operator: string): Bu
   const existing = readReviewStore(slug);
   const decisions: Record<string, { action: OperatorDecisionAction; finalValue?: string }> = {};
   for (const field of review.fields) {
+    if (field.id === "openingHoursSummary" || field.id.startsWith("openingHours_")) continue;
     if (existing?.decisions[field.id]) continue;
     if (field.reviewTier !== "verified" && field.reviewTier !== "recommended") continue;
     const meta = defaultMeta(field.id);
@@ -1344,8 +1409,16 @@ function applyFinalValuesToProfile(slug: string, fields: BusinessProfileReviewFi
     data.addressLine1 = byId.address.split(",")[0]?.trim() || byId.address;
   }
   if (byId.openingHoursSummary) {
-    data.openingHours = byId.openingHoursSummary;
-    data.displayOpeningHours = byId.openingHoursSummary;
+    const hoursField = fields.find((f) => f.id === "openingHoursSummary");
+    const days = hoursField?.weeklyHours
+      ? chosenWeeklyDays(hoursField.weeklyHours, hoursField.decision?.action || "confirm", byId.openingHoursSummary)
+      : [];
+    if (days.some((row) => row.hours)) {
+      Object.assign(data, weeklyDaysToProfilePatch(days));
+    } else {
+      data.openingHours = byId.openingHoursSummary;
+      data.displayOpeningHours = byId.openingHoursSummary;
+    }
   }
   for (const day of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]) {
     const key = `openingHours_${day.toLowerCase()}`;
