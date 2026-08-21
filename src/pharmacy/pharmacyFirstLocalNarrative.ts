@@ -1087,10 +1087,15 @@ export function buildPharmacyFirstLocalNarrative(
     wordCountEstimate: 0,
     seoTitle: [
       `${serviceName} in ${areaName}`,
-      verified.distanceLabel
-        ? `${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""} of ${pharmacyName}`
-        : pharmacyName,
-    ].join(" | "),
+      verified.landmarks[0]?.name ||
+        (verified.nearbyLocalities[0] ? `near ${verified.nearbyLocalities[0].areaName}` : "") ||
+        (verified.distanceLabel
+          ? `${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""}`
+          : ""),
+      pharmacyName,
+    ]
+      .filter(Boolean)
+      .join(" | "),
     metaDescription: [
       `${pharmacyName} provides ${serviceName} for patients in ${areaName}`,
       geoSummary,

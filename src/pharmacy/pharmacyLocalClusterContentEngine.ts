@@ -570,7 +570,11 @@ function composeServiceVariantPackClusterDraft(
     narrativeType: `service-variant-pack:${input.serviceId}`,
     wordCountEstimate: 0,
     seoTitle: `${input.serviceName} in ${input.areaName}${
-      verified?.distanceLabel ? ` | ${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""}` : ""
+      verified?.landmarks[0]
+        ? ` | ${verified.landmarks[0].name}`
+        : verified?.distanceLabel
+          ? ` | ${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""}`
+          : ""
     } | ${pharmacyName}`,
     metaDescription: [
       `${pharmacyName} provides ${input.serviceName} for patients in ${input.areaName}`,

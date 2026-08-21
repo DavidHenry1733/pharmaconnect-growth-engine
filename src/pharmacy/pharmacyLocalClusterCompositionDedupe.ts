@@ -206,9 +206,11 @@ export function finalizeLocalClusterPageContent(content: LocalClusterPageContent
     title: scrubPublicLocalEngineTerms(step.title),
     body: dedupeFieldWithIntents(step.body, usedKeys, usedIntents, step.title.toLowerCase().includes("next") ? ["referral"] : []),
   }));
-  const accessBody = dedupeFieldWithIntents(content.accessBody, usedKeys, usedIntents, [
+  const accessOwnKeys = new Set<string>();
+  const accessBody = dedupeFieldWithIntents(content.accessBody, accessOwnKeys, usedIntents, [
     "cta",
   ]);
+  for (const key of accessOwnKeys) usedKeys.add(key);
   const clinicalEnvironmentBody = dedupeFieldWithIntents(content.clinicalEnvironmentBody, usedKeys, usedIntents);
   const trustBody = dedupeFieldWithIntents(content.trustBody, usedKeys, usedIntents, ["referral"]);
   const trustIntro = content.trustIntro

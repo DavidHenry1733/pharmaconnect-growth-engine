@@ -140,7 +140,8 @@ export function cardinalFromBearing(deg: number): string {
 
 export function formatVerifiedDistanceKm(km: number): string {
   if (km < 1) return "less than 1 km";
-  return `about ${Math.round(km)} km`;
+  const tenths = Math.round(km * 10) / 10;
+  return `about ${Number.isInteger(tenths) ? String(tenths) : tenths.toFixed(1)} km`;
 }
 
 function loadSavedRelevancePack(slug: string, areaSlug: string): Record<string, unknown> | null {
