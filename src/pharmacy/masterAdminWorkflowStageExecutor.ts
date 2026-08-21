@@ -170,7 +170,8 @@ export async function executeWorkflowStageAction(
         return { ok: true, evidence: "Business profile approved", warnings, errors, result };
       }
       case "orchestrate_competitor_analysis": {
-        const outcome = await runCompetitorAnalysisWorkflowAction(slug, operator);
+        const executingJobId = typeof body.masterAdminJobId === "string" ? body.masterAdminJobId : null;
+        const outcome = await runCompetitorAnalysisWorkflowAction(slug, operator, executingJobId);
         if (!outcome.ok) {
           return { ok: false, evidence: outcome.evidence, warnings, errors: outcome.errors.length ? outcome.errors : [outcome.evidence] };
         }
