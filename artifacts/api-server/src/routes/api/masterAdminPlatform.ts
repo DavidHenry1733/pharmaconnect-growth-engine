@@ -197,6 +197,7 @@ import {
 } from "../../../../../src/pharmacy/masterAdminCommercialIntelligenceDashboardService.ts";
 import {
   approveCommercialIntelligence,
+  findActiveCommercialIntelligenceJob,
 } from "../../../../../src/pharmacy/masterAdminCommercialIntelligenceWorkflowService.ts";
 
 const router = Router();
@@ -618,11 +619,16 @@ router.get(
 
 router.get("/master-admin-platform/customers/:slug/commercial-intelligence-dashboard", (req, res) => {
   const slug = safeAdminSlug(req.params.slug);
-  res.json({
-    ok: true,
-    dashboard: buildCommercialIntelligenceDashboard(slug),
-    customer: buildMasterAdminCustomerRecordLite(slug),
-  });
+  try {
+    res.json({
+      ok: true,
+      dashboard: buildCommercialIntelligenceDashboard(slug),
+      customer: buildMasterAdminCustomerRecordLite(slug),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ ok: false, error: message });
+  }
 });
 
 router.post("/master-admin-platform/customers/:slug/commercial-intelligence-dashboard/approve", (req, res) => {
@@ -637,6 +643,58 @@ router.post("/master-admin-platform/customers/:slug/commercial-intelligence-dash
     dashboard: buildCommercialIntelligenceDashboard(slug),
     customer: buildMasterAdminCustomerRecordLite(slug),
   });
+});
+
+router.post("/master-admin-platform/customers/:slug/commercial-intelligence-dashboard/generate-competitor-analysis", (req, res) => {
+  const slug = safeAdminSlug(req.params.slug);
+  const user = resolveUser(req);
+  try {
+    const dashboard = buildCommercialIntelligenceDashboard(slug);
+    const active = findActiveCommercialIntelligenceJob(slug, new Set(["orchestrate_competitor_analysis"]));
+    if (active) {
+      return res.json({
+        ok: true,
+        async: true,
+        idempotent: true,
+        jobId: active.id,
+        evidence: `Competitor Analysis job already ${active.status}`,
+        dashboard,
+        customer: buildMasterAdminCustomerRecordLite(slug),
+      });
+    }
+    if (dashboard.competitorAnalysis?.generated && !dashboard.staleCompletion?.flagged) {
+      return res.json({
+        ok: true,
+        async: false,
+        idempotent: true,
+        evidence: "Competitor Analysis already stored",
+        dashboard,
+        customer: buildMasterAdminCustomerRecordLite(slug),
+      });
+    }
+    const job = createMasterAdminJob({
+      slug,
+      action: "orchestrate_competitor_analysis",
+      user,
+    });
+    runMasterAdminJobAsync(job.id, req.body || {});
+    return res.json({
+      ok: true,
+      async: true,
+      idempotent: false,
+      jobId: job.id,
+      evidence: "Competitor Analysis queued",
+      dashboard: buildCommercialIntelligenceDashboard(slug),
+      customer: buildMasterAdminCustomerRecordLite(slug),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({
+      ok: false,
+      error: message,
+      customer: buildMasterAdminCustomerRecordLite(slug),
+    });
+  }
 });
 
 router.get("/master-admin-platform/customers/:slug/competitor-analysis-review", (req, res) => {
