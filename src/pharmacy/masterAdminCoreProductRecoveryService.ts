@@ -48,6 +48,7 @@ import {
 } from "./masterAdminServicePageGenerationIdentity.ts";
 import { readActiveServiceCampaignSelection } from "./masterAdminActiveServiceCampaignStore.ts";
 import { readPharmacyCampaignStore } from "./pharmacyCampaignService.ts";
+import { buildContentEcosystemLocalPreviewUrl } from "./pharmacyClusterPageUrlResolver.ts";
 import {
   finishWorkflowExecution,
   getLastRecordedWorkflowStage,
@@ -440,7 +441,7 @@ export function listCprClusterPagePreviews(
   return listGeneratedLocalClusterAreaDirs(localDir).map((areaSlug) => ({
     areaSlug,
     label: areaSlug.replace(/^cluster-/, "").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-    previewUrl: `/api/pharmacy-content-ecosystem-preview/${encodeURIComponent(identity.serviceId)}/local/${encodeURIComponent(areaSlug)}/?slug=${encodeURIComponent(slug)}`,
+    previewUrl: buildContentEcosystemLocalPreviewUrl(identity.serviceId, areaSlug, slug),
     outputPath: path.join(localDir, areaSlug, "index.html"),
   }));
 }

@@ -4,15 +4,17 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { resolveTenantProfileSlug } from "./pharmacyTenantSlug.ts";
 import { buildPharmacyServicePageProfile } from "./pharmacyServicePageProfileContext.ts";
 import {
   resolveClusterPageSlug,
   resolveClusterPageFilesystemRelativePath,
+  buildContentEcosystemLocalPreviewUrl,
 } from "./pharmacyClusterPageUrlResolver.ts";
+import { PHARMACY_WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export { buildContentEcosystemLocalPreviewUrl };
+
 
 type EcosystemAsset = {
   id: string;
@@ -96,24 +98,7 @@ const PACK_IDS = new Set(["social-pack", "gbp-pack", "email-sequence", "video-sc
 const PAGE_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const PACK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
-function resolveWorkspaceRoot(): string {
-  const candidates = [
-    process.env.WORKSPACE_ROOT,
-    path.resolve(__dirname, "../.."),
-    path.resolve(__dirname, "../../.."),
-    process.cwd(),
-  ].filter(Boolean) as string[];
-  for (const root of candidates) {
-    const indexPath = path.join(
-      root,
-      "output/pharmacy-content-ecosystem/pharmaconnect/pharmacy-first/_ecosystem-index.json",
-    );
-    if (fs.existsSync(indexPath)) return root;
-  }
-  return path.resolve(__dirname, "../..");
-}
-
-const WORKSPACE_ROOT = resolveWorkspaceRoot();
+const WORKSPACE_ROOT = PHARMACY_WORKSPACE_ROOT;
 const ECOSYSTEM_ROOT = path.join(
   WORKSPACE_ROOT,
   "output/pharmacy-content-ecosystem/pharmaconnect/pharmacy-first",
@@ -559,7 +544,33 @@ export function isLocalClusterGeneratedPage(html: string): boolean {
   return /data-publish-source=["'](?:local-cluster-design-system|local-area-v1|local-cluster-v1|local-hub-v1)["']/i.test(html);
 }
 
-function renderGeneratedLocalClusterPreviewHtml(sourceHtml: string): string {
+function compactSlugKey(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+/** Inject the active customer slug into ecosystem-preview links that omitted it. */
+export function applyPreviewTenantSlugToLocalityHtml(html: string, tenantSlug: string): string {
+  const slug = String(tenantSlug || "").trim();
+  if (!slug) return html;
+  return html.replace(
+    /(href|src)=(["'])(\/api\/pharmacy-content-ecosystem-preview\/[^"']+)\2/gi,
+    (full, attr: string, quote: string, url: string) => {
+      try {
+        const parsed = new URL(url.replace(/&amp;/g, "&"), "https://preview.local");
+        if (!parsed.searchParams.get("slug") && !parsed.searchParams.get("tenant")) {
+          parsed.searchParams.set("slug", slug);
+        }
+        return `${attr}=${quote}${parsed.pathname}${parsed.search}${parsed.hash}${quote}`;
+      } catch {
+        return full;
+      }
+    },
+  );
+}
+
+function renderGeneratedLocalClusterPreviewHtml(sourceHtml: string, tenantSlug: string): string {
   const toolbar =
     '<div class="pharmacy-review-preview-toolbar" data-component="review-preview-toolbar">Review preview — not published. Generated local page shown exactly as produced.</div>';
   const toolbarStyle =
@@ -577,24 +588,27 @@ function renderGeneratedLocalClusterPreviewHtml(sourceHtml: string): string {
   if (!html.includes('data-component="review-preview-toolbar"')) {
     html = html.replace(/<body\b[^>]*>/i, (match) => `${match}\n${toolbar}`);
   }
-  return html;
+  return applyPreviewTenantSlugToLocalityHtml(html, tenantSlug);
 }
 
 export function renderBenchmarkPagePreviewHtml(filePath: string, serviceId: string, slug: string, pageSlug: string): string {
   const sourceHtml = fs.readFileSync(filePath, "utf8");
   if (isLocalClusterGeneratedPage(sourceHtml)) {
-    return renderGeneratedLocalClusterPreviewHtml(sourceHtml);
+    return renderGeneratedLocalClusterPreviewHtml(sourceHtml, slug);
   }
   const withPlaceholders = sanitizeReviewPreviewHtml(fillMissingImagePlaceholders(sourceHtml));
-  return renderReviewPreviewChrome({
+  return applyPreviewTenantSlugToLocalityHtml(
+    renderReviewPreviewChrome({
+      slug,
+      serviceId,
+      title: extractTitleFromHtml(withPlaceholders, pageSlug.replace(/-/g, " ")),
+      body: formatReviewBodyHtml(extractReviewBody(withPlaceholders)),
+      sourcePath: filePath,
+      contentType: "ecosystem-page",
+      imageSlot: reviewPreviewImageSlot(pageSlug),
+    }),
     slug,
-    serviceId,
-    title: extractTitleFromHtml(withPlaceholders, pageSlug.replace(/-/g, " ")),
-    body: formatReviewBodyHtml(extractReviewBody(withPlaceholders)),
-    sourcePath: filePath,
-    contentType: "ecosystem-page",
-    imageSlot: reviewPreviewImageSlot(pageSlug),
-  });
+  );
 }
 
 export function renderMissingReviewPreview(slug: string, serviceId: string, assetTitle = "Campaign content"): string {
@@ -686,8 +700,16 @@ export function renderPackPreviewPage(asset: EcosystemAsset, serviceId = "pharma
 const SERVICE_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 export function resolvePreviewTenantSlug(raw?: string | null): string {
-  const cleaned = String(raw || "pharmaconnect").trim();
-  return resolveTenantProfileSlug(cleaned) || cleaned;
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return "pharmaconnect";
+  const resolved = resolveTenantProfileSlug(trimmed);
+  if (!resolved) return trimmed;
+  const suppliedKey = compactSlugKey(trimmed);
+  const resolvedKey = compactSlugKey(resolved);
+  if (suppliedKey === resolvedKey || trimmed.toLowerCase() === resolved.toLowerCase()) {
+    return resolved;
+  }
+  return trimmed;
 }
 
 export function sanitisePreviewServiceId(raw: string): string | null {
@@ -696,7 +718,7 @@ export function sanitisePreviewServiceId(raw: string): string | null {
 }
 
 function benchmarkEcosystemRoot(serviceId: string, slug = "pharmaconnect"): string {
-  return path.join(WORKSPACE_ROOT, "output/pharmacy-content-ecosystem", slug, serviceId);
+  return path.join(PHARMACY_WORKSPACE_ROOT, "output/pharmacy-content-ecosystem", slug, serviceId);
 }
 
 export function loadBenchmarkEcosystemIndex(serviceId: string, slug = "pharmaconnect"): EcosystemIndex | null {
@@ -756,7 +778,7 @@ function benchmarkAssetPreviewUrl(serviceId: string, asset: EcosystemAsset, slug
   }
   if (asset.outputPath.includes(`${path.sep}local${path.sep}`)) {
     const areaSlug = path.basename(path.dirname(asset.outputPath));
-    return `/api/pharmacy-content-ecosystem-preview/${serviceId}/local/${areaSlug}/${slugQ}`;
+    return buildContentEcosystemLocalPreviewUrl(serviceId, areaSlug, slug);
   }
   const pageSlug = pageSlugFromOutputPath(asset.outputPath);
   return pageSlug ? `/api/pharmacy-content-ecosystem-preview/${serviceId}/pages/${pageSlug}/${slugQ}` : "#";

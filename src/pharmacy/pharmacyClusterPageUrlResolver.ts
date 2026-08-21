@@ -51,7 +51,18 @@ export function resolveClusterPagePreviewApiPath(
   input: string,
 ): string {
   const pageSlug = resolveClusterPageSlug(input);
-  return `/api/pharmacy-content-ecosystem/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(serviceId)}/local/${encodeURIComponent(pageSlug)}/`;
+  const cleaned = String(tenantSlug || "").trim();
+  const slugQ = cleaned ? `?slug=${encodeURIComponent(cleaned)}` : "";
+  return `/api/pharmacy-content-ecosystem-preview/${encodeURIComponent(serviceId)}/local/${encodeURIComponent(pageSlug)}/${slugQ}`;
+}
+
+/** Shared locality-review / ecosystem-preview URL builder. Always carries tenant slug when supplied. */
+export function buildContentEcosystemLocalPreviewUrl(
+  serviceId: string,
+  areaSlug: string,
+  tenantSlug?: string | null,
+): string {
+  return resolveClusterPagePreviewApiPath(String(tenantSlug || ""), serviceId, areaSlug);
 }
 
 export function resolveClusterPageCanonicalFinalRenderSlug(input: string): string {
