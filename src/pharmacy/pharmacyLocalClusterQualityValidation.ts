@@ -20,6 +20,7 @@ import {
   extractLocalUniqueContentHtml,
   normalizeCopyForSimilarity,
 } from "./pharmacyLocalClusterVariantFamilies.ts";
+import { evaluateLocalityPageDuplicationGate } from "./pharmacyLocalityPageDuplicationGateV1.ts";
 import { isInvalidGenericMapEmbedUrl, validateMapInHtml } from "./pharmacyMapResolver.ts";
 import { resolveTenantProfileSlug } from "./pharmacyTenantSlug.ts";
 import { PHARMACY_WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
@@ -52,6 +53,7 @@ export interface LocalClusterQualityValidation {
   servicePageLinksAllLocalAreas: boolean;
   localCopyDepthValidation: LocalCopyDepthValidation;
   localSimilarityScores: Array<{ pair: string; score: number }>;
+  localityDuplicationGate?: { ok: boolean; message: string };
   areaPrefixDetected: string[];
   mapUsesBusinessLocation: boolean;
   servicePageLocalLinksCount: number;
@@ -251,13 +253,15 @@ export function validateLocalClusterQuality(
       const b = slugs[j]!;
       const score = copySimilarityScore(normalizedPages.get(a)!, normalizedPages.get(b)!);
       localSimilarityScores.push({ pair: `${a}~${b}`, score: Math.round(score * 100) / 100 });
-      if (score >= LOCAL_SIMILARITY_FAIL_THRESHOLD) {
-        duplicateCopyWarnings.push(`${a}~${b}:${score.toFixed(2)}`);
-        if (!failedLocalPages.some((f) => f.startsWith(`${a}:`) || f.startsWith(`${b}:`))) {
-          failedLocalPages.push(`${a}~${b}:duplicate-similarity`);
-        }
-        failedLocalQualityReasons.push(`duplicate similarity ${a}~${b}: ${score.toFixed(2)}`);
-      }
+    }
+  }
+
+  const duplicationGate = evaluateLocalityPageDuplicationGate(slug, serviceId, selectedAreas, profile.pharmacyName);
+  if (!duplicationGate.ok) {
+    for (const pair of duplicationGate.pairs.filter((p) => p.blocked)) {
+      duplicateCopyWarnings.push(`${pair.a}~${pair.b}:${pair.reason}`);
+      failedLocalPages.push(`${pair.a}~${pair.b}:substantive-duplicate`);
+      failedLocalQualityReasons.push(pair.reason);
     }
   }
 
@@ -318,6 +322,7 @@ export function validateLocalClusterQuality(
     servicePageLinksAllLocalAreas,
     localCopyDepthValidation,
     localSimilarityScores,
+    localityDuplicationGate: { ok: duplicationGate.ok, message: duplicationGate.message },
     areaPrefixDetected,
     mapUsesBusinessLocation,
     servicePageLocalLinksCount,

@@ -18,6 +18,8 @@ import {
   getLocalityVariationSessionV1,
   rememberStrategyForSlug,
 } from "./pharmacyLocalityVariationSessionV1.ts";
+import type { VerifiedLocalityEvidence } from "./pharmacyVerifiedLocalityEvidenceV1.ts";
+import { verifiedTravelSummary } from "./pharmacyVerifiedLocalityEvidenceV1.ts";
 
 export type LocalityEvidenceAllocationInput = {
   areaName: string;
@@ -29,6 +31,7 @@ export type LocalityEvidenceAllocationInput = {
   nearbyAreaNames?: string[];
   areaSlugsInCluster?: string[];
   areaDiscovery?: Parameters<typeof areaDiscoveryForName>[0];
+  verified?: VerifiedLocalityEvidence | null;
 };
 
 export type LocalityEvidenceAllocation = {
@@ -44,6 +47,7 @@ export type LocalityEvidenceAllocation = {
   nearbyIntro: string;
   headings: LocalityPageStrategyPlan["headings"];
   pack: LocalityIntelPack;
+  verified?: VerifiedLocalityEvidence | null;
 };
 
 function asSentence(text: string): string {
@@ -312,6 +316,7 @@ export function allocateLocalityEvidenceV1(
     areaName: input.areaName,
     nearbyAreaNames: input.nearbyAreaNames,
     pharmacyAddress: input.pharmacyAddress,
+    verified: input.verified,
   });
 
   const plan = resolveLocalityPageStrategyV1({
@@ -335,14 +340,30 @@ export function allocateLocalityEvidenceV1(
   memory.claim(input.nearbyAreaNames || [], 12);
 
   const evidence = claimFocusEvidence(pack, memory, plan.evidenceFocus);
-  const discovery = areaDiscoveryForName(input.areaDiscovery, input.areaName);
-  const openingLocalitySentence = buildOpeningLocalitySentence(
-    plan,
-    input.areaName,
-    input.serviceName,
-    evidence,
-    discovery?.distanceLabel || "",
-  );
+  const geo =
+    input.verified?.distanceLabel && input.verified.cardinalDirection
+      ? ` ${input.areaName} is ${input.verified.distanceLabel} ${input.verified.cardinalDirection} of the pharmacy.`
+      : input.verified?.distanceLabel
+        ? ` ${input.areaName} is ${input.verified.distanceLabel} from the pharmacy.`
+        : "";
+  const landmark = input.verified?.landmarks[0] ? ` Local reference on file: ${input.verified.landmarks[0].name}.` : "";
+  const verifiedTravel = input.verified ? verifiedTravelSummary(input.verified) : "";
+  const discoveryLabel = input.verified?.distanceLabel
+    ? [input.verified.distanceLabel, input.verified.cardinalDirection].filter(Boolean).join(" ")
+    : "";
+  const openingLocalitySentence = [
+    buildOpeningLocalitySentence(
+      plan,
+      input.areaName,
+      input.serviceName,
+      evidence,
+      discoveryLabel,
+    ),
+    verifiedTravel && !discoveryLabel ? verifiedTravel : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   const accessBody = buildAccessBody(
     plan,
     input.areaName,
@@ -366,7 +387,10 @@ export function allocateLocalityEvidenceV1(
     input.serviceName,
     evidence,
   );
-  const neighbourNames = memory.claim(pack.neighbouring, 2);
+  const neighbourNames = (input.verified?.nearbyLocalities.map((n) => n.areaName).length
+    ? input.verified.nearbyLocalities.map((n) => n.areaName)
+    : memory.claim(pack.neighbouring, 2)
+  ).slice(0, 2);
   const nearbyIntro = buildNearbyIntro(
     plan,
     input.areaName,
@@ -374,19 +398,21 @@ export function allocateLocalityEvidenceV1(
     input.serviceName,
     neighbourNames,
   );
+  const accessWithGeo = [accessBody, verifiedTravel].filter(Boolean).join(" ").trim();
 
   return {
     strategyId: plan.strategyId,
     evidenceFocus: plan.evidenceFocus,
     openingLocalitySentence,
     accessHeading: plan.headings.travel,
-    accessBody,
+    accessBody: accessWithGeo,
     consultationLocalityNote,
     ctaPrimary: cta.primary,
     ctaSecondary: cta.secondary,
-    ctaPhonePrompt: cta.phonePrompt,
+    ctaPhonePrompt: `${cta.phonePrompt}.${geo}${landmark}`.replace(/\.\s*\./g, ".").trim(),
     nearbyIntro,
     headings: plan.headings,
     pack,
+    verified: input.verified || null,
   };
 }

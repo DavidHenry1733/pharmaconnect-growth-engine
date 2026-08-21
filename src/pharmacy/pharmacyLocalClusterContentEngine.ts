@@ -30,6 +30,7 @@ import { buildPharmacyFirstLocalNarrative } from "./pharmacyFirstLocalNarrative.
 import { finalizeLocalClusterPageContent } from "./pharmacyLocalClusterCompositionDedupe.ts";
 import { commercialNarrativeSequenceV1 } from "./contentEngine/pharmacyCommercialSectionPlannerV1.ts";
 import { allocateLocalityEvidenceV1 } from "./contentEngine/pharmacyLocalityEvidenceAllocatorV1.ts";
+import { bindVerifiedLocalityEvidenceV1 } from "./contentEngine/pharmacyVerifiedLocalityEvidenceV1.ts";
 
 export interface LocalClusterContentInput {
   slug: string;
@@ -39,6 +40,8 @@ export interface LocalClusterContentInput {
   areaSlug: string;
   nearbyAreaNames: string[];
   areaSlugsInCluster: string[];
+  siblingLocalities?: Array<{ areaName: string; areaSlug: string; distanceLabel?: string; relationship?: string; evidence?: string[]; source?: string }>;
+  localityRecord?: { distanceLabel?: string; relationship?: string; evidence?: string[]; source?: string };
 }
 
 export interface LocalClusterProcessStep {
@@ -75,6 +78,14 @@ export interface LocalClusterPageContent {
   localIntelligenceUsed: boolean;
   narrativeType: string;
   wordCountEstimate: number;
+  seoTitle?: string;
+  metaDescription?: string;
+  supportingHeading?: string;
+  supportingIntro?: string;
+  supportingItems?: Array<{ title: string; body: string; evidence: string }>;
+  nearbyLocalityLinks?: Array<{ areaName: string; areaSlug: string; reason: string; geographic?: boolean }>;
+  sectionEvidence?: Record<string, string[]>;
+  evidenceLimited?: boolean;
 }
 
 function pick<T>(items: T[], seed: string, offset = 0): T | undefined {
@@ -378,6 +389,25 @@ function composeServiceVariantPackClusterDraft(
     );
 
   // Shared locality evidence allocation — service banks stay intact; place facts are injected.
+  const verified = ctx
+    ? bindVerifiedLocalityEvidenceV1({
+        ctx,
+        areaName: input.areaName,
+        areaSlug: input.areaSlug,
+        siblingLocalities: (input.siblingLocalities?.length
+          ? input.siblingLocalities
+          : input.nearbyAreaNames.map((name, i) => ({
+              areaName: name,
+              areaSlug: input.areaSlugsInCluster[i] || name.toLowerCase(),
+            }))
+        ).concat(
+          input.siblingLocalities?.some((s) => s.areaSlug === input.areaSlug)
+            ? []
+            : [{ areaName: input.areaName, areaSlug: input.areaSlug, ...input.localityRecord }],
+        ),
+        localityRecord: input.localityRecord,
+      })
+    : null;
   const localityEvidence = allocateLocalityEvidenceV1({
     areaName: input.areaName,
     areaSlug: input.areaSlug,
@@ -385,9 +415,10 @@ function composeServiceVariantPackClusterDraft(
     serviceName: input.serviceName,
     displayPhone: profile.displayPhone || profile.phone,
     pharmacyAddress: profile.fullAddress || profile.customerFacingAddress || "",
-    nearbyAreaNames: input.nearbyAreaNames,
+    nearbyAreaNames: verified?.nearbyLocalities.map((n) => n.areaName) || input.nearbyAreaNames,
     areaSlugsInCluster: input.areaSlugsInCluster,
     areaDiscovery: ctx?.areaDiscovery,
+    verified,
   });
 
   const problem = variants.sections.problem;
@@ -538,6 +569,44 @@ function composeServiceVariantPackClusterDraft(
     localIntelligenceUsed: true,
     narrativeType: `service-variant-pack:${input.serviceId}`,
     wordCountEstimate: 0,
+    seoTitle: `${input.serviceName} in ${input.areaName}${
+      verified?.distanceLabel ? ` | ${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""}` : ""
+    } | ${pharmacyName}`,
+    metaDescription: [
+      `${pharmacyName} provides ${input.serviceName} for patients in ${input.areaName}`,
+      verified?.distanceLabel ? `${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""} of the pharmacy` : "",
+      verified?.nearbyLocalities[0] ? `including nearby ${verified.nearbyLocalities[0].areaName}` : "",
+    ]
+      .filter(Boolean)
+      .join(". ") + ".",
+    supportingHeading: verified?.landmarks[0]
+      ? `Local orientation for ${input.areaName}`
+      : verified?.healthcare[0]
+        ? `Healthcare context for ${input.areaName}`
+        : `Using ${input.serviceName} from ${input.areaName}`,
+    supportingIntro: verified?.evidenceLimited
+      ? `This page uses only verified facts on file for ${input.areaName}.`
+      : "",
+    supportingItems: [
+      ...(verified?.landmarks.slice(0, 2).map((l) => ({
+        title: l.name,
+        body: `A verified local reference point for patients travelling from ${input.areaName}.`,
+        evidence: l.provenance,
+      })) || []),
+      ...(verified?.healthcare.slice(0, 1).map((h) => ({
+        title: h.name,
+        body: `Verified local healthcare context for ${input.areaName}${h.distanceLabel ? ` (${h.distanceLabel})` : ""}.`,
+        evidence: h.provenance,
+      })) || []),
+      ...(verified?.nearbyLocalities.slice(0, 2).map((n) => ({
+        title: n.areaName,
+        body: n.reason,
+        evidence: n.geographic ? "haversine-between-saved-coords" : "approved-sibling-locality",
+      })) || []),
+    ],
+    nearbyLocalityLinks: verified?.nearbyLocalities || [],
+    sectionEvidence: verified?.sectionEvidence,
+    evidenceLimited: verified?.evidenceLimited,
   };
 }
 

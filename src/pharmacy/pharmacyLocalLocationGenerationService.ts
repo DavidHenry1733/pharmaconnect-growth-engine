@@ -27,53 +27,7 @@ import {
   beginLocalityVariationSessionV1,
   endLocalityVariationSessionV1,
 } from "./contentEngine/pharmacyLocalityVariationSessionV1.ts";
-import { nextStrategyCandidate } from "./contentEngine/pharmacyLocalityPageStrategyV1.ts";
-import {
-  copySimilarityScore,
-  normalizeCopyForSimilarity,
-} from "./pharmacyLocalClusterVariantFamilies.ts";
-
-function extractMainText(html: string): string {
-  const main = html.match(/<main\b[\s\S]*?<\/main>/i)?.[0] || html;
-  return main
-    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function stripSharedLegalPhrases(text: string): string {
-  return text
-    .replace(
-      /sore throat,? earache,? impetigo,? infected insect bites,? shingles,? sinusitis,? and uncomplicated UTI in eligible women/gi,
-      " ",
-    )
-    .replace(
-      /breathing difficulties,? chest pain,? severe dehydration,? confusion,? a non-blanching rash,? or any emergency symptoms that make you feel critically unwell/gi,
-      " ",
-    )
-    .replace(/patient group directions?/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function headingSequenceKey(html: string, areaNames: string[]): string {
-  const main = html.match(/<main\b[\s\S]*?<\/main>/i)?.[0] || html;
-  let joined = [...main.matchAll(/<h2>([^<]+)<\/h2>/gi)]
-    .map((m) => m[1]!.toLowerCase().trim())
-    .join(" | ");
-  for (const area of areaNames) {
-    joined = joined.replace(new RegExp(area.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "{area}");
-  }
-  return joined;
-}
-
-function localitySimilarityScore(aHtml: string, bHtml: string, areaNames: string[], pharmacyName: string): number {
-  const na = normalizeCopyForSimilarity(stripSharedLegalPhrases(extractMainText(aHtml)), areaNames, pharmacyName);
-  const nb = normalizeCopyForSimilarity(stripSharedLegalPhrases(extractMainText(bHtml)), areaNames, pharmacyName);
-  return copySimilarityScore(na, nb);
-}
+import { evaluateLocalityHtmlDuplicationGate } from "./pharmacyLocalityPageDuplicationGateV1.ts";
 
 export interface LocalLocationGenerationResult {
   ok: boolean;
@@ -84,6 +38,10 @@ export interface LocalLocationGenerationResult {
   hubPath?: string;
   clusterPaths: string[];
   areaPaths: string[];
+  duplicationGate?: {
+    ok: boolean;
+    message: string;
+  };
 }
 
 function countWords(html: string): number {
@@ -128,7 +86,6 @@ export function generateLocalLocationHierarchyPages(ctx: ContentGenerationContex
   const clusterSlugs = hierarchy.clusters.map((c) => resolveClusterPageSlug(c.slug));
   const generationRevision = `cpr-content-hotfix-04-${generatedAt}`;
   const session = beginLocalityVariationSessionV1(clusterSlugs);
-  const areaNames = hierarchy.clusters.map((c) => c.name);
   const pharmacyName = ctx.profile.pharmacyName;
 
   const renderClusterHtml = (cluster: (typeof hierarchy.clusters)[number]): string => {
@@ -159,48 +116,17 @@ export function generateLocalLocationHierarchyPages(ctx: ContentGenerationContex
     htmlBySlug.set(pageSlug, renderClusterHtml(cluster));
   }
 
-  // Cross-page duplicate gate — commercial threshold: normalised similarity must stay below 70%.
-  const SIM_FAIL = 0.7;
-  const faqKey = (html: string) =>
-    [...html.matchAll(/class="faq-q">([^<]+)/g)]
-      .map((m) => m[1]!.toLowerCase().replace(/\s+/g, " ").trim())
-      .join("|");
-  const ctaKey = (html: string) => {
-    const h2 = (html.match(/data-template-block="final-cta"[\s\S]*?<h2>([^<]+)/i) || [])[1] || "";
-    const prompt = (html.match(/data-template-block="final-cta"[\s\S]*?<p class="[^"]*">([\s\S]*?)<\/p>/i) || [])[1] || "";
-    return normalizeCopyForSimilarity(`${h2} ${prompt}`, areaNames, pharmacyName);
-  };
-  for (let pass = 0; pass < 5; pass++) {
-    const slugs = [...htmlBySlug.keys()];
-    let rebuilt = false;
-    for (let i = 0; i < slugs.length; i++) {
-      for (let j = i + 1; j < slugs.length; j++) {
-        const a = slugs[i]!;
-        const b = slugs[j]!;
-        const score = localitySimilarityScore(htmlBySlug.get(a)!, htmlBySlug.get(b)!, areaNames, pharmacyName);
-        const sameHeadings =
-          headingSequenceKey(htmlBySlug.get(a)!, areaNames) ===
-          headingSequenceKey(htmlBySlug.get(b)!, areaNames);
-        const sameFaqs =
-          normalizeCopyForSimilarity(faqKey(htmlBySlug.get(a)!), areaNames, pharmacyName) ===
-          normalizeCopyForSimilarity(faqKey(htmlBySlug.get(b)!), areaNames, pharmacyName);
-        const sameCta = ctaKey(htmlBySlug.get(a)!) === ctaKey(htmlBySlug.get(b)!);
-        if (score < SIM_FAIL && !sameHeadings && !sameFaqs && !sameCta) continue;
-        const rebuildSlug = a === "headingley" ? b : a;
-        if (rebuildSlug === "headingley") continue;
-        const current = session.strategyBySlug.get(rebuildSlug);
-        if (!current) continue;
-        const next = nextStrategyCandidate(current, session.usedStrategies);
-        session.forceStrategyBySlug.set(rebuildSlug, next);
-        session.usedStrategies.delete(current);
-        const cluster = hierarchy.clusters.find((c) => resolveClusterPageSlug(c.slug) === rebuildSlug);
-        if (!cluster) continue;
-        htmlBySlug.set(rebuildSlug, renderClusterHtml(cluster));
-        rebuilt = true;
-      }
-    }
-    if (!rebuilt) break;
-  }
+  const duplicationGate = evaluateLocalityHtmlDuplicationGate({
+    pages: hierarchy.clusters.map((cluster) => {
+      const pageSlug = resolveClusterPageSlug(cluster.slug);
+      return {
+        areaSlug: pageSlug,
+        areaName: cluster.name,
+        html: htmlBySlug.get(pageSlug) || "",
+      };
+    }),
+    pharmacyName,
+  });
 
   for (const cluster of hierarchy.clusters) {
     const pageSlug = resolveClusterPageSlug(cluster.slug);
@@ -273,6 +199,10 @@ export function generateLocalLocationHierarchyPages(ctx: ContentGenerationContex
     localClusterEntries,
     clusterPaths,
     areaPaths,
+    duplicationGate: {
+      ok: duplicationGate.ok,
+      message: duplicationGate.message,
+    },
   };
 }
 

@@ -29,6 +29,9 @@ export {
   allocateLocalityEvidenceV1,
 } from "./pharmacyLocalityEvidenceAllocatorV1.ts";
 export {
+  bindVerifiedLocalityEvidenceV1,
+} from "./pharmacyVerifiedLocalityEvidenceV1.ts";
+export {
   resolvePatientFacingClusterHeading,
   resolvePatientFacingServiceHeading,
 } from "./pharmacyCommercialPatientHeadingsV1.ts";

@@ -96,26 +96,43 @@ function renderChildAreasSection(
   hierarchy: LocalLocationHierarchy,
   cluster: LocalAreaEvidenceRecord,
   intro: string,
+  content: ReturnType<typeof buildLocalClusterHubPageContent>,
 ): string {
   const childAreas = hierarchy.areas.filter((a) => a.parentAreaId === cluster.areaId);
-  const cards = childAreas
-    .map(
-      (a) =>
-        `<a class="area-card" href="${esc(publicHref(ctx, resolveLocalAreaTarget(a.slug, a.name)))}"><h3>${esc(ctx.serviceName)} in ${esc(a.name)}</h3><p>Guidance for patients living in or travelling from ${esc(a.name)}.</p></a>`,
-    )
-    .join("\n");
-  return `<section class="soft" id="child-areas" data-template-block="child-areas">
+  const supporting = content.base.supportingItems || [];
+  const cards = childAreas.length
+    ? childAreas
+        .map(
+          (a) =>
+            `<a class="area-card" href="${esc(publicHref(ctx, resolveLocalAreaTarget(a.slug, a.name)))}"><h3>${esc(ctx.serviceName)} in ${esc(a.name)}</h3><p>Guidance for patients living in or travelling from ${esc(a.name)}.</p></a>`,
+        )
+        .join("\n")
+    : supporting
+        .map(
+          (item) =>
+            `<article class="area-card" data-locality-evidence="${esc(item.evidence)}"><h3>${esc(item.title)}</h3><p>${esc(item.body)}</p></article>`,
+        )
+        .join("\n");
+  const heading = childAreas.length
+    ? resolveLocalSectionHeading({
+        kind: "child-area-cards",
+        pageType: "location-cluster",
+        serviceName: ctx.serviceName,
+        localityLabel: cluster.name,
+      })
+    : content.base.supportingHeading ||
+      resolveLocalSectionHeading({
+        kind: "child-area-cards",
+        pageType: "location-cluster",
+        serviceName: ctx.serviceName,
+        localityLabel: cluster.name,
+      });
+  return `<section class="soft" id="child-areas" data-template-block="child-areas" data-locality-evidence="${esc(
+    (content.base.sectionEvidence?.supporting || []).join("|"),
+  )}">
 <div class="wrap">
-${renderSectionHead(
-  resolveLocalSectionHeading({
-    kind: "child-area-cards",
-    pageType: "location-cluster",
-    serviceName: ctx.serviceName,
-    localityLabel: cluster.name,
-  }),
-  intro,
-)}
-<div class="areas-grid">${cards}</div>
+${renderSectionHead(heading, intro || content.base.supportingIntro || "")}
+<div class="areas-grid">${cards || `<article class="area-card"><h3>${esc(cluster.name)}</h3><p>This page uses only verified facts on file for ${esc(cluster.name)}.</p></article>`}</div>
 </div>
 </section>`;
 }
@@ -124,10 +141,15 @@ function renderClusterLinksSection(
   ctx: ContentGenerationContext,
   hierarchy: LocalLocationHierarchy,
   cluster: LocalAreaEvidenceRecord,
+  content: ReturnType<typeof buildLocalClusterHubPageContent>,
 ): string {
   const hubHref = publicHref(ctx, resolveLocalHubTarget(hierarchy));
   const childAreas = hierarchy.areas.filter((a) => a.parentAreaId === cluster.areaId);
-  const siblingClusters = hierarchy.clusters.filter((c) => c.slug !== cluster.slug);
+  const ranked = content.base.nearbyLocalityLinks?.length
+    ? content.base.nearbyLocalityLinks
+        .map((n) => hierarchy.clusters.find((c) => c.slug === n.areaSlug || c.name === n.areaName))
+        .filter((c): c is NonNullable<typeof c> => Boolean(c))
+    : hierarchy.clusters.filter((c) => c.slug !== cluster.slug);
   const serviceHref = publicHref(ctx, { pageType: "service", localSegment: ctx.serviceId });
   const links = [
     `<li><a href="${esc(hubHref)}">All ${esc(ctx.serviceName)} locations near ${esc(hierarchy.primaryLocality)}</a></li>`,
@@ -135,13 +157,15 @@ function renderClusterLinksSection(
       (a) =>
         `<li><a href="${esc(publicHref(ctx, resolveLocalAreaTarget(a.slug, a.name)))}">${esc(ctx.serviceName)} in ${esc(a.name)}</a></li>`,
     ),
-    ...siblingClusters.slice(0, 4).map(
-      (c) =>
-        `<li><a href="${esc(publicHref(ctx, resolveLocalClusterTarget(c.slug, c.name)))}">${esc(ctx.serviceName)} in ${esc(c.name)}</a></li>`,
-    ),
+    ...ranked.slice(0, 4).map((c) => {
+      const reason = content.base.nearbyLocalityLinks?.find((n) => n.areaSlug === c.slug || n.areaName === c.name)?.reason;
+      return `<li><a href="${esc(publicHref(ctx, resolveLocalClusterTarget(c.slug, c.name)))}">${esc(ctx.serviceName)} in ${esc(c.name)}</a>${reason ? ` <span>${esc(reason)}</span>` : ""}</li>`;
+    }),
     `<li><a href="${esc(serviceHref)}">${esc(ctx.serviceName)} overview</a></li>`,
   ].join("\n");
-  return `<section class="cluster-link-band soft" data-template-block="parent-child-links">
+  return `<section class="cluster-link-band soft" data-template-block="parent-child-links" data-locality-evidence="${esc(
+    (content.base.sectionEvidence?.internalLinks || []).join("|"),
+  )}">
 <div class="wrap">
 ${renderSectionHead(
   resolveLocalSectionHeading({
@@ -255,7 +279,7 @@ ${bodyToParagraphs(content.clusterContextBody)
 </div>
 </section>`;
 
-  const childAreas = renderChildAreasSection(ctx, hierarchy, cluster, content.childAreasIntro);
+  const childAreas = renderChildAreasSection(ctx, hierarchy, cluster, content.childAreasIntro, content);
   const relevance = renderMediaTextSection({
     sectionId: "cluster-relevance",
     sectionClass: "blue-band",
@@ -273,15 +297,23 @@ ${bodyToParagraphs(content.clusterContextBody)
     town: cluster.name,
     includeCoverageTags: true,
     localAreaLinks: supportedLinks,
+    intro: content.base.accessBody,
   });
-  const links = renderClusterLinksSection(ctx, hierarchy, cluster);
+  const links = renderClusterLinksSection(ctx, hierarchy, cluster, content);
   const faq = renderClusterFaqSection(content, ctx, cluster.name);
-  const conversionAndCta = buildProfileFinalCtaHtml(ctx.serviceName, profile, conversionImageHtml, "", "", ctx);
+  const conversionAndCta = `${buildProfileFinalCtaHtml(ctx.serviceName, profile, conversionImageHtml, "", "", ctx)}${
+    content.base.ctaPhonePrompt
+      ? `<p class="locality-cta-context wrap" data-locality-cta>${esc(content.base.ctaPhonePrompt)}</p>`
+      : ""
+  }`;
 
   const main = [hero, clusterContext, childAreas, relevance, trust, access, links, faq, conversionAndCta].join("\n");
 
-  const title = `${ctx.serviceName} ${cluster.name} | ${profile.pharmacyName}`;
-  const metaDesc = `${profile.pharmacyName} provides ${ctx.serviceName} for patients in ${cluster.name} and nearby communities.`;
+  const title =
+    content.base.seoTitle || `${ctx.serviceName} in ${cluster.name} | ${profile.pharmacyName}`;
+  const metaDesc =
+    content.base.metaDescription ||
+    `${profile.pharmacyName} provides ${ctx.serviceName} for patients in ${cluster.name}.`;
 
   let html = `<!DOCTYPE html>
 <html lang="en-GB">
