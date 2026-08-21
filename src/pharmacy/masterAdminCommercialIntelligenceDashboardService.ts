@@ -152,6 +152,7 @@ export interface CommercialIntelligenceDashboard {
     confidence: string;
   };
   competitorAnalysis: CommercialDashboardCompetitorAnalysis;
+  /** Classified DataForSEO evidence. Not a second local-competitor list. */
   organicSearchEvidence: OrganicSearchEvidenceSection;
   locality: TenantLocalityResolution;
   localMarketIntelligence: {

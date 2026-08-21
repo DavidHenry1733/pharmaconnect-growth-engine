@@ -169,7 +169,9 @@ async function main() {
       /organicSearchEvidence/.test(dashboardSrc) &&
       !/organicSearchCompetitors/.test(dashboardSrc) &&
       pageSrc.includes("organicHtml") &&
-      /execHtml\+metricsHtml\+gapHtml\+compHtml\+organicHtml\+trafficHtml/.test(pageSrc),
+      /execHtml\+metricsHtml\+gapHtml\+providerHtml\+compHtml\+organicHtml\+trafficHtml/.test(pageSrc) &&
+      !pageSrc.includes("dashboard.organicSearchCompetitors") &&
+      !pageSrc.includes("DataForSEO organic-search competitors"),
   );
   record(
     "Organic evidence is not imported by workflow completion",
