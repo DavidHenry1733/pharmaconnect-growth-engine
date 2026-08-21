@@ -9,16 +9,24 @@ import { WORKSPACE_ROOT } from "./pharmacyExecutiveDashboardService.ts";
 import { slugifyArea } from "./pharmacyAreaNarrativeProfiles.ts";
 import {
   readPharmacyCampaignStore,
-  writePharmacyCampaignStore,
   type CampaignAreaEntry,
   type PharmacyCampaign,
 } from "./pharmacyCampaignService.ts";
 import { resolveProfileCampaignAreas } from "./pharmacyAreaDiscoveryService.ts";
+import { readSetupProfile } from "./growthEngineCustomerSetupImportSplitService.ts";
+import {
+  campaignLocalityFreezePath,
+  projectCanonicalSelectionOntoCampaign,
+  readCanonicalSavedLocalityAreas,
+  writeCanonicalSavedLocalityAreas,
+} from "./masterAdminSavedLocalitySelectionService.ts";
 import { resolveTenantProfileSlug } from "./pharmacyTenantSlug.ts";
 import {
   CPR_DASHBOARD_INITIATION_SOURCE,
   assertServicePageGenerationAllowed,
+  isCampaignServicePageReviewApproved,
   isServicePageGeneratedForIdentity,
+  isServicePageReviewApproved,
   readServicePageGenerationRecord,
   resolveServicePageGenerationIdentity,
   writeServicePageGenerationRecord,
@@ -46,14 +54,6 @@ function safeSlug(slug: string): string {
   return resolveTenantProfileSlug(slug) || slug;
 }
 
-function freezeFilePath(slug: string, serviceId: string): string {
-  return path.join(
-    WORKSPACE_ROOT,
-    "data/growth-engine",
-    `${safeSlug(slug)}-campaign-generation-context-${serviceId}.json`,
-  );
-}
-
 function toAreaSlug(areaName: string): string {
   return slugifyArea(String(areaName || "").trim());
 }
@@ -65,6 +65,14 @@ function normalizeCampaignAreas(areas: CampaignAreaEntry[]): CampaignAreaEntry[]
       selected: a.selected !== false,
       source: String(a.source || "product-owner-selection").trim() || "product-owner-selection",
       priority: typeof a.priority === "number" ? a.priority : 50 + idx,
+      areaId: a.areaId || toAreaSlug(String(a.areaName || "").trim()),
+      areaSlug: a.areaSlug || toAreaSlug(String(a.areaName || "").trim()),
+      latitude: a.latitude ?? null,
+      longitude: a.longitude ?? null,
+      distanceKm: a.distanceKm ?? null,
+      distanceLabel: a.distanceLabel || "",
+      distanceMethod: a.distanceMethod || "",
+      distanceProvenance: a.distanceProvenance,
     }))
     .filter((a) => a.areaName);
 }
@@ -87,48 +95,32 @@ export function updatePharmacyCampaignLocalitySelection(
     return { ok: false, error: "at_least_one_locality_required" };
   }
 
-  const next: PharmacyCampaign = {
-    ...campaign,
-    areaSource: "custom",
-    campaignAreas: normalized,
-  };
-  store.campaigns[idx] = next;
-  store.updatedAt = new Date().toISOString();
-  writePharmacyCampaignStore(store);
-
-  const selected = normalized.filter((a) => a.selected !== false);
-  const freezePath = freezeFilePath(s, campaign.serviceId);
-  const existing = fs.existsSync(freezePath)
-    ? (JSON.parse(fs.readFileSync(freezePath, "utf8")) as Record<string, unknown>)
-    : {};
-  const payload = {
-    ...existing,
-    version: existing.version || "1.0.0",
-    frozenAt: new Date().toISOString(),
-    slug: s,
-    serviceId: campaign.serviceId,
+  const projected = writeCanonicalSavedLocalityAreas(
+    s,
+    normalized.map((area, order) => ({
+      areaName: area.areaName,
+      areaId: area.areaId || toAreaSlug(area.areaName),
+      areaType: undefined,
+      selected: area.selected !== false,
+      source: area.source,
+      priority: area.priority,
+      order: order + 1,
+      latitude: area.latitude ?? null,
+      longitude: area.longitude ?? null,
+      distanceKm: area.distanceKm ?? null,
+      distanceLabel: area.distanceLabel,
+      distanceMethod: area.distanceMethod,
+      distanceProvenance: area.distanceProvenance,
+    })),
     campaignId,
-    targetAreas: selected.map((a) => a.areaName),
-    generationContext: {
-      ...((existing.generationContext as Record<string, unknown>) || {}),
-      selectedAreas: selected.map((a, order) => ({
-        areaName: a.areaName,
-        areaSlug: toAreaSlug(a.areaName),
-        selected: true,
-        order: order + 1,
-        priority: a.priority,
-      })),
-    },
-    sourceRefs: {
-      ...((existing.sourceRefs as Record<string, unknown>) || {}),
-      localitySelectionUpdatedAt: new Date().toISOString(),
-      localitySelectionSource: "product_owner_dashboard",
-    },
+  );
+  const nextStore = readPharmacyCampaignStore(s);
+  const next = nextStore?.campaigns.find((c) => c.id === campaignId);
+  return {
+    ok: true,
+    campaign: next,
+    freezePath: projected.freezePath || campaignLocalityFreezePath(s, campaign.serviceId),
   };
-  fs.mkdirSync(path.dirname(freezePath), { recursive: true });
-  fs.writeFileSync(freezePath, JSON.stringify(payload, null, 2), "utf8");
-
-  return { ok: true, campaign: next, freezePath };
 }
 
 export function buildCampaignLocalitySelectionDashboard(
@@ -151,9 +143,10 @@ export function buildCampaignLocalitySelectionDashboard(
   const campaign = store?.campaigns.find((c) => c.id === campaignId);
   if (!campaign) return { ok: false, error: "campaign_not_found" };
 
-  const profileAreas = resolveProfileCampaignAreas(s);
+  const profileAreas = resolveProfileCampaignAreas(readSetupProfile(s));
+  const canonicalSaved = readCanonicalSavedLocalityAreas(s);
   const availableMap = new Map<string, CampaignAreaEntry>();
-  for (const a of [...profileAreas, ...(campaign.campaignAreas || [])]) {
+  for (const a of [...profileAreas, ...(campaign.campaignAreas || []), ...canonicalSaved]) {
     const key = toAreaSlug(a.areaName);
     if (!key) continue;
     availableMap.set(key, {
@@ -161,12 +154,15 @@ export function buildCampaignLocalitySelectionDashboard(
       selected: false,
       source: a.source || "profile",
       priority: a.priority ?? 50,
+      areaId: "areaId" in a ? a.areaId : key,
+      areaSlug: key,
     });
   }
   const selectedKeys = new Set(
-    (campaign.campaignAreas || [])
-      .filter((a) => a.selected !== false)
-      .map((a) => toAreaSlug(a.areaName)),
+    (canonicalSaved.length
+      ? canonicalSaved
+      : (campaign.campaignAreas || []).filter((a) => a.selected !== false)
+    ).map((a) => toAreaSlug(a.areaName)),
   );
   const availableAreas = [...availableMap.values()].map((a) => ({
     ...a,
@@ -193,7 +189,21 @@ export function buildCampaignLocalitySelectionDashboard(
     serviceId: campaign.serviceId,
     serviceName: campaign.serviceName,
     areaSource: campaign.areaSource,
-    selectedAreas: (campaign.campaignAreas || []).filter((a) => a.selected !== false),
+    selectedAreas: canonicalSaved.length
+      ? canonicalSaved.map((a) => ({
+          areaName: a.areaName,
+          selected: true,
+          source: a.source,
+          priority: a.priority,
+          areaId: a.areaId,
+          areaSlug: a.areaSlug,
+          latitude: a.latitude ?? null,
+          longitude: a.longitude ?? null,
+          distanceKm: a.distanceKm ?? null,
+          distanceLabel: a.distanceLabel || "",
+          distanceMethod: a.distanceMethod || "",
+        }))
+      : (campaign.campaignAreas || []).filter((a) => a.selected !== false),
     availableAreas,
     hasLocalPages,
     canGenerateLocalities: serviceGenerated && availableAreas.some((a) => a.selected),
@@ -381,7 +391,7 @@ export function queueProductOwnerLocalityGeneration(
     campaignId?: string;
     serviceId?: string;
   },
-): { ok: boolean; error?: string; jobId?: string; blockers?: string[] } {
+): { ok: boolean; error?: string; jobId?: string; blockers?: string[]; selectedCount?: number } {
   if (options.initiationSource !== CPR_DASHBOARD_INITIATION_SOURCE) {
     return {
       ok: false,
@@ -404,8 +414,32 @@ export function queueProductOwnerLocalityGeneration(
   if (!isServicePageGeneratedForIdentity(slug, serviceId, campaignId)) {
     return {
       ok: false,
-      error: "service_page_required",
-      blockers: ["Generate and review the service page before locality generation"],
+      error: "Service page has not been generated for this campaign. Generate the service page before locality pages.",
+      blockers: ["missing_service_page"],
+    };
+  }
+
+  const generationRecord = readServicePageGenerationRecord(slug, serviceId, campaignId);
+  const generationRevision = generationRecord?.imageAssignmentRevision || null;
+  if (
+    !isCampaignServicePageReviewApproved(slug, campaignId, serviceId, generationRevision) &&
+    !isServicePageReviewApproved(slug)
+  ) {
+    return {
+      ok: false,
+      error: "Service page is not approved for this campaign. Approve the service page before generating locality pages.",
+      blockers: ["missing_service_page_approval"],
+    };
+  }
+
+  projectCanonicalSelectionOntoCampaign(slug, campaignId);
+  const savedAreas = readCanonicalSavedLocalityAreas(slug);
+  if (options.mode !== "regenerate_one" && savedAreas.length < 1) {
+    return {
+      ok: false,
+      error: "No saved locality areas. Save at least one area in Local Coverage before generating locality pages.",
+      blockers: ["missing_saved_locality_areas"],
+      selectedCount: 0,
     };
   }
 
@@ -424,10 +458,10 @@ export function queueProductOwnerLocalityGeneration(
   );
   if (active) {
     return {
-      ok: false,
-      error: "job_already_running",
-      blockers: [`A locality job is already ${active.status}`],
+      ok: true,
       jobId: active.id,
+      selectedCount: savedAreas.length,
+      blockers: [`A locality job is already ${active.status}`],
     };
   }
 
@@ -474,6 +508,18 @@ export function queueProductOwnerLocalityGeneration(
       preservePreviousRevision: options.mode !== "generate_all",
       autoApprove: false,
       autoPublish: false,
+      selectedAreaCount: savedAreas.length,
+      selectedAreas: savedAreas.map((area) => ({
+        areaId: area.areaId,
+        areaName: area.areaName,
+        areaSlug: area.areaSlug,
+        latitude: area.latitude ?? null,
+        longitude: area.longitude ?? null,
+        distanceKm: area.distanceKm ?? null,
+        distanceLabel: area.distanceLabel || "",
+        distanceMethod: area.distanceMethod || "",
+        distanceProvenance: area.distanceProvenance || null,
+      })),
     },
   });
   updateMasterAdminJob(job.id, {
@@ -486,7 +532,7 @@ export function queueProductOwnerLocalityGeneration(
           : "Queued generate localities",
   });
   runMasterAdminJobAsync(job.id, job.executionPayload || {});
-  return { ok: true, jobId: job.id };
+  return { ok: true, jobId: job.id, selectedCount: savedAreas.length };
 }
 
 export function getProductOwnerGenerationJobStatus(jobId: string): MasterAdminJob | null {

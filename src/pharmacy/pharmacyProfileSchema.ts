@@ -44,6 +44,13 @@ export interface ProfileAreaEntry {
   score?: number;
   tier?: string;
   postcode?: string;
+  areaId?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  distanceKm?: number | null;
+  distanceLabel?: string;
+  distanceMethod?: string;
+  distanceProvenance?: Record<string, unknown>;
 }
 
 /** Wizard V2 competitor selection — stored on profile; not wired to generators. */
@@ -593,6 +600,16 @@ function normalizeAreaEntries(raw: unknown): ProfileAreaEntry[] {
         score: row.score != null ? Number(row.score) : undefined,
         tier: str(row.tier),
         postcode: str(row.postcode),
+        areaId: str(row.areaId) || undefined,
+        latitude: row.latitude == null || row.latitude === "" ? undefined : Number(row.latitude),
+        longitude: row.longitude == null || row.longitude === "" ? undefined : Number(row.longitude),
+        distanceKm: row.distanceKm == null || row.distanceKm === "" ? undefined : Number(row.distanceKm),
+        distanceLabel: str(row.distanceLabel) || undefined,
+        distanceMethod: str(row.distanceMethod) || undefined,
+        distanceProvenance:
+          row.distanceProvenance && typeof row.distanceProvenance === "object"
+            ? (row.distanceProvenance as Record<string, unknown>)
+            : undefined,
       } satisfies ProfileAreaEntry;
     })
     .filter(Boolean) as ProfileAreaEntry[];

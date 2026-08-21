@@ -280,6 +280,7 @@ export function renderProfileLocalAccessSectionHtml(
     includeCoverageTags?: boolean;
     localAreaLinks?: LocalAreaLink[];
     section13?: ParsedMasterSection;
+    intro?: string;
   } = {},
 ): string {
   const town = options.town || profile.town;
@@ -306,7 +307,8 @@ export function renderProfileLocalAccessSectionHtml(
   const nhsPrefix = isPharmacyFirstService(contentContext?.serviceId, serviceName) ? "NHS " : "";
   const introShort = stripUnsupportedLocalCopy(
     stripUnconfirmedConsultationRoomClaims(
-      `${name} is located at ${profile.customerFacingAddress || profile.fullAddress || [profile.addressLine1, profile.postcode].filter(Boolean).join(", ")}. Patients in ${town || "the local area"} can access ${nhsPrefix}${serviceName} at the pharmacy${profile.phone ? ` by calling ${displayPhone}` : ""}.`,
+      options.intro?.trim() ||
+        `${name} is located at ${profile.customerFacingAddress || profile.fullAddress || [profile.addressLine1, profile.postcode].filter(Boolean).join(", ")}. Patients in ${town || "the local area"} can access ${nhsPrefix}${serviceName} at the pharmacy${profile.phone ? ` by calling ${displayPhone}` : ""}.`,
       profile,
     ),
     profile,

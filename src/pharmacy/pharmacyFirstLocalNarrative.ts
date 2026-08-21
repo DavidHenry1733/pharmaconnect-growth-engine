@@ -28,6 +28,12 @@ import {
   getLocalityVariationSessionV1,
   rememberStrategyForSlug,
 } from "./contentEngine/pharmacyLocalityVariationSessionV1.ts";
+import {
+  bindVerifiedLocalityEvidenceV1,
+  discoveryContextSentence,
+  verifiedTravelSummary,
+  type VerifiedLocalityEvidence,
+} from "./contentEngine/pharmacyVerifiedLocalityEvidenceV1.ts";
 
 const PHARMACY_FIRST_CONDITIONS =
   "sore throat, earache, impetigo, infected insect bites, shingles, sinusitis, and uncomplicated UTI in eligible women";
@@ -483,7 +489,7 @@ function buildTravel(
       if (evidence.landmarks.length) {
         bits.push(`If you orient yourself using ${evidence.landmarks.join(" or ")}, you are already close to a usable mental map for the visit.`);
       } else {
-        bits.push(`Use familiar local landmarks around ${areaName} to plan the simplest approach.`);
+        bits.push(`Use the pharmacy address and a call ahead to plan the simplest approach from ${areaName}.`);
       }
       if (evidence.roads[0]) bits.push(`Approach routes often include ${evidence.roads[0]}.`);
       bits.push(
@@ -577,12 +583,40 @@ function buildFaqs(
   displayPhone: string,
   discovery: ReturnType<typeof areaDiscoveryForName>,
   memory: LocalityMemoryV1,
+  verified: VerifiedLocalityEvidence | null,
 ): FaqVariant[] {
   const address = confirmedAddressLine(ctx);
   const area = input.areaName;
-  const distance = discovery?.distanceLabel
-    ? `${area} is ${discovery.distanceLabel.toLowerCase()}.`
+  const distance = verified?.distanceLabel
+    ? `${area} is ${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""} of the pharmacy.`
     : `Call ${displayPhone} for the simplest route from ${area}${address ? ` to ${address}` : ""}.`;
+  void discovery;
+
+  const evidenceFaqs: FaqVariant[] = [];
+  if (verified?.distanceLabel) {
+    evidenceFaqs.push({
+      question: `How far is ${pharmacyName} from ${area}?`,
+      answer: `${distance} Saved coordinates and provenance are used rather than estimated travel times.`,
+    });
+  }
+  if (verified?.landmarks[0]) {
+    evidenceFaqs.push({
+      question: `What local reference points are on file for ${area}?`,
+      answer: `Saved locality evidence lists ${verified.landmarks
+        .slice(0, 2)
+        .map((l) => l.name)
+        .join(" and ")} for ${area}. Consultations take place at the pharmacy, not at those landmarks.`,
+    });
+  }
+  if (verified?.nearbyLocalities[0]) {
+    evidenceFaqs.push({
+      question: `Are there Pharmacy First pages for places near ${area}?`,
+      answer: `Nearby approved locality pages include ${verified.nearbyLocalities
+        .slice(0, 2)
+        .map((n) => n.areaName)
+        .join(" and ")}. ${verified.nearbyLocalities[0].reason}.`,
+    });
+  }
 
   const byStrategy: Record<LocalityPageStrategyId, FaqVariant[]> = {
     "access-led": [
@@ -678,8 +712,8 @@ function buildFaqs(
       },
       {
         question: `How far is ${pharmacyName} from ${area}?`,
-        answer: discovery?.distanceLabel
-          ? `${area} is ${discovery.distanceLabel.toLowerCase()}. Call ${displayPhone} if you want help planning the journey.`
+        answer: verified?.distanceLabel
+          ? `${area} is ${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""} of the pharmacy. Call ${displayPhone} if you want help planning the journey.`
           : `Call ${displayPhone} for the simplest route from ${area}${address ? ` to ${address}` : ""}.`,
       },
       {
@@ -753,52 +787,85 @@ function buildFaqs(
     ],
   };
 
-  const selected = byStrategy[plan.strategyId] || byStrategy["patient-journey-led"]!;
-  const rotate = plan.faqRotate % selected.length;
-  return [...selected.slice(rotate), ...selected.slice(0, rotate)].slice(0, 6);
+  const selected = [...(byStrategy[plan.strategyId] || byStrategy["patient-journey-led"]!)];
+  const merged: FaqVariant[] = [...evidenceFaqs];
+  for (const faq of selected) {
+    if (merged.some((existing) => existing.question === faq.question)) continue;
+    if (verified?.distanceLabel && /how far is/i.test(faq.question)) continue;
+    if (verified?.landmarks[0] && /local reference points|familiar places/i.test(faq.question)) continue;
+    merged.push(faq);
+  }
+  const rotate = plan.faqRotate % merged.length;
+  return [...merged.slice(rotate), ...merged.slice(0, rotate)].slice(0, 6);
 }
 
-function buildCta(plan: LocalityPageStrategyPlan, pharmacyName: string, displayPhone: string, areaName: string) {
+function buildCta(
+  plan: LocalityPageStrategyPlan,
+  pharmacyName: string,
+  displayPhone: string,
+  areaName: string,
+  verified: VerifiedLocalityEvidence | null,
+) {
+  const geo =
+    verified?.distanceLabel && verified.cardinalDirection
+      ? ` ${areaName} is ${verified.distanceLabel} ${verified.cardinalDirection} of the pharmacy.`
+      : verified?.distanceLabel
+        ? ` ${areaName} is ${verified.distanceLabel} from the pharmacy.`
+        : "";
+  const landmark = verified?.landmarks[0] ? ` Local reference on file: ${verified.landmarks[0].name}.` : "";
   switch (plan.ctaFrame) {
     case "directions-first":
       return {
-        primary: `Get directions to ${pharmacyName}`,
+        primary: `Get directions to ${pharmacyName} from ${areaName}`,
         secondary: `Call ${displayPhone}`,
-        phonePrompt: `Call ${displayPhone} for directions from ${areaName}`,
+        phonePrompt: `Call ${displayPhone} for directions from ${areaName}.${geo}${landmark}`,
       };
     case "check-suitability":
       return {
-        primary: `Check if Pharmacy First is suitable`,
+        primary: `Check if Pharmacy First is suitable from ${areaName}`,
         secondary: `Call ${displayPhone}`,
-        phonePrompt: `Call ${displayPhone} to check suitability from ${areaName}`,
+        phonePrompt: `Call ${displayPhone} to check suitability before travelling from ${areaName}.${geo}${landmark}`,
       };
     case "call-first":
       return {
-        primary: `Call the ${pharmacyName} team`,
+        primary: `Call the ${pharmacyName} team from ${areaName}`,
         secondary: `Ask about Pharmacy First`,
-        phonePrompt: `Call ${displayPhone} from ${areaName}`,
+        phonePrompt: `Call ${displayPhone} from ${areaName}.${geo}${landmark}`,
       };
     case "book-first":
     default:
       return {
-        primary: `Book, call or get directions`,
+        primary: `Book Pharmacy First from ${areaName}`,
         secondary: `Call ${displayPhone}`,
-        phonePrompt: `Call ${displayPhone} from ${areaName}`,
+        phonePrompt: `Call ${displayPhone} from ${areaName}.${geo}${landmark}`,
       };
   }
 }
 
-function nearbyIntro(plan: LocalityPageStrategyPlan, area: string, pharmacy: string, service: string): string {
+function nearbyIntro(
+  plan: LocalityPageStrategyPlan,
+  area: string,
+  pharmacy: string,
+  service: string,
+  neighbours: string[],
+): string {
+  const hint = neighbours.slice(0, 2).filter(Boolean);
   switch (plan.nearbyIntroStyle) {
     case "travel":
-      return `If you are travelling from communities near ${area}, you can also use ${service} at ${pharmacy}. Choose a nearby area below for local guidance.`;
+      return hint.length
+        ? `If you are travelling from ${hint.join(" or ")}, you can also use ${service} at ${pharmacy}. Choose a nearby area below for local guidance.`
+        : `Other approved locality pages can help if you are travelling from communities around ${area} to ${pharmacy}.`;
     case "family":
-      return `Families and neighbours around ${area} can access the same ${service} support at ${pharmacy}. Use the links below for area-specific guidance.`;
+      return `Families around ${area}${hint.length ? `, including ${hint.join(" and ")}` : ""}, can access the same ${service} support at ${pharmacy}.`;
     case "corridor":
-      return `Patients along nearby corridors from ${area} can also arrange ${service} at ${pharmacy}. Explore the links below.`;
+      return hint.length
+        ? `Patients travelling between ${area} and ${hint.join(" or ")} can also arrange ${service} at ${pharmacy}.`
+        : `Patients travelling from ${area} can also arrange ${service} at ${pharmacy}.`;
     case "community":
     default:
-      return `Patients from communities near ${area} can also use ${service} at ${pharmacy}. Choose a nearby area below for local guidance.`;
+      return hint.length
+        ? `Patients from ${hint.join(" and ")} can also use ${service} at ${pharmacy}. Choose a nearby area below for local guidance.`
+        : `Patients from communities around ${area} can also use ${service} at ${pharmacy}.`;
   }
 }
 
@@ -813,6 +880,24 @@ export function buildPharmacyFirstLocalNarrative(
   const serviceName = input.serviceName;
   const areaName = input.areaName;
   const discovery = areaDiscoveryForName(ctx.areaDiscovery, areaName);
+  const siblings = (input.siblingLocalities?.length
+    ? input.siblingLocalities
+    : input.nearbyAreaNames.map((name, i) => ({
+        areaName: name,
+        areaSlug: input.areaSlugsInCluster[i] || name.toLowerCase(),
+      }))
+  ).concat(
+    (input.siblingLocalities || []).some((s) => s.areaSlug === input.areaSlug)
+      ? []
+      : [{ areaName: input.areaName, areaSlug: input.areaSlug, ...input.localityRecord }],
+  );
+  const verified = bindVerifiedLocalityEvidenceV1({
+    ctx,
+    areaName,
+    areaSlug: input.areaSlug,
+    siblingLocalities: siblings,
+    localityRecord: input.localityRecord,
+  });
   const session = getLocalityVariationSessionV1();
   const listedIdx = input.areaSlugsInCluster.indexOf(input.areaSlug);
   const areaIndex =
@@ -821,8 +906,9 @@ export function buildPharmacyFirstLocalNarrative(
     (listedIdx >= 0 ? listedIdx : pickIndex(`${input.areaSlug}:area-idx`, 8));
   const pack = resolveLocalityIntelligencePack({
     areaName,
-    nearbyAreaNames: input.nearbyAreaNames,
+    nearbyAreaNames: verified.nearbyLocalities.map((n) => n.areaName),
     pharmacyAddress: profile.fullAddress,
+    verified,
   });
   const plan = resolveLocalityPageStrategyV1({
     areaName,
@@ -841,29 +927,91 @@ export function buildPharmacyFirstLocalNarrative(
   const confirmedRoad = roadFromAddress(address);
   if (confirmedRoad) memory.claim([confirmedRoad], 1);
   // Reserve neighbour names for nearby section only.
-  memory.claim(input.nearbyAreaNames, 12);
+  memory.claim(verified.nearbyLocalities.map((n) => n.areaName), 12);
 
   const evidence = claimFocusEvidence(pack, memory, plan.evidenceFocus);
   const variantPack = loadServiceVariantPack("pharmacy-first");
   const prepVariant = variantPack?.preparationGuide?.[areaIndex % (variantPack.preparationGuide.length || 1)];
+  const geoSummary = verifiedTravelSummary(verified);
+  const discoveryContext = discoveryContextSentence(verified);
+  const accessGeo = verified.distanceLabel
+    ? `Saved coordinates place ${areaName} ${verified.distanceLabel}${
+        verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""
+      } of the consultation address${address ? ` at ${address}` : ""}.`
+    : "";
+  const accessLandmark = verified.landmarks[0]
+    ? `Verified orientation from ${areaName} includes ${verified.landmarks[0].name}.`
+    : "";
 
-  const heroIntro = buildHero(
-    plan,
-    areaName,
-    serviceName,
-    address,
-    evidence,
-    displayPhone,
-    discovery?.distanceLabel || "",
-  );
-  const whyChecksBody = buildWhy(plan, areaName, displayPhone, evidence);
+  const heroIntro = [
+    buildHero(
+      plan,
+      areaName,
+      serviceName,
+      address,
+      evidence,
+      displayPhone,
+      verified.distanceLabel
+        ? [verified.distanceLabel, verified.cardinalDirection].filter(Boolean).join(" ")
+        : "",
+    ),
+    discoveryContext,
+    geoSummary && !verified.distanceLabel ? geoSummary : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const localRelevanceFacts = [
+    geoSummary ? `${geoSummary}.` : "",
+    verified.landmarks.length
+      ? `Verified local reference points for ${areaName} include ${verified.landmarks
+          .slice(0, 2)
+          .map((l) => l.name)
+          .join(" and ")}.`
+      : "",
+    verified.healthcare.length
+      ? `Saved healthcare context for ${areaName} includes ${verified.healthcare
+          .slice(0, 2)
+          .map((h) => h.name)
+          .join(" and ")}.`
+      : "",
+    verified.nearbyLocalities.length
+      ? `Other approved locality pages with geographic relevance include ${verified.nearbyLocalities
+          .slice(0, 2)
+          .map((n) => n.areaName)
+          .join(" and ")}.`
+      : "",
+    verified.evidenceLimited
+      ? `Where further locality landmarks are not on file, this page stays limited to verified ${areaName} facts rather than invented local colour.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const localRelevanceBody = [buildConditions(plan, serviceName, displayPhone, areaName), localRelevanceFacts]
+    .filter(Boolean)
+    .join(" ");
+  const whyChecksBody = [buildWhy(plan, areaName, displayPhone, evidence), discoveryContext, geoSummary]
+    .filter(Boolean)
+    .join(" ");
   const processOnly = buildHow(plan, serviceName, areaName, displayPhone);
   const consultationBody = buildConsultation(plan, displayPhone, areaName);
-  const localRelevanceBody = buildConditions(plan, serviceName, displayPhone, areaName);
-  const accessBody = buildTravel(plan, areaName, address, evidence, displayPhone, pack, memory);
+  const accessBody = [
+    buildTravel(plan, areaName, address, evidence, displayPhone, pack, memory),
+    accessGeo,
+    accessLandmark,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   const trustBody = buildGp(plan, areaName, displayPhone, serviceName);
-  const cta = buildCta(plan, pharmacyName, displayPhone, areaName);
-  const nearby = nearbyIntro(plan, areaName, pharmacyName, serviceName);
+  const cta = buildCta(plan, pharmacyName, displayPhone, areaName, verified);
+  const nearby = nearbyIntro(
+    plan,
+    areaName,
+    pharmacyName,
+    serviceName,
+    verified.nearbyLocalities.map((n) => n.areaName),
+  );
 
   const processIntro = [
     processOnly,
@@ -887,11 +1035,21 @@ export function buildPharmacyFirstLocalNarrative(
   const content: LocalClusterPageContent = {
     heroIntro,
     localRelevanceHeading: plan.headings.conditions,
-    localRelevanceIntro: plan.headings.conditions.includes("Conditions")
-      ? `${serviceName} covers defined NHS pathway conditions. The pharmacist confirms what can be assessed for you on the day.`
-      : `Pathway suitability is confirmed during consultation — not assumed from your postcode.`,
+    localRelevanceIntro: [
+      geoSummary ? `${geoSummary}.` : `Pharmacy First support for patients in ${areaName} is confirmed during consultation.`,
+      verified.landmarks[0]
+        ? `Local orientation can use ${verified.landmarks[0].name}.`
+        : verified.nearbyLocalities[0]
+          ? `Nearby approved guidance also covers ${verified.nearbyLocalities[0].areaName}.`
+          : `Pathway suitability is confirmed during consultation — not assumed from your postcode.`,
+    ].join(" "),
     localRelevanceBody,
-    localRelevanceBullets: [],
+    localRelevanceBullets: [
+      geoSummary ? geoSummary : "",
+      ...verified.landmarks.slice(0, 2).map((l) => `Verified local reference: ${l.name}.`),
+      ...verified.healthcare.slice(0, 1).map((h) => `Verified healthcare context: ${h.name}.`),
+      ...verified.nearbyLocalities.slice(0, 2).map((n) => `${n.areaName}: ${n.reason}.`),
+    ].filter(Boolean),
     whyChecksHeading: plan.headings.why,
     whyChecksBody,
     whyChecksBullets: [
@@ -919,7 +1077,7 @@ export function buildPharmacyFirstLocalNarrative(
     trustBullets: undefined,
     trustClosing: undefined,
     trustBody,
-    faqs: buildFaqs(plan, input, ctx, pharmacyName, displayPhone, discovery, memory),
+    faqs: buildFaqs(plan, input, ctx, pharmacyName, displayPhone, discovery, memory, verified),
     ctaPrimary: cta.primary,
     ctaSecondary: cta.secondary,
     ctaPhonePrompt: cta.phonePrompt,
@@ -927,6 +1085,63 @@ export function buildPharmacyFirstLocalNarrative(
     localIntelligenceUsed: true,
     narrativeType: `pharmacy-first-intelligence:${plan.strategyId}`,
     wordCountEstimate: 0,
+    seoTitle: [
+      `${serviceName} in ${areaName}`,
+      verified.landmarks[0]?.name ||
+        (verified.nearbyLocalities[0] ? `near ${verified.nearbyLocalities[0].areaName}` : "") ||
+        (verified.distanceLabel
+          ? `${verified.distanceLabel}${verified.cardinalDirection ? ` ${verified.cardinalDirection}` : ""}`
+          : ""),
+      pharmacyName,
+    ]
+      .filter(Boolean)
+      .join(" | "),
+    metaDescription: [
+      `${pharmacyName} provides ${serviceName} for patients in ${areaName}`,
+      geoSummary,
+      verified.landmarks[0] ? `Local reference: ${verified.landmarks[0].name}` : "",
+      verified.nearbyLocalities[0] ? `Also serving nearby ${verified.nearbyLocalities[0].areaName}` : "",
+      `Call ${displayPhone} to check suitability.`,
+    ]
+      .filter(Boolean)
+      .join(". "),
+    supportingHeading: verified.landmarks[0]
+      ? `Verified local context for ${areaName}`
+      : verified.healthcare[0]
+        ? `Healthcare context for ${areaName}`
+        : `Using ${serviceName} from ${areaName}`,
+    supportingIntro: verified.evidenceLimited
+      ? `This page uses only verified facts on file for ${areaName}. Unsupported landmarks, travel times and local claims are omitted.`
+      : `The local details below come from saved locality evidence for ${areaName}.`,
+    supportingItems: [
+      ...verified.landmarks.slice(0, 2).map((l) => ({
+        title: l.name,
+        body: `Saved locality evidence lists ${l.name} as a reference point for patients in ${areaName}.`,
+        evidence: l.provenance,
+      })),
+      ...verified.healthcare.slice(0, 1).map((h) => ({
+        title: h.name,
+        body: `Verified healthcare context for ${areaName}${h.distanceLabel ? ` (${h.distanceLabel})` : ""}.`,
+        evidence: h.provenance,
+      })),
+      ...verified.nearbyLocalities.slice(0, 2).map((n) => ({
+        title: n.areaName,
+        body: n.reason,
+        evidence: n.geographic ? "haversine-between-saved-coords" : "approved-sibling-locality",
+      })),
+      ...(verified.latitude != null && verified.longitude != null
+        ? [
+            {
+              title: `${areaName} coordinates`,
+              body: `Saved locality coordinates (${verified.latitude.toFixed(4)}, ${verified.longitude.toFixed(4)}) with provenance ${verified.coordinateProvenance}.`,
+              evidence: verified.coordinateProvenance,
+            },
+          ]
+        : []),
+    ],
+    nearbyLocalityLinks: verified.nearbyLocalities,
+    sectionEvidence: verified.sectionEvidence,
+    evidenceLimited: verified.evidenceLimited,
   };
 
   content.contentFingerprint = [

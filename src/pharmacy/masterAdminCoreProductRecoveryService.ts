@@ -48,6 +48,7 @@ import {
 } from "./masterAdminServicePageGenerationIdentity.ts";
 import { readActiveServiceCampaignSelection } from "./masterAdminActiveServiceCampaignStore.ts";
 import { readPharmacyCampaignStore } from "./pharmacyCampaignService.ts";
+import { buildContentEcosystemLocalPreviewUrl } from "./pharmacyClusterPageUrlResolver.ts";
 import {
   finishWorkflowExecution,
   getLastRecordedWorkflowStage,
@@ -62,6 +63,8 @@ import type {
   ServicePageImageSelection,
   ServicePageReviewPayload,
 } from "./masterAdminCoreProductRecoveryModel.ts";
+import { evaluateLocalityHtmlDuplicationGate } from "./pharmacyLocalityPageDuplicationGateV1.ts";
+import { buildPharmacyServicePageProfile } from "./pharmacyServicePageProfileContext.ts";
 
 /** Explicit Product Owner locality review scope — never invents Pharmacy First / primary service. */
 export type LocalityReviewScope = {
@@ -343,6 +346,21 @@ export function readLocalityPageDecisionStore(
   }
 }
 
+function localityDuplicationGateForPages(
+  slug: string,
+  pages: Array<{ areaSlug: string; label: string; outputPath: string }>,
+): ReturnType<typeof evaluateLocalityHtmlDuplicationGate> {
+  const pharmacyName = buildPharmacyServicePageProfile(slug).pharmacyName;
+  const loaded = pages
+    .filter((p) => p.outputPath && fs.existsSync(p.outputPath))
+    .map((p) => ({
+      areaSlug: p.areaSlug,
+      areaName: p.label,
+      html: fs.readFileSync(p.outputPath, "utf8"),
+    }));
+  return evaluateLocalityHtmlDuplicationGate({ pages: loaded, pharmacyName });
+}
+
 /**
  * Persist a single locality approval/rejection for tenant + campaign + service + locality.
  * Does not approve the service page, other localities, publish, or regenerate.
@@ -363,6 +381,14 @@ export function decideLocalityPageReview(
 
   const pages = listCprClusterPagePreviews(slug, identity);
   if (!pages.some((p) => p.areaSlug === area)) return null;
+
+  if (decision === "approved") {
+    const gate = localityDuplicationGateForPages(slug, pages);
+    if (!gate.ok) {
+      const dashboard = buildCprClusterReviewDashboard(slug, identity);
+      return dashboard;
+    }
+  }
 
   const existing = readLocalityPageDecisionStore(slug, identity) || {
     version: 1 as const,
@@ -415,7 +441,7 @@ export function listCprClusterPagePreviews(
   return listGeneratedLocalClusterAreaDirs(localDir).map((areaSlug) => ({
     areaSlug,
     label: areaSlug.replace(/^cluster-/, "").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-    previewUrl: `/api/pharmacy-content-ecosystem-preview/${encodeURIComponent(identity.serviceId)}/local/${encodeURIComponent(areaSlug)}/?slug=${encodeURIComponent(slug)}`,
+    previewUrl: buildContentEcosystemLocalPreviewUrl(identity.serviceId, areaSlug, slug),
     outputPath: path.join(localDir, areaSlug, "index.html"),
   }));
 }
@@ -451,6 +477,11 @@ export function buildCprClusterReviewDashboard(
   remainingLocalityCount: number;
   canApprove: boolean;
   nextActionLabel: string;
+  duplicationGate?: {
+    ok: boolean;
+    message: string;
+    failedPairs: Array<{ a: string; b: string; reason: string }>;
+  };
 } | null {
   if (!isCoreProductRecoveryMode(slug)) return null;
   const identity = resolveLocalityReviewIdentity(slug, scope);
@@ -474,8 +505,8 @@ export function buildCprClusterReviewDashboard(
   });
   const approvedLocalityCount = pages.filter((p) => p.decision === "approved").length;
   const remainingLocalityCount = pages.length - approvedLocalityCount;
-  // Campaign-scoped only — never gate on tenant-level / Pharmacy First / primary-service CPR state.
   const allLocalitiesApproved = pages.length > 0 && remainingLocalityCount === 0;
+  const duplicationGate = localityDuplicationGateForPages(slug, pages);
   return {
     slug,
     campaignId: identity.campaignId,
@@ -492,9 +523,13 @@ export function buildCprClusterReviewDashboard(
     pageCount: pages.length,
     approvedLocalityCount,
     remainingLocalityCount,
-    // Bulk control available when this campaign has generated pages and 2+ still unapproved.
-    canApprove: pages.length > 0 && remainingLocalityCount >= 2,
-    nextActionLabel: "Review Locality Pages",
+    canApprove: pages.length > 0 && remainingLocalityCount >= 2 && duplicationGate.ok,
+    nextActionLabel: duplicationGate.ok ? "Review Locality Pages" : "Resolve locality duplication before approval",
+    duplicationGate: {
+      ok: duplicationGate.ok,
+      message: duplicationGate.message,
+      failedPairs: duplicationGate.pairs.filter((p) => p.blocked).map((p) => ({ a: p.a, b: p.b, reason: p.reason })),
+    },
   };
 }
 

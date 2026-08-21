@@ -88,8 +88,17 @@ export function buildLocalClusterHubPageContent(
 ): LocalClusterHubPageContent {
   void resolveCommercialSectionPlanV1("cluster");
   const childAreas = hierarchy.areas.filter((a) => a.parentAreaId === cluster.areaId);
-  const focusArea = childAreas[0]?.name ?? cluster.name;
+  const siblingLocalities = hierarchy.clusters.map((c) => ({
+    areaName: c.name,
+    areaSlug: c.slug,
+    distanceLabel: c.distanceLabel,
+    relationship: c.relationship,
+    evidence: c.evidence,
+    source: c.source,
+  }));
+  const focusArea = cluster.name;
   const scopedCtx = scopeContentGenerationContextForArea(ctx, focusArea);
+  const nearbyNames = siblingLocalities.filter((s) => s.areaSlug !== cluster.slug).map((s) => s.areaName);
   const base = composeCommercialClusterNarrativeV1(
     {
       slug: ctx.resolvedSlug,
@@ -97,8 +106,15 @@ export function buildLocalClusterHubPageContent(
       serviceName: ctx.serviceName,
       areaName: cluster.name,
       areaSlug: cluster.slug,
-      nearbyAreaNames: childAreas.map((a) => a.name),
-      areaSlugsInCluster: childAreas.map((a) => a.slug),
+      nearbyAreaNames: nearbyNames.length ? nearbyNames : childAreas.map((a) => a.name),
+      areaSlugsInCluster: siblingLocalities.map((s) => s.areaSlug),
+      siblingLocalities,
+      localityRecord: {
+        distanceLabel: cluster.distanceLabel,
+        relationship: cluster.relationship,
+        evidence: cluster.evidence,
+        source: cluster.source,
+      },
     },
     scopedCtx,
   );
@@ -119,7 +135,7 @@ export function buildLocalClusterHubPageContent(
     clusterContextIntro: scrubPublicLocalEngineTerms(whyIntro),
     clusterContextBody: scrubPublicLocalEngineTerms(whyBody),
     // How + consultation marker for commercial polish split (renderer-neutral).
-    childAreasIntro: scrubPublicLocalEngineTerms(base.processIntro || ""),
+    childAreasIntro: scrubPublicLocalEngineTerms(base.supportingIntro || ""),
     relevanceHeading: scrubPublicLocalEngineTerms(base.localRelevanceHeading || ""),
     base: {
       ...base,
@@ -150,6 +166,15 @@ export function buildLocalClusterHubPageContent(
       ctaPrimary: scrubPublicLocalEngineTerms(base.ctaPrimary),
       ctaSecondary: scrubPublicLocalEngineTerms(base.ctaSecondary),
       ctaPhonePrompt: scrubPublicLocalEngineTerms(base.ctaPhonePrompt),
+      seoTitle: base.seoTitle ? scrubPublicLocalEngineTerms(base.seoTitle) : undefined,
+      metaDescription: base.metaDescription ? scrubPublicLocalEngineTerms(base.metaDescription) : undefined,
+      supportingHeading: base.supportingHeading ? scrubPublicLocalEngineTerms(base.supportingHeading) : undefined,
+      supportingIntro: base.supportingIntro ? scrubPublicLocalEngineTerms(base.supportingIntro) : undefined,
+      supportingItems: base.supportingItems?.map((item) => ({
+        title: scrubPublicLocalEngineTerms(item.title),
+        body: scrubPublicLocalEngineTerms(item.body),
+        evidence: item.evidence,
+      })),
     },
   };
 }

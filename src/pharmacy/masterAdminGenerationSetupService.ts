@@ -6,13 +6,15 @@ import path from "node:path";
 import { readSetupProfile, writeSetupProfile } from "./growthEngineCustomerSetupImportSplitService.ts";
 import { readLatestApprovalSnapshot } from "./masterAdminBusinessProfileReviewService.ts";
 import { readGoogleIntelligenceRecord } from "./masterAdminCanonicalGoogleService.ts";
+import { syncProfileAreaCompatibility } from "./pharmacyAreaDiscoveryService.ts";
 import {
-  applyAreaDiscoveryToProfile,
-  discoverPharmacyAreas,
-  syncProfileAreaCompatibility,
-} from "./pharmacyAreaDiscoveryService.ts";
-import { loadCityAreaData } from "../area/loadCityAreaData.ts";
+  buildLocalCoverageRecommendations,
+  type LocalCoverageAreaRecommendation,
+} from "./masterAdminLocalCoverageRecommendationService.ts";
+import { DISTANCE_UNAVAILABLE_LABEL } from "./masterAdminLocalCoverageGeoService.ts";
 import type { PharmacyProfileData, ProfileAreaEntry } from "./pharmacyProfileSchema.ts";
+import { slugifyArea } from "./pharmacyAreaNarrativeProfiles.ts";
+import { projectCanonicalSelectionOntoCampaign } from "./masterAdminSavedLocalitySelectionService.ts";
 import { getPharmacyProfilePath, safePharmacySlug, WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
 import {
   ensureComponentDnaPersisted,
@@ -33,6 +35,10 @@ export interface LocalAreaRecommendation {
   confidence: number;
   selected: boolean;
   recommended: boolean;
+  branchLocality?: boolean;
+  evidenceLimitation?: string | null;
+  distanceMethod?: string;
+  distanceProvenance?: LocalCoverageAreaRecommendation["distanceProvenance"];
 }
 
 export interface GenerationSetupState {
@@ -104,35 +110,20 @@ function resolvePrimaryTown(profile: PharmacyProfileData, slug: string): { town:
   return { town: "", source: "none" };
 }
 
-function distanceForArea(town: string, areaName: string): { km: number | null; label: string } {
-  try {
-    const cityData = loadCityAreaData(town);
-    const profile = cityData.areas.find((a) => a.name.toLowerCase() === areaName.toLowerCase());
-    if (profile?.distanceKm != null) {
-      return { km: profile.distanceKm, label: `Approx. ${profile.distanceKm} km from ${town} town centre` };
-    }
-  } catch {
-    /* ignore */
-  }
-  return { km: null, label: "Distance unavailable" };
-}
-
-function mapAreaToRecommendation(
-  entry: ProfileAreaEntry,
-  town: string,
-  evidenceSource: string,
-  recommended: boolean,
-): LocalAreaRecommendation {
-  const distance = distanceForArea(town, entry.areaName);
+function mapCoverageArea(area: LocalCoverageAreaRecommendation): LocalAreaRecommendation {
   return {
-    areaName: entry.areaName,
-    areaType: entry.areaType || "neighbourhood",
-    distanceKm: distance.km,
-    distanceLabel: distance.label,
-    evidenceSource: entry.source === "manual" ? "manual entry" : evidenceSource,
-    confidence: entry.confidence ?? 70,
-    selected: entry.selected !== false,
-    recommended,
+    areaName: area.areaName,
+    areaType: area.areaType,
+    distanceKm: area.distanceKm,
+    distanceLabel: area.distanceLabel,
+    evidenceSource: area.evidenceSource,
+    confidence: area.confidence,
+    selected: area.selected,
+    recommended: area.recommended,
+    branchLocality: area.branchLocality,
+    evidenceLimitation: area.evidenceLimitation,
+    distanceMethod: area.distanceMethod,
+    distanceProvenance: area.distanceProvenance,
   };
 }
 
@@ -159,52 +150,19 @@ export function buildLocalAreaRecommendations(slug: string): {
     };
   }
   const { town, source: primaryTownSource } = resolvePrimaryTown(profile, safe);
-
-  if (!town) {
+  const coverage = buildLocalCoverageRecommendations(safe);
+  if (!town && !coverage.branchLocality && !coverage.areas.length) {
     return { primaryTown: "", primaryTownSource, areas: [], discoverySource: "none", localityStrategyActive: true };
   }
 
-  const existingSelected = new Map(
-    (profile.selectedAreas || []).map((a) => [a.areaName.toLowerCase(), a]),
-  );
-  const hasSavedSelection = [...existingSelected.values()].some((a) => a.selected !== false);
-
-  const discovery = discoverPharmacyAreas({
-    town,
-    limit: 10,
-    preserveSelection: profile.selectedAreas || [],
-  });
-
-  const recommendedNames = new Set(
-    discovery.areas.slice(0, 8).map((a) => a.areaName.toLowerCase()),
-  );
-
-  const areas = discovery.areas.map((entry, idx) => {
-    const saved = existingSelected.get(entry.areaName.toLowerCase());
-    const recommended = recommendedNames.has(entry.areaName.toLowerCase());
-    const selected = saved ? saved.selected !== false : hasSavedSelection ? false : false;
-    return mapAreaToRecommendation(
-      { ...entry, selected, order: saved?.order ?? entry.order ?? idx + 1 },
-      discovery.primaryCity,
-      discovery.source,
-      recommended,
-    );
-  });
-
-  for (const [key, saved] of existingSelected) {
-    if (areas.some((a) => a.areaName.toLowerCase() === key)) continue;
-    areas.push(
-      mapAreaToRecommendation(saved, town, saved.source || "saved profile", false),
-    );
-  }
-
   return {
-    primaryTown: discovery.primaryCity || town,
-    primaryTownSource,
-    areas,
-    discoverySource: discovery.source,
-    marketScope: "local_regional",
-    localityStrategyActive: true,
+    primaryTown: coverage.primaryTown || town,
+    primaryTownSource: coverage.primaryTownSource || primaryTownSource,
+    areas: coverage.areas.map(mapCoverageArea),
+    discoverySource: coverage.discoverySource,
+    marketScope: coverage.marketScope,
+    primaryMarket: coverage.primaryMarket,
+    localityStrategyActive: coverage.localityStrategyActive,
   };
 }
 
@@ -303,15 +261,29 @@ export function saveGenerationSetupLocalAreas(
     .filter((a) => text(a.areaName))
     .map((a, idx) => {
       const known = byName.get(a.areaName.toLowerCase());
+      const areaName = a.areaName.trim();
+      const knownRec = known as (typeof known & {
+        latitude?: number | null;
+        longitude?: number | null;
+        distanceMethod?: string;
+        distanceProvenance?: Record<string, unknown>;
+      }) | undefined;
       return {
-        areaName: a.areaName.trim(),
+        areaName,
+        areaId: slugifyArea(areaName),
         areaType: known?.areaType || "neighbourhood",
         priority: idx + 1,
         order: idx + 1,
         selected: a.selected !== false,
         source: known?.evidenceSource || "generation-setup",
         confidence: known?.confidence ?? 70,
-        tier: "secondary",
+        tier: known?.branchLocality ? "priority" : "secondary",
+        distanceKm: known?.distanceKm ?? null,
+        distanceLabel: known?.distanceLabel || DISTANCE_UNAVAILABLE_LABEL,
+        distanceMethod: knownRec?.distanceMethod || known?.distanceMethod || "none",
+        latitude: knownRec?.latitude ?? null,
+        longitude: knownRec?.longitude ?? null,
+        distanceProvenance: knownRec?.distanceProvenance,
       } satisfies ProfileAreaEntry;
     });
 
@@ -328,6 +300,7 @@ export function saveGenerationSetupLocalAreas(
   });
 
   writeSetupProfile(safe, synced as PharmacyProfileData);
+  projectCanonicalSelectionOntoCampaign(safe);
   return buildGenerationSetupState(safe);
 }
 

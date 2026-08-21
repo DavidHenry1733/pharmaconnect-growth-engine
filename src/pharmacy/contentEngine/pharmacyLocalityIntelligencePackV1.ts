@@ -4,6 +4,8 @@
  */
 import { hashSeed } from "../pharmacyLayoutTemplateLibrary.ts";
 import { slugifyArea } from "../pharmacyAreaNarrativeProfiles.ts";
+import type { VerifiedLocalityEvidence } from "./pharmacyVerifiedLocalityEvidenceV1.ts";
+import { verifiedTravelSummary } from "./pharmacyVerifiedLocalityEvidenceV1.ts";
 
 export type LocalityIntelPack = {
   areaName: string;
@@ -174,51 +176,58 @@ function pick<T>(items: T[], seed: string, offset = 0): T {
   return items[(hashSeed(seed, String(offset)) % items.length + items.length) % items.length]!;
 }
 
-function synthesizePack(areaName: string, nearby: string[], pharmacyRoad: string): LocalityIntelPack {
-  const seed = slugifyArea(areaName) || "area";
-  const roadPool = [
-    `${areaName} Road`,
-    `${areaName} Lane`,
-    pharmacyRoad || "the main local road",
-    "High Street approaches",
-    "Station Road",
-    "Church Street",
-    "Park Avenue",
-  ].filter(Boolean);
-  const landmarkPool = [
-    `the ${areaName} local centre`,
-    `${areaName} parish church approaches`,
-    `the ${areaName} war memorial green`,
-    `${areaName} library approaches`,
-  ];
-  const parkPool = [`${areaName} Park`, `recreation ground near ${areaName}`, `green space off the main ${areaName} roads`];
-  const shopPool = [`${areaName} local shops`, `neighbourhood parades serving ${areaName}`, `everyday retail around ${areaName}`];
-  const schoolPool = [`schools serving ${areaName}`, `family catchments around ${areaName}`];
-  const gpPool = [`${areaName} GP surgery catchment`, `${areaName} neighbourhood medical centre links`];
-  const transportPool = [
-    `local bus routes through ${areaName}`,
-    `walking routes from the ${areaName} centre`,
-    `short drives from surrounding streets`,
-  ];
-  const neighbours = nearby.length ? nearby.slice(0, 4) : ["neighbouring districts", "nearby residential streets"];
+function packFromVerified(evidence: VerifiedLocalityEvidence): LocalityIntelPack {
+  const travel = verifiedTravelSummary(evidence);
+  const neighbours = evidence.nearbyLocalities.map((n) => n.areaName).slice(0, 4);
+  const parks = evidence.landmarks.filter((l) => /park/i.test(`${l.name} ${l.category || ""}`)).map((l) => l.name);
+  const gps = evidence.healthcare
+    .filter((h) => /gp|surgery|medical centre|doctor|health centre/i.test(`${h.name} ${h.category || ""}`))
+    .map((h) => h.name);
+  const localContext = [
+    evidence.discoveryReason,
+    evidence.relationship,
+    ...evidence.discoveryEvidence.slice(0, 2),
+  ]
+    .map((s) => String(s || "").trim())
+    .filter((s) => s && !/^approx\.\s*\d+\s*km from/i.test(s) && !/^recognised neighbourhood/i.test(s));
   return {
-    areaName,
-    roads: [pick(roadPool, seed, 1), pick(roadPool, seed, 2), pick(roadPool, seed, 3)],
-    landmarks: [pick(landmarkPool, seed, 1), pick(landmarkPool, seed, 2)],
-    parks: [pick(parkPool, seed, 1)],
-    shopping: [pick(shopPool, seed, 1)],
-    schools: [pick(schoolPool, seed, 1)],
-    gpSurgeries: [pick(gpPool, seed, 1)],
-    transport: [pick(transportPool, seed, 1), pick(transportPool, seed, 2)],
+    areaName: evidence.areaName,
+    roads: [],
+    landmarks: evidence.landmarks.map((l) => l.name),
+    parks,
+    shopping: evidence.retail.map((r) => r.name),
+    schools: evidence.schools.map((s) => s.name),
+    gpSurgeries: gps.length ? gps : evidence.healthcare.map((h) => h.name),
+    transport: evidence.transport.map((t) => t.name),
     neighbouring: neighbours,
     travelNotes: [
-      `Patients usually approach from the main roads serving ${areaName}`,
-      `Call ahead if you are travelling from the far side of ${areaName} so the visit is worthwhile`,
-    ],
-    localContext: [
-      `${areaName} residents often need practical same-day pharmacist assessment when routine GP appointments are hard to book`,
-      `Everyday school, shopping and commuting patterns around ${areaName} shape when people can attend`,
-    ],
+      travel,
+      evidence.distanceLabel && evidence.cardinalDirection
+        ? `Saved coordinates place ${evidence.areaName} ${evidence.distanceLabel} ${evidence.cardinalDirection} of the pharmacy`
+        : "",
+    ].filter(Boolean),
+    localContext: localContext.length
+      ? localContext
+      : evidence.evidenceLimited
+        ? [`This page uses only verified facts on file for ${evidence.areaName}`]
+        : [],
+  };
+}
+
+/** Fail-safe pack: locality name + approved neighbours only. Never invents landmarks or roads. */
+function restrainedPack(areaName: string, nearby: string[]): LocalityIntelPack {
+  return {
+    areaName,
+    roads: [],
+    landmarks: [],
+    parks: [],
+    shopping: [],
+    schools: [],
+    gpSurgeries: [],
+    transport: [],
+    neighbouring: nearby.slice(0, 4),
+    travelNotes: [],
+    localContext: [`This page uses only verified facts on file for ${areaName}`],
   };
 }
 
@@ -226,7 +235,20 @@ export function resolveLocalityIntelligencePack(input: {
   areaName: string;
   nearbyAreaNames?: string[];
   pharmacyAddress?: string;
+  verified?: VerifiedLocalityEvidence | null;
 }): LocalityIntelPack {
+  if (input.verified) {
+    const fromEvidence = packFromVerified(input.verified);
+    const hasPlaceFacts =
+      fromEvidence.landmarks.length +
+        fromEvidence.gpSurgeries.length +
+        fromEvidence.transport.length +
+        fromEvidence.shopping.length >
+      0;
+    if (hasPlaceFacts || input.verified.distanceLabel || input.verified.nearbyLocalities.length) {
+      return fromEvidence;
+    }
+  }
   const slug = slugifyArea(input.areaName);
   const known = LEEDS_PACKS[slug];
   if (known) {
@@ -238,10 +260,7 @@ export function resolveLocalityIntelligencePack(input: {
     ].slice(0, 5);
     return { ...known, neighbouring: neighbours };
   }
-  const roadMatch = String(input.pharmacyAddress || "").match(
-    /\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)*\s(?:Road|Street|Lane|Avenue|Drive|Way))\b/,
-  );
-  return synthesizePack(input.areaName, input.nearbyAreaNames || [], roadMatch?.[1] || "");
+  return restrainedPack(input.areaName, input.nearbyAreaNames || input.verified?.nearbyLocalities.map((n) => n.areaName) || []);
 }
 
 /** Build lightweight healthcare provider rows for access/locality consumers when market snapshots are empty. */
@@ -300,37 +319,40 @@ export function localitySentences(pack: LocalityIntelPack, purpose: "hero" | "wh
   switch (purpose) {
     case "hero":
       return [
-        asSentence(pick(pack.localContext, seed, 0)),
-        `Familiar routes include ${pack.roads[0]} and ${pack.roads[1] || pack.roads[0]}.`,
-      ];
+        asSentence(pack.localContext[0] || pick(pack.localContext, seed, 0)),
+        pack.roads[0] && !/consultations take place/i.test(pack.roads[0])
+          ? asSentence(`Approach references include ${pack.roads[0]}`)
+          : "",
+      ].filter(Boolean);
     case "why":
       return [
-        asSentence(pick(pack.localContext, seed, 1) || pack.localContext[0]!),
-        `Households around ${pack.neighbouring.slice(0, 2).join(" and ")} often look to the same convenient pharmacist access.`,
-      ];
+        asSentence(pack.localContext[1] || pack.localContext[0] || ""),
+        pack.neighbouring.length
+          ? `Households around ${pack.neighbouring.slice(0, 2).join(" and ")} can use the same pharmacist access.`
+          : "",
+      ].filter(Boolean);
     case "travel":
       return [
-        asSentence(pick(pack.travelNotes, seed, 0)),
-        `Useful approach roads include ${pack.roads.slice(0, 3).join(", ")}.`,
-        asSentence(pick(pack.transport, seed, 0)),
-      ];
+        asSentence(pack.travelNotes[0] || pick(pack.travelNotes, seed, 0)),
+        asSentence(pack.transport[0] || ""),
+      ].filter(Boolean);
     case "landmarks":
-      return [
-        `Local reference points include ${pack.landmarks.slice(0, 2).join(" and ")}, with ${pack.parks[0]} nearby.`,
-        `Everyday orientation also comes from ${pack.shopping[0]} and ${pack.schools[0]}.`,
-      ];
+      return pack.landmarks.length
+        ? [
+            `Verified local reference points include ${pack.landmarks.slice(0, 2).join(" and ")}${
+              pack.parks[0] ? `, with ${pack.parks[0]} nearby` : ""
+            }.`,
+          ]
+        : [];
     case "parking":
-      return [
-        asSentence(pick(pack.transport, seed, 1)),
-        asSentence(pick(pack.travelNotes, seed, 1)),
-        `If you are coming past ${pack.landmarks[0]}, follow local signs toward ${pack.roads[0]}.`,
-      ];
+      return [asSentence(pack.transport[0] || ""), asSentence(pack.travelNotes[0] || "")].filter(Boolean);
     case "conditions":
-      return [
-        `Patients linked to ${pack.gpSurgeries[0]} still use community pharmacy care for suitable needs when surgery diaries are full.`,
-        `School-term peaks around ${pack.schools[0]} often increase pharmacy consultation demand.`,
-      ];
+      return pack.gpSurgeries[0]
+        ? [
+            `Patients linked to ${pack.gpSurgeries[0]} still use community pharmacy care for suitable needs when surgery diaries are full.`,
+          ]
+        : [];
     default:
-      return pack.localContext.slice(0, 1).map(asSentence);
+      return pack.localContext.slice(0, 1).map(asSentence).filter(Boolean);
   }
 }

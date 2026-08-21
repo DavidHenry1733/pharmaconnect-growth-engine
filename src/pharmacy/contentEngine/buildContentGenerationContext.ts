@@ -138,10 +138,14 @@ export function buildContentGenerationContext(
   }
 
   const localLocationHierarchy = resolveLocalLocationHierarchy(resolvedSlug, serviceId, raw);
+  const resolvedFromProfile = resolveSelectedAreas(raw);
   const profileSelectedAreas =
     options.selectedAreasOverride?.length
       ? options.selectedAreasOverride
-      : (loadFrozenCampaignSelectedAreas(resolvedSlug, serviceId) || resolveSelectedAreas(raw)).map((a) => ({
+      : (resolvedFromProfile.length
+          ? resolvedFromProfile
+          : loadFrozenCampaignSelectedAreas(resolvedSlug, serviceId) || []
+        ).map((a) => ({
           areaName: a.areaName,
           areaSlug: "areaSlug" in a && a.areaSlug ? a.areaSlug : slugifyArea(a.areaName),
           selected: a.selected !== false,

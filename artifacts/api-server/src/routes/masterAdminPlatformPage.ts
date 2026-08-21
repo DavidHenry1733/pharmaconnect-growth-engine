@@ -1181,7 +1181,7 @@ let localCoverageSavedConfirmed=false;
 const LOCAL_COVERAGE_MINIMUM=3;
 function formatLocalCoverageDistance(label){
   const text=String(label||'').trim();
-  if(!text||text==='Distance unavailable')return '—';
+  if(!text||text==='Distance unavailable')return 'Distance unavailable';
   const match=text.match(/([\d.]+)\s*km/i);
   return match?match[1]+' km':text;
 }
@@ -1630,6 +1630,16 @@ function withAuthHandoff(href){
     if(!handoff)return href;
     const u=new URL(href,location.origin);
     if(!u.searchParams.get('_t'))u.searchParams.set('_t',handoff);
+    return u.pathname+u.search+u.hash;
+  }catch(_e){return href;}
+}
+function withCustomerSlug(href){
+  if(!href||href==='#')return href;
+  const slug=activeCustomer&&activeCustomer.slug;
+  if(!slug)return href;
+  try{
+    const u=new URL(href,location.origin);
+    if(!u.searchParams.get('slug')&&!u.searchParams.get('tenant'))u.searchParams.set('slug',slug);
     return u.pathname+u.search+u.hash;
   }catch(_e){return href;}
 }
@@ -3618,7 +3628,7 @@ function renderClusterPageReview(review){
         '<strong>'+esc(p.label||p.areaSlug)+'</strong>'+
         '<span style="color:'+statusColor+';font-size:.7rem">'+esc(statusLabel)+'</span></div>'+
         '<div style="display:flex;flex-wrap:wrap;gap:6px">'+
-        '<a class="btn secondary" href="'+esc(withAuthHandoff(p.previewUrl||'#'))+'" target="_blank" rel="noopener" style="font-size:.68rem;text-decoration:none">Open Preview</a>'+
+        '<a class="btn secondary" href="'+esc(withAuthHandoff(withCustomerSlug(p.previewUrl||'#')))+'" target="_blank" rel="noopener" style="font-size:.68rem;text-decoration:none">Open Preview</a>'+
         '<button class="btn secondary" type="button" style="font-size:.68rem" id="cprRegen_'+slugAttr+'" onclick="regenerateOneCampaignLocalityPage(\\''+slugAttr+'\\')">Regenerate Individual Page</button>'+
         '<button class="btn secondary" type="button" style="font-size:.68rem" onclick="decideClusterLocalityPage(\\''+slugAttr+'\\',\\'approved\\')">Approve</button>'+
         '<button class="btn secondary" type="button" style="font-size:.68rem" onclick="decideClusterLocalityPage(\\''+slugAttr+'\\',\\'rejected\\')">Reject</button>'+
@@ -3853,7 +3863,6 @@ async function generateCampaignLocalityPages(){
   const camp=selectedCampaignRef();
   if(!camp)return;
   if(!window.confirm('Generate locality pages for '+camp.serviceName+' using this campaign’s selected locality areas? This creates one job and does not publish.'))return;
-  await saveCampaignLocalitySelection();
   localityJobInFlight=true;
   const statusEl=document.getElementById('campaignLocalityMsg');
   const genBtn=document.getElementById('campaignLocalityGenerateBtn');
