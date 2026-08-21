@@ -1692,7 +1692,7 @@ function renderWorkflowOverview(){
     const status=hasCurrent?'current':'pending';
     const inner='<span class="workflow-icon '+status+'">'+workflowIcon(status)+'</span><div class="workflow-label">'+esc(s.label)+(count?'<span class="workflow-count">('+count+')</span>':'')+'</div>';
     if(s.id==='competitor_analysis'){
-      return '<button type="button" class="workflow-row workflow-row-action" aria-haspopup="dialog" aria-label="Open '+esc(s.label)+'" onclick="openOperationalWorkflowStage(\'competitor_analysis\')">'+inner+'</button>';
+      return '<button type="button" class="workflow-row workflow-row-action" data-workflow-stage="competitor_analysis" aria-haspopup="dialog" aria-label="Open '+esc(s.label)+'" onclick="openOperationalWorkflowStage(this.dataset.workflowStage)">'+inner+'</button>';
     }
     return '<div class="workflow-row">'+inner+'</div>';
   }).join('');
