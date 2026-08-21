@@ -49,6 +49,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .lifecycle-flow{display:flex;flex-direction:column;gap:4px;margin-bottom:14px;padding:12px;background:#0f172a;border-radius:10px;border:1px dashed #475569;max-height:220px;overflow:auto}
 .workflow-row{display:flex;align-items:flex-start;gap:8px;font-size:.74rem;padding:4px 0;border-bottom:1px solid #1e293b}
 .workflow-row:last-child{border-bottom:none}
+button.workflow-row{width:100%;margin:0;background:transparent;text-align:left;font:inherit;color:inherit;cursor:pointer;border:0;border-bottom:1px solid #1e293b;border-radius:6px}
+button.workflow-row:last-child{border-bottom:none}
+button.workflow-row:hover{background:rgba(56,189,248,.08)}
+button.workflow-row:focus-visible{outline:2px solid #38bdf8;outline-offset:2px}
 .workflow-icon{width:18px;text-align:center;font-weight:800;flex-shrink:0}
 .workflow-icon.complete{color:#4ade80}
 .workflow-icon.current{color:#38bdf8}
@@ -1686,10 +1690,52 @@ function renderWorkflowOverview(){
     const count=workflowStageCounts[s.id]||0;
     const hasCurrent=customers.some(c=>c.currentStage===s.id);
     const status=hasCurrent?'current':'pending';
-    return '<div class="workflow-row"><span class="workflow-icon '+status+'">'+workflowIcon(status)+'</span><div class="workflow-label">'+esc(s.label)+(count?'<span class="workflow-count">('+count+')</span>':'')+'</div></div>';
+    const inner='<span class="workflow-icon '+status+'">'+workflowIcon(status)+'</span><div class="workflow-label">'+esc(s.label)+(count?'<span class="workflow-count">('+count+')</span>':'')+'</div>';
+    if(s.id==='competitor_analysis'){
+      return '<button type="button" class="workflow-row workflow-row-action" data-workflow-stage="competitor_analysis" aria-haspopup="dialog" aria-label="Open '+esc(s.label)+'" onclick="openOperationalWorkflowStage(this.dataset.workflowStage)">'+inner+'</button>';
+    }
+    return '<div class="workflow-row">'+inner+'</div>';
   }).join('');
   const sel=document.getElementById('lifecycleFilter');
   sel.innerHTML='<option value="">All workflow stages</option>'+workflowStages.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.label)+'</option>').join('');
+}
+function customersAtWorkflowStage(stage){
+  return (customers||[]).filter(function(c){
+    return (c.currentStage||(c.workflow&&c.workflow.currentStage)||'')===stage;
+  });
+}
+async function openOperationalWorkflowStage(stage){
+  if(stage!=='competitor_analysis'){
+    toast('This workflow stage is not yet interactive.',true);
+    return;
+  }
+  const lf=document.getElementById('lifecycleFilter');
+  if(lf){
+    lf.value=stage;
+    filterCustomers();
+  }
+  const matches=customersAtWorkflowStage(stage);
+  let slug=null;
+  if(matches.length===1)slug=matches[0].slug;
+  else if(matches.length>1){
+    if(activeCustomer&&matches.some(function(c){return c.slug===activeCustomer.slug;}))slug=activeCustomer.slug;
+    else slug=matches[0].slug;
+  }else if(activeCustomer&&activeCustomer.slug)slug=activeCustomer.slug;
+  if(!slug){
+    toast('Select a customer to open Competitor Analysis.',true);
+    return;
+  }
+  try{
+    await openCustomer(slug);
+    if(!(activeCustomer&&activeCustomer.slug===slug)){
+      const detail=document.getElementById('detailErrorDetail');
+      const msg=(detail&&detail.textContent&&detail.textContent.trim())||('Could not open customer '+slug);
+      throw new Error(msg);
+    }
+    await openCommercialIntelligenceReview();
+  }catch(e){
+    toast(String(e&&e.message||e),true);
+  }
 }
 
 function setCustomerArchiveFilter(mode){
@@ -3487,7 +3533,11 @@ function renderCommercialIntelligenceDashboard(dashboard){
 }
 function toggleCiTechnicalLog(){const el=document.getElementById('cirTechnicalLog');if(el)el.classList.toggle('open')}
 async function openCommercialIntelligenceReview(){
-  if(!activeCustomer)return;
+  if(!activeCustomer){
+    const err=new Error('Select a customer to open Competitor Analysis.');
+    toast(err.message,true);
+    throw err;
+  }
   const p=new URLSearchParams(location.search);
   p.set('customer',activeCustomer.slug);
   p.set('panel','commercial-intelligence');
