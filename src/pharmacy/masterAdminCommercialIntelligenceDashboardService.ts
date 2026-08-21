@@ -38,7 +38,13 @@ import { resolveClinicalMissingServicePages } from "./growthEngineWebsiteDiscove
 import {
   buildNationalGrowthPlatformDashboard,
 } from "./nationalGrowthPlatformDashboardService.ts";
-import { readNationalCompetitorDiscovery } from "./nationalCompetitorDiscoveryStorageService.ts";
+import { isDataForSeoConfigured } from "./dataForSeoNationalSearchAdapter.ts";
+import {
+  readOrganicSearchRun,
+} from "./competitorAnalysisOrganicSearchService.ts";
+import { isCombinedCompetitorAnalysisStored, isReliableGoogleLocalAnalysis } from "./pharmacyCompetitorIntelligenceService.ts";
+import { hasGooglePlacesApiKey } from "./googlePlacesConnection.ts";
+import type { CompetitorAnalysisProviderStatus } from "./nationalCompetitorDiscoveryModel.ts";
 import { isCoreProductRecoveryMode } from "./masterAdminCoreProductRecoveryService.ts";
 import { isBusinessProfileReviewApproved } from "./masterAdminBusinessProfileReviewService.ts";
 
@@ -184,16 +190,37 @@ export interface CommercialIntelligenceDashboard {
     family: "google_local" | "dataforseo_organic";
     configured: boolean;
     generated: boolean;
+    status: CompetitorAnalysisProviderStatus | "configured";
     statusLabel: string;
     source: string;
     capturedAt: string | null;
+    error: string | null;
   }>;
   organicSearchCompetitors: {
     generated: boolean;
     provider: string;
-    competitors: Array<{ name: string; domain: string; url: string; evidence: string; source: string }>;
+    status: CompetitorAnalysisProviderStatus | "configured";
+    statusLabel: string;
+    error: string | null;
+    locationName: string | null;
+    languageCode: string | null;
+    competitors: Array<{
+      name: string;
+      domain: string;
+      host: string;
+      url: string;
+      position: number | null;
+      matchedQuery: string;
+      title: string;
+      description: string;
+      evidence: string;
+      source: string;
+      capturedAt: string | null;
+      taskId: string | null;
+    }>;
     capturedAt: string | null;
   };
+  combinedCompetitorAnalysisStatus: "completed" | "partial" | "failed" | "pending";
   staleCompletion: {
     flagged: boolean;
     message: string | null;
@@ -1008,82 +1035,113 @@ function buildHistoricalEvents(slug: string): CommercialIntelligenceDashboard["h
   }));
 }
 
-function isDataForSeoConfigured(): boolean {
-  const login = String(process.env.DATAFORSEO_LOGIN || process.env.DATAFORSEO_API_LOGIN || "").trim();
-  const password = String(process.env.DATAFORSEO_PASSWORD || process.env.DATAFORSEO_API_PASSWORD || "").trim();
-  return Boolean(login && password);
-}
-
-function isGooglePlacesConfigured(): boolean {
-  return Boolean(String(process.env.GOOGLE_PLACES_API_KEY || "").trim());
+function providerStatusLabel(status: CompetitorAnalysisProviderStatus, error?: string | null): string {
+  if (status === "not_configured") return "not configured";
+  if (status === "no_reliable_results") return "no reliable results";
+  if (status === "failed") return error ? `failed — ${error}` : "failed";
+  if (status === "partial") return error ? `partial — ${error}` : "partial";
+  return status;
 }
 
 function buildOrganicSearchCompetitors(slug: string): CommercialIntelligenceDashboard["organicSearchCompetitors"] {
-  try {
-    const discovery = readNationalCompetitorDiscovery(slug);
-    const rows = (discovery?.qualifiedCompetitors || []).slice(0, 12).map((c) => ({
-      name: c.name || c.domain || "Not available",
-      domain: c.domain || "",
-      url: c.websiteUrl || (c.evidenceUrls && c.evidenceUrls[0]) || "",
-      evidence: (c.qualificationReasons || []).join("; ") || "DataForSEO Google organic SERP",
-      source: "dataforseo-google-organic-live",
-    }));
-    return {
-      generated: rows.length > 0,
-      provider: "DataForSEO Google organic SERP",
-      competitors: rows,
-      capturedAt: discovery?.generatedAt || null,
-    };
-  } catch {
+  const run = readOrganicSearchRun(slug);
+  const configured = isDataForSeoConfigured();
+  if (!run) {
+    const status: CompetitorAnalysisProviderStatus = configured ? "configured" : "not_configured";
     return {
       generated: false,
-      provider: "DataForSEO Google organic SERP",
+      provider: "dataforseo-google-organic-live",
+      status,
+      statusLabel: providerStatusLabel(status),
+      error: configured ? null : "DataForSEO is not configured",
+      locationName: "United Kingdom",
+      languageCode: "en",
       competitors: [],
       capturedAt: null,
     };
   }
+  const rows = (run.competitors || []).map((c) => ({
+    name: c.title || c.domain || "Not available",
+    domain: c.domain || "",
+    host: c.host || c.domain || "",
+    url: c.url || "",
+    position: c.position,
+    matchedQuery: c.matchedQuery || "",
+    title: c.title || "",
+    description: c.description || "",
+    evidence: c.overlapEvidence || "DataForSEO Google organic SERP",
+    source: c.provider || "dataforseo-google-organic-live",
+    capturedAt: c.capturedAt || run.capturedAt,
+    taskId: c.taskId,
+  }));
+  const generated = run.status === "completed" && rows.length > 0;
+  return {
+    generated,
+    provider: run.provider || "dataforseo-google-organic-live",
+    status: run.status,
+    statusLabel: providerStatusLabel(run.status, run.error),
+    error: run.error,
+    locationName: run.locationName || "United Kingdom",
+    languageCode: run.languageCode || "en",
+    competitors: rows,
+    capturedAt: run.capturedAt,
+  };
+}
+
+function buildGoogleProviderStatus(
+  slug: string,
+  localGenerated: boolean,
+  localSource: string,
+  localCapturedAt: string | null,
+): CommercialIntelligenceDashboard["analysisProviders"][number] {
+  const configured = hasGooglePlacesApiKey();
+  let status: CompetitorAnalysisProviderStatus = configured ? "configured" : "not_configured";
+  let error: string | null = configured ? null : "Google Places is not configured";
+  if (isReliableGoogleLocalAnalysis(slug) || (localGenerated && String(localSource || "").includes("google"))) {
+    status = "completed";
+    error = null;
+  } else if (localGenerated && !String(localSource || "").includes("google")) {
+    status = "no_reliable_results";
+    error = "Google/local competitor artifact is not live Google Places evidence.";
+  }
+  return {
+    id: "google-places-local",
+    label: "Google/local competitors",
+    family: "google_local",
+    configured,
+    generated: status === "completed",
+    status,
+    statusLabel: providerStatusLabel(status, error),
+    source: localGenerated ? localSource || "Google Places" : configured ? "Google Places (configured)" : "Google Places (not configured)",
+    capturedAt: localCapturedAt,
+    error,
+  };
 }
 
 function buildAnalysisProviders(
+  slug: string,
   localGenerated: boolean,
   localSource: string,
   localCapturedAt: string | null,
   organic: CommercialIntelligenceDashboard["organicSearchCompetitors"],
 ): CommercialIntelligenceDashboard["analysisProviders"] {
-  const googleConfigured = isGooglePlacesConfigured();
-  const dataForSeoConfigured = isDataForSeoConfigured();
   return [
-    {
-      id: "google-places-local",
-      label: "Google/local competitors",
-      family: "google_local",
-      configured: googleConfigured,
-      generated: localGenerated,
-      statusLabel: localGenerated
-        ? "Generated"
-        : googleConfigured
-          ? "Not generated — Google Places is configured"
-          : "Not generated — Google Places is not configured",
-      source: localGenerated ? localSource || "Google Places" : googleConfigured ? "Google Places (configured)" : "Google Places (not configured)",
-      capturedAt: localCapturedAt,
-    },
+    buildGoogleProviderStatus(slug, localGenerated, localSource, localCapturedAt),
     {
       id: "dataforseo-google-organic-live",
       label: "DataForSEO organic-search competitors",
       family: "dataforseo_organic",
-      configured: dataForSeoConfigured,
+      configured: organic.status !== "not_configured" && isDataForSeoConfigured(),
       generated: organic.generated,
-      statusLabel: organic.generated
-        ? "Generated"
-        : dataForSeoConfigured
-          ? "Not generated — DataForSEO is configured"
-          : "Not generated — DataForSEO is not configured",
+      status: organic.status,
+      statusLabel: organic.statusLabel,
       source: organic.generated
         ? organic.provider
-        : dataForSeoConfigured
+        : isDataForSeoConfigured()
           ? "dataforseo-google-organic-live (configured)"
           : "dataforseo-google-organic-live (not configured)",
       capturedAt: organic.capturedAt,
+      error: organic.error,
     },
   ];
 }
@@ -1155,11 +1213,22 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
   const staleCompletion = buildStaleCompetitorCompletion(slug, Boolean(competitor.generated));
   const activeCompetitorJob = findActiveCommercialIntelligenceJob(slug, new Set(["orchestrate_competitor_analysis"]));
   const analysisProviders = buildAnalysisProviders(
+    slug,
     Boolean(competitor.generated),
     competitor.discoverySource,
     competitor.evidenceTimestamp,
     organicSearchCompetitors,
   );
+  const googleProvider = analysisProviders.find((p) => p.family === "google_local");
+  const organicProvider = analysisProviders.find((p) => p.family === "dataforseo_organic");
+  const combinedCompetitorAnalysisStatus =
+    googleProvider?.status === "completed" && (organicProvider?.status === "completed" || organicProvider?.status === "not_configured")
+      ? "completed"
+      : googleProvider?.status === "failed" && (organicProvider?.status === "failed" || organicProvider?.status === "not_configured")
+        ? "failed"
+        : googleProvider?.generated || organicProvider?.generated || googleProvider?.status === "completed" || organicProvider?.status === "completed"
+          ? "partial"
+          : "pending";
   const googleProfileMetrics = buildGoogleProfileMetrics(slug, profile, snap);
   const trafficOpportunity = buildTrafficOpportunitySection(slug, locality, visibility);
   const competitorSummary = competitor.summary;
@@ -1232,8 +1301,9 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
     trafficOpportunity,
     analysisProviders,
     organicSearchCompetitors,
+    combinedCompetitorAnalysisStatus,
     staleCompletion,
-    canGenerateCompetitorAnalysis: !competitor.generated || staleCompletion.flagged,
+    canGenerateCompetitorAnalysis: !isCombinedCompetitorAnalysisStored(slug) || staleCompletion.flagged,
     activeCompetitorAnalysisJobId: activeCompetitorJob?.id || null,
     sectionEvidence,
     localMarketIntelligence: {

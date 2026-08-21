@@ -199,6 +199,7 @@ import {
   approveCommercialIntelligence,
   findActiveCommercialIntelligenceJob,
 } from "../../../../../src/pharmacy/masterAdminCommercialIntelligenceWorkflowService.ts";
+import { isCombinedCompetitorAnalysisStored } from "../../../../../src/pharmacy/pharmacyCompetitorIntelligenceService.ts";
 
 const router = Router();
 router.use(requireAdmin);
@@ -662,7 +663,7 @@ router.post("/master-admin-platform/customers/:slug/commercial-intelligence-dash
         customer: buildMasterAdminCustomerRecordLite(slug),
       });
     }
-    if (dashboard.competitorAnalysis?.generated && !dashboard.staleCompletion?.flagged) {
+    if (isCombinedCompetitorAnalysisStored(slug) && !dashboard.staleCompletion?.flagged) {
       return res.json({
         ok: true,
         async: false,

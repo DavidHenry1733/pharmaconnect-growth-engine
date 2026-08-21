@@ -18,14 +18,24 @@ import type {
 const ENDPOINT =
   "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
 
-function requireCredential(name: string): string {
-  const value = String(process.env[name] || "").trim();
+function requireCredential(name: "DATAFORSEO_LOGIN" | "DATAFORSEO_PASSWORD"): string {
+  const alias =
+    name === "DATAFORSEO_LOGIN"
+      ? process.env.DATAFORSEO_API_LOGIN
+      : process.env.DATAFORSEO_API_PASSWORD;
+  const value = String(process.env[name] || alias || "").trim();
 
   if (!value) {
     throw new Error(`${name} is not configured`);
   }
 
   return value;
+}
+
+export function isDataForSeoConfigured(): boolean {
+  const login = String(process.env.DATAFORSEO_LOGIN || process.env.DATAFORSEO_API_LOGIN || "").trim();
+  const password = String(process.env.DATAFORSEO_PASSWORD || process.env.DATAFORSEO_API_PASSWORD || "").trim();
+  return Boolean(login && password);
 }
 
 function canonicalDomain(raw: unknown, url: unknown): string {
@@ -160,6 +170,7 @@ export class DataForSeoNationalSearchProvider
       provider: this.id,
       query,
       marketCountry,
+      languageCode,
       capturedAt: new Date().toISOString(),
       cost:
         typeof task.cost === "number"
@@ -167,6 +178,7 @@ export class DataForSeoNationalSearchProvider
           : null,
       organicResultCount: organic.length,
       results: organic,
+      taskId: task?.id != null ? String(task.id) : null,
     };
   }
 }
