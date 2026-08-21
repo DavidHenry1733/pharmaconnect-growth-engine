@@ -3223,8 +3223,8 @@ function ciEvidenceFoot(evidence){
 function ciMetricTable(metrics){
   const rows=(metrics||[]);
   if(!rows.length)return '<p class="ci-narrative">Google Profile Metrics not yet available.</p>';
-  return '<table class="ci-metric-table"><thead><tr><th>Metric</th><th>Your Pharmacy</th><th>Local Average</th><th>Highest Competitor</th><th>Gap</th><th>Recommended Target</th></tr></thead><tbody>'+
-    rows.map(m=>'<tr><td>'+esc(m.label)+'</td><td>'+esc(m.yourPharmacy)+'</td><td>'+esc(m.localAverage)+'</td><td>'+esc(m.highestCompetitor)+'</td><td>'+esc(m.gap)+'</td><td>'+esc(m.recommendedTarget)+'</td></tr>').join('')+
+  return '<table class="ci-metric-table"><thead><tr><th>Metric</th><th>Your Pharmacy</th><th>Local Average</th><th>Highest Competitor</th><th>Gap</th><th>Recommended Target</th><th>Sample Size</th></tr></thead><tbody>'+
+    rows.map(m=>'<tr><td>'+esc(m.label)+'</td><td>'+esc(m.yourPharmacy)+'</td><td>'+esc(m.localAverage)+'</td><td>'+esc(m.highestCompetitor)+'</td><td>'+esc(m.gap)+'</td><td>'+esc(m.recommendedTarget)+'</td><td>'+esc(m.sampleSizeLabel||(m.sampleSize!=null?('n='+m.sampleSize):'Not Available'))+'</td></tr>').join('')+
     '</tbody></table>';
 }
 function ciCompSummaryHtml(summary){
@@ -3447,7 +3447,7 @@ function renderCommercialIntelligenceDashboard(dashboard){
   const metricsHtml='<div class="ci-section"><h4>Google Profile Metrics</h4><p class="ci-narrative">Evidence-backed Google Business Profile comparison — your pharmacy vs local average vs highest nearby competitor.</p>'+
     ciMetricTable(metrics)+ciEvidenceFoot(dashboard.sectionEvidence?.googleProfileMetrics)+'</div>';
   const gapHtml='<div class="ci-section"><h4>Gap Analysis</h4><p class="ci-narrative">Commercial gaps measured against local benchmarks with recommended targets and PharmaConnect improvement actions.</p>'+
-    (metrics.length?'<ul>'+metrics.map(m=>'<li><strong>'+esc(m.label)+'</strong> — Current: '+esc(m.yourPharmacy)+' · Average: '+esc(m.localAverage)+' · Gap: '+esc(m.gap)+' · Target: '+esc(m.recommendedTarget)+'<br><span style="color:#94a3b8">'+esc(m.opportunity)+'</span></li>').join('')+'</ul>':'<p class="ci-narrative">Gap analysis pending local market evidence.</p>')+
+    (metrics.length?'<ul>'+metrics.map(m=>'<li><strong>'+esc(m.label)+'</strong> — Current: '+esc(m.yourPharmacy)+' · Average: '+esc(m.localAverage)+' · Gap: '+esc(m.gap)+' · Target: '+esc(m.recommendedTarget)+' · Sample: '+esc(m.sampleSizeLabel||(m.sampleSize!=null?('n='+m.sampleSize):'Not Available'))+'<br><span style="color:#94a3b8">'+esc(m.opportunity)+'</span></li>').join('')+'</ul>':'<p class="ci-narrative">Gap analysis pending local market evidence.</p>')+
     ciEvidenceFoot(dashboard.sectionEvidence?.googleProfileMetrics)+'</div>';
   const ca=dashboard.competitorAnalysis||{};
   const compRows=(ca.competitors||[]);
