@@ -141,7 +141,7 @@ export function findActiveCommercialIntelligenceJob(
 ): MasterAdminJob | null {
   return (
     listMasterAdminJobs({ slug, limit: 20 }).find(
-      (j) => actions.has(j.action) && (j.status === "queued" || j.status === "running"),
+      (j) => actions.has(j.action) && (j.status === "queued" || j.status === "claimed" || j.status === "running"),
     ) || null
   );
 }
