@@ -25,6 +25,7 @@ import {
   isCommercialIntelligenceReadyForReview,
   isLocalMarketIntelligenceGenerated,
   isGrowthIntelligenceGenerated,
+  findActiveCommercialIntelligenceJob,
 } from "./masterAdminCommercialIntelligenceWorkflowService.ts";
 import { readCommercialIntelligenceApproval } from "./masterAdminWorkflowAckService.ts";
 import {
@@ -37,6 +38,9 @@ import { resolveClinicalMissingServicePages } from "./growthEngineWebsiteDiscove
 import {
   buildNationalGrowthPlatformDashboard,
 } from "./nationalGrowthPlatformDashboardService.ts";
+import { readNationalCompetitorDiscovery } from "./nationalCompetitorDiscoveryStorageService.ts";
+import { isCoreProductRecoveryMode } from "./masterAdminCoreProductRecoveryService.ts";
+import { isBusinessProfileReviewApproved } from "./masterAdminBusinessProfileReviewService.ts";
 
 export interface CommercialDashboardSection {
   title: string;
@@ -174,6 +178,28 @@ export interface CommercialIntelligenceDashboard {
     keywords: CommercialTrafficKeyword[];
     evidence: SectionEvidence;
   };
+  analysisProviders: Array<{
+    id: string;
+    label: string;
+    family: "google_local" | "dataforseo_organic";
+    configured: boolean;
+    generated: boolean;
+    statusLabel: string;
+    source: string;
+    capturedAt: string | null;
+  }>;
+  organicSearchCompetitors: {
+    generated: boolean;
+    provider: string;
+    competitors: Array<{ name: string; domain: string; url: string; evidence: string; source: string }>;
+    capturedAt: string | null;
+  };
+  staleCompletion: {
+    flagged: boolean;
+    message: string | null;
+  };
+  canGenerateCompetitorAnalysis: boolean;
+  activeCompetitorAnalysisJobId: string | null;
   sectionEvidence: {
     executiveSummary: SectionEvidence;
     googleProfileMetrics: SectionEvidence;
@@ -982,6 +1008,103 @@ function buildHistoricalEvents(slug: string): CommercialIntelligenceDashboard["h
   }));
 }
 
+function isDataForSeoConfigured(): boolean {
+  const login = String(process.env.DATAFORSEO_LOGIN || process.env.DATAFORSEO_API_LOGIN || "").trim();
+  const password = String(process.env.DATAFORSEO_PASSWORD || process.env.DATAFORSEO_API_PASSWORD || "").trim();
+  return Boolean(login && password);
+}
+
+function isGooglePlacesConfigured(): boolean {
+  return Boolean(String(process.env.GOOGLE_PLACES_API_KEY || "").trim());
+}
+
+function buildOrganicSearchCompetitors(slug: string): CommercialIntelligenceDashboard["organicSearchCompetitors"] {
+  try {
+    const discovery = readNationalCompetitorDiscovery(slug);
+    const rows = (discovery?.qualifiedCompetitors || []).slice(0, 12).map((c) => ({
+      name: c.name || c.domain || "Not available",
+      domain: c.domain || "",
+      url: c.websiteUrl || (c.evidenceUrls && c.evidenceUrls[0]) || "",
+      evidence: (c.qualificationReasons || []).join("; ") || "DataForSEO Google organic SERP",
+      source: "dataforseo-google-organic-live",
+    }));
+    return {
+      generated: rows.length > 0,
+      provider: "DataForSEO Google organic SERP",
+      competitors: rows,
+      capturedAt: discovery?.generatedAt || null,
+    };
+  } catch {
+    return {
+      generated: false,
+      provider: "DataForSEO Google organic SERP",
+      competitors: [],
+      capturedAt: null,
+    };
+  }
+}
+
+function buildAnalysisProviders(
+  localGenerated: boolean,
+  localSource: string,
+  localCapturedAt: string | null,
+  organic: CommercialIntelligenceDashboard["organicSearchCompetitors"],
+): CommercialIntelligenceDashboard["analysisProviders"] {
+  const googleConfigured = isGooglePlacesConfigured();
+  const dataForSeoConfigured = isDataForSeoConfigured();
+  return [
+    {
+      id: "google-places-local",
+      label: "Google/local competitors",
+      family: "google_local",
+      configured: googleConfigured,
+      generated: localGenerated,
+      statusLabel: localGenerated
+        ? "Generated"
+        : googleConfigured
+          ? "Not generated — Google Places is configured"
+          : "Not generated — Google Places is not configured",
+      source: localGenerated ? localSource || "Google Places" : googleConfigured ? "Google Places (configured)" : "Google Places (not configured)",
+      capturedAt: localCapturedAt,
+    },
+    {
+      id: "dataforseo-google-organic-live",
+      label: "DataForSEO organic-search competitors",
+      family: "dataforseo_organic",
+      configured: dataForSeoConfigured,
+      generated: organic.generated,
+      statusLabel: organic.generated
+        ? "Generated"
+        : dataForSeoConfigured
+          ? "Not generated — DataForSEO is configured"
+          : "Not generated — DataForSEO is not configured",
+      source: organic.generated
+        ? organic.provider
+        : dataForSeoConfigured
+          ? "dataforseo-google-organic-live (configured)"
+          : "dataforseo-google-organic-live (not configured)",
+      capturedAt: organic.capturedAt,
+    },
+  ];
+}
+
+function buildStaleCompetitorCompletion(slug: string, competitorGenerated: boolean): CommercialIntelligenceDashboard["staleCompletion"] {
+  const history = getWorkflowHistory(slug);
+  const historySaysComplete = history.some(
+    (h) => h.fromStage === "commercial_intelligence" || h.fromStage === "competitor_analysis",
+  );
+  const operatorMarkedComplete =
+    isCommercialIntelligenceApproved(slug) ||
+    (isCoreProductRecoveryMode(slug) && isBusinessProfileReviewApproved(slug));
+  const flagged = !competitorGenerated && (operatorMarkedComplete || historySaysComplete);
+  return {
+    flagged,
+    message: flagged
+      ? "Workflow history marks Commercial Intelligence complete, but no valid Competitor Analysis artifact is stored. Generate Competitor Analysis to create evidence."
+      : null,
+  };
+}
+
 function buildTechnicalLog(slug: string, locality: TenantLocalityResolution): CommercialIntelligenceDashboard["technicalLog"] {
   const jobs = listMasterAdminJobs({ slug, limit: 8 });
   const executions = getWorkflowExecutions(slug).slice(0, 8);
@@ -1028,6 +1151,15 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
   const visibility = readPharmacyVisibilityReport(slug);
   const snap = loadCompetitorSnapshot(slug);
   const competitor = buildCompetitorAnalysis(slug, locality);
+  const organicSearchCompetitors = buildOrganicSearchCompetitors(slug);
+  const staleCompletion = buildStaleCompetitorCompletion(slug, Boolean(competitor.generated));
+  const activeCompetitorJob = findActiveCommercialIntelligenceJob(slug, new Set(["orchestrate_competitor_analysis"]));
+  const analysisProviders = buildAnalysisProviders(
+    Boolean(competitor.generated),
+    competitor.discoverySource,
+    competitor.evidenceTimestamp,
+    organicSearchCompetitors,
+  );
   const googleProfileMetrics = buildGoogleProfileMetrics(slug, profile, snap);
   const trafficOpportunity = buildTrafficOpportunitySection(slug, locality, visibility);
   const competitorSummary = competitor.summary;
@@ -1098,6 +1230,11 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
     competitorSummary,
     googleProfileMetrics,
     trafficOpportunity,
+    analysisProviders,
+    organicSearchCompetitors,
+    staleCompletion,
+    canGenerateCompetitorAnalysis: !competitor.generated || staleCompletion.flagged,
+    activeCompetitorAnalysisJobId: activeCompetitorJob?.id || null,
     sectionEvidence,
     localMarketIntelligence: {
       sections: buildLocalMarketSections(slug, profile, report, locality, googleProfileMetrics, snap),
