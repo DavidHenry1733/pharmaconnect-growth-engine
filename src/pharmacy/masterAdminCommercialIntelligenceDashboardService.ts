@@ -31,6 +31,10 @@ import {
   googleLocalArtifactConfidence,
   loadCanonicalGoogleLocalCompetitorArtifact,
 } from "./googleLocalCompetitorMetricsService.ts";
+import {
+  buildOrganicSearchEvidenceSection,
+  type OrganicSearchEvidenceSection,
+} from "./organicSearchEvidenceClassificationService.ts";
 import { readCommercialIntelligenceApproval } from "./masterAdminWorkflowAckService.ts";
 import {
   isAuthorisedEcosystemQualityReviewReady,
@@ -148,6 +152,7 @@ export interface CommercialIntelligenceDashboard {
     confidence: string;
   };
   competitorAnalysis: CommercialDashboardCompetitorAnalysis;
+  organicSearchEvidence: OrganicSearchEvidenceSection;
   locality: TenantLocalityResolution;
   localMarketIntelligence: {
     sections: CommercialDashboardSection[];
@@ -185,6 +190,7 @@ export interface CommercialIntelligenceDashboard {
     executiveSummary: SectionEvidence;
     googleProfileMetrics: SectionEvidence;
     competitorAnalysis: SectionEvidence;
+    organicSearchEvidence: SectionEvidence;
     localMarketIntelligence: SectionEvidence;
     growthIntelligence: SectionEvidence;
     trafficOpportunity: SectionEvidence;
@@ -944,6 +950,7 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
   const competitor = buildCompetitorAnalysis(slug, locality);
   const googleProfileMetrics = buildGoogleLocalProfileMetrics(profile, snap, googleLocalArtifact);
   const trafficOpportunity = buildTrafficOpportunitySection(slug, locality, visibility);
+  const organicSearchEvidence = buildOrganicSearchEvidenceSection(slug, profile);
   const competitorSummary = competitor.summary;
   const sectionEvidence = {
     executiveSummary: buildSectionEvidence({
@@ -957,6 +964,11 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
       confidence: googleLocalArtifactConfidence(googleLocalArtifact),
     }),
     competitorAnalysis: competitor.evidence,
+    organicSearchEvidence: buildSectionEvidence({
+      evidenceSource: organicSearchEvidence.provider || "dataforseo-google-organic-live",
+      capturedAt: organicSearchEvidence.capturedAt,
+      confidence: organicSearchEvidence.generated ? "Medium" : "Unknown",
+    }),
     localMarketIntelligence: buildSectionEvidence({
       evidenceSource: snap?.source || "Local Market Intelligence",
       capturedAt: snap?.generatedAt || null,
@@ -1009,6 +1021,7 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
     locality,
     executiveSummary: buildExecutiveSummary(slug, profile, report, competitor, locality, trafficOpportunity),
     competitorAnalysis: competitor,
+    organicSearchEvidence,
     competitorSummary,
     googleProfileMetrics,
     trafficOpportunity,

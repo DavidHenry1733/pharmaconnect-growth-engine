@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "platform": "national",
+  "slug": "organic-evidence-fixture-02",
+  "generatedAt": "2026-08-19T08:30:00.000Z",
+  "marketCountry": "United Kingdom",
+  "targetCustomerMarket": "organic-search evidence",
+  "queries": [],
+  "candidates": [],
+  "qualifiedCompetitors": [],
+  "rejectedCandidates": [],
+  "source": "national-competitor-discovery-v1",
+  "status": "complete",
+  "errors": [],
+  "organicSearch": {
+    "provider": "dataforseo-google-organic-live",
+    "status": "completed",
+    "configured": true,
+    "generated": true,
+    "error": null,
+    "locationName": "United Kingdom",
+    "languageCode": "en",
+    "taskIds": ["task-organic-fixture-2"],
+    "queries": ["pharmacy other town"],
+    "capturedAt": "2026-08-19T08:30:00.000Z",
+    "competitors": [
+      {
+        "domain": "second-tenant.example",
+        "host": "second-tenant.example",
+        "url": "https://second-tenant.example/about",
+        "position": 2,
+        "matchedQuery": "pharmacy other town",
+        "title": "Second Tenant Pharmacy",
+        "description": "About our pharmacy.",
+        "overlapEvidence": "DataForSEO Google organic SERP",
+        "capturedAt": "2026-08-19T08:30:00.000Z",
+        "provider": "dataforseo-google-organic-live",
+        "taskId": "task-organic-fixture-2",
+        "provenance": "dataforseo-google-organic-live"
+      },
+      {
+        "domain": "www.boots.com",
+        "host": "www.boots.com",
+        "url": "https://www.boots.com/pharmacy",
+        "position": 1,
+        "matchedQuery": "pharmacy other town",
+        "title": "Boots Pharmacy",
+        "description": "Boots pharmacy services.",
+        "overlapEvidence": "DataForSEO Google organic SERP",
+        "capturedAt": "2026-08-19T08:30:00.000Z",
+        "provider": "dataforseo-google-organic-live",
+        "taskId": "task-organic-fixture-2",
+        "provenance": "dataforseo-google-organic-live"
+      },
+      {
+        "domain": "www.facebook.com",
+        "host": "www.facebook.com",
+        "url": "https://www.facebook.com/other-town-pharmacy",
+        "position": 4,
+        "matchedQuery": "pharmacy other town",
+        "title": "Other Town Pharmacy | Facebook",
+        "description": "Social page.",
+        "overlapEvidence": "DataForSEO Google organic SERP",
+        "capturedAt": "2026-08-19T08:30:00.000Z",
+        "provider": "dataforseo-google-organic-live",
+        "taskId": "task-organic-fixture-2",
+        "provenance": "dataforseo-google-organic-live"
+      }
+    ]
+  }
+}
