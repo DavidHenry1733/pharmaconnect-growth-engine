@@ -530,7 +530,7 @@ th{background:#0f172a;color:#94a3b8;font-size:.68rem;text-transform:uppercase;le
         <button class="btn" type="button" id="reimportWebsiteWorkflowBtn" onclick="reimportWebsiteFromCustomerWorkflow()" style="margin-top:8px;width:100%;font-size:.78rem;display:none">Re-import Website</button>
         <button class="bpr-btn-review" type="button" id="openBprBtn" onclick="openBusinessProfileReview()" style="margin-top:8px">Open Business Profile Review</button>
         <button class="btn secondary" type="button" id="openIerBtn" onclick="openImportedEvidenceReview()" style="margin-top:8px;width:100%;font-size:.78rem">Open Imported Evidence Review</button>
-        <button class="cir-btn-review" type="button" id="openCirBtn" onclick="openCommercialIntelligenceReview()" style="margin-top:8px;display:none">Open Intelligence Review</button>
+        <button class="cir-btn-review" type="button" id="openCirBtn" onclick="openCommercialIntelligenceReview()" style="margin-top:8px;display:none">Open Competitor Analysis</button>
         <button class="cqr-btn-review" type="button" id="openCqrBtn" onclick="openCommercialQualityReview()" style="margin-top:8px;display:none">Open Quality Review</button>
         <button class="cqr-btn-review" type="button" id="openClusterReviewBtn" onclick="openClusterPageReview()" style="margin-top:8px;display:none">Review Locality Pages</button>
         <button class="mp-btn-review" type="button" id="openMpBtn" onclick="openManagedPublishing()" style="margin-top:8px;display:none">Open Managed Publishing</button>
@@ -2187,6 +2187,7 @@ function startJobPolling(){
         await loadDashboard();
         if(jobEl)jobEl.style.display='none';
         if(activeSpgDashboard&&document.getElementById('spgModal').classList.contains('open'))await openServicePageGeneration();
+        else if(document.getElementById('cirModal')&&document.getElementById('cirModal').classList.contains('open'))await openCommercialIntelligenceReview();
         else if(customerAtServicePageReview(activeCustomer))openServicePageReview();
         toast((activeSpgDashboard&&document.getElementById('spgModal').classList.contains('open'))||customerAtServicePageReview(activeCustomer)?'Service page job completed':'Growth Intelligence job completed');
       }
@@ -2807,6 +2808,8 @@ function renderWorkflowSummaryPanel(c){
   const image=ws.imagePlatform||{};
   const ci=ws.commercialIntelligence||{};
   const inv=canonical.inventoryCount!=null?String(canonical.inventoryCount):'—';
+  const ciStatus=ci.approvalStatus||ci.status||'—';
+  const ciDetail=ci.detail?'<div class="workflow-meta">'+esc(ci.detail)+'</div>':'';
   const imgLine=image.status==='unavailable'?'Unavailable':[
     image.assignmentCount!=null?image.assignmentCount+' assignments':null,
     image.uniqueApprovedAssets!=null?image.uniqueApprovedAssets+' unique approved assets':null,
@@ -2815,7 +2818,7 @@ function renderWorkflowSummaryPanel(c){
   return '<div class="orchestration-summary" style="margin-top:10px">'+
     '<div><span class="label">Canonical Inventory</span><div>'+esc(inv)+'</div></div>'+
     '<div><span class="label">Image Platform</span><div>'+esc(imgLine)+'</div></div>'+
-    '<div><span class="label">Commercial Intelligence</span><div>'+esc(ci.approvalStatus||ci.status||'—')+'</div></div>'+
+    '<div><span class="label">Commercial Intelligence</span><div>'+esc(ciStatus)+ciDetail+'</div></div>'+
     '<div><span class="label">Workflow Readiness</span><div>'+esc(ws.workflowReadinessStatus||'—')+'</div></div>'+
     '</div>';
 }
@@ -2864,6 +2867,7 @@ function renderCustomerDetail(c){
       renderCustomerStatusPills(c)+
       '<div style="font-size:.68rem;color:#64748b;margin-top:8px">Search Console: '+esc(scm.connectionStatus||'—')+' · Last sync: '+fmt(scm.lastSync||'')+' · Property: '+esc(scm.property||'—')+'</div>'+
       '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">'+
+      '<button class="btn secondary" type="button" style="font-size:.72rem" onclick="openCommercialIntelligenceReview()">Open Competitor Analysis</button>'+
       '<button class="btn secondary" type="button" style="font-size:.72rem" onclick="openCommercialIndexingReview(true)">Search Console &amp; Indexing</button>'+
       '<button class="btn secondary" type="button" style="font-size:.72rem" onclick="openCommercialPerformanceDashboard(true)">Growth Dashboard</button>'+
       '</div>'+
@@ -3025,7 +3029,7 @@ function renderCustomerDetail(c){
     }else{cirBanner.style.display='none';cirBanner.innerHTML=''}
   }
   const cirBtn=document.getElementById('openCirBtn');
-  if(cirBtn){cirBtn.style.display=atCir?'block':'none';cirBtn.textContent=atCirReview?'Open Dashboard & Approve':'Open Commercial Intelligence Dashboard'}
+  if(cirBtn){cirBtn.style.display='block';cirBtn.textContent='Open Competitor Analysis'}
   const btn=document.getElementById('continueWorkflowBtn');
   btn.style.display=(atCqr||atMp||atPublishReview||atCirReview||atCge||atIdx||atPerf||atCprJourney||customerAtServicePageReview(c))?'none':'block';
   btn.textContent=orch.continueLabel||'Continue Workflow';
@@ -3452,12 +3456,32 @@ function renderCommercialIntelligenceDashboard(dashboard){
   const ca=dashboard.competitorAnalysis||{};
   const compRows=(ca.competitors||[]);
   const compSummary=ca.generated?ciCompSummaryHtml(ca.summary||dashboard.competitorSummary||[]):'';
-  const compHtml='<div class="ci-section"><h4>Competitor Analysis</h4>'+
+  const providers=dashboard.analysisProviders||[];
+  const organic=dashboard.organicSearchCompetitors||{};
+  const organicRows=organic.competitors||[];
+  const stale=dashboard.staleCompletion||{};
+  const canGenerate=Boolean(dashboard.canGenerateCompetitorAnalysis);
+  const generateDisabled=Boolean(dashboard.activeCompetitorAnalysisJobId);
+  const generateBtn=canGenerate?'<button class="btn secondary" type="button" data-generate-competitor-analysis="1" '+(generateDisabled?'disabled':'')+' onclick="generateCompetitorAnalysisFromCir()">Generate Competitor Analysis</button>':'';
+  const providerHtml='<div class="ci-section"><h4>Analysis providers</h4>'+
+    (dashboard.combinedCompetitorAnalysisStatus?'<p class="ci-narrative"><strong>Combined status:</strong> '+esc(dashboard.combinedCompetitorAnalysisStatus)+'</p>':'')+
+    (providers.length?providers.map(function(p){return '<p class="ci-narrative"><strong>'+esc(p.label)+':</strong> '+esc(p.statusLabel)+(p.capturedAt?' · '+fmt(p.capturedAt):'')+' · '+esc(p.source||'')+(p.error?'<br><span style="color:#fca5a5">'+esc(p.error)+'</span>':'')+'</p>';}).join(''):'<p class="ci-narrative">Provider status unavailable.</p>')+
+    '<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">Opening this dashboard does not start analysis. Generate queues one orchestrate_competitor_analysis job that runs Google Places local discovery and the existing DataForSEO organic-search adapter.</p></div>';
+  const staleHtml=stale.flagged?'<div class="guidance-box" style="margin-bottom:10px">'+esc(stale.message||'Commercial Intelligence is marked complete, but Competitor Analysis evidence is missing.')+'</div>':'';
+  const googleHtml='<div class="ci-section"><h4>Google/local competitors</h4>'+staleHtml+
+    '<p class="ci-narrative"><strong>Analysis status:</strong> '+(ca.generated?'Generated':'Not generated')+(ca.evidenceTimestamp?' · '+fmt(ca.evidenceTimestamp):'')+' · '+esc(ca.discoverySource||'Google Places')+'</p>'+
     (dashboard.locality?.provenanceLabel?'<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">Locality: '+esc(dashboard.locality.provenanceLabel)+'</p>':'')+
     (ca.generated?'<h5 style="font-size:.78rem;color:#cbd5e1;margin:8px 0 4px">Competitor Summary</h5>'+compSummary:'')+
     (ca.generated?(compRows.length?'<table class="audit-table"><thead><tr><th>Competitor</th><th>Rating</th><th>Reviews</th><th>Distance</th><th>Address</th><th>Categories</th><th>Phone</th><th>Website</th><th>Maps</th><th>Place ID</th><th>Evidence</th><th>Confidence</th></tr></thead><tbody>'+
-    compRows.map(c=>'<tr><td>'+esc(c.name||'')+'</td><td>'+esc(c.rating||'Not Available')+'</td><td>'+esc(c.reviews||'Not Available')+'</td><td>'+esc(c.distance||'Not Available')+'</td><td>'+esc(c.address||'Not Available')+'</td><td>'+esc(c.categories||'Not Available')+'</td><td>'+esc(c.phone||'Not Available')+'</td><td>'+esc(c.website||'Not Available')+'</td><td>'+esc(c.maps||'Not Available')+'</td><td>'+esc(c.placeId||'Not Available')+'</td><td>'+esc(c.evidence||'Not Available')+'</td><td>'+esc(c.confidence||'Not Available')+'</td></tr>').join('')+'</tbody></table>':'<p class="ci-narrative">Competitor Analysis generated but no competitors returned.</p>'):
-    '<p class="ci-narrative"><strong>Competitor Analysis not yet generated</strong></p><p class="ci-narrative">Action: Generate Competitor Analysis from the workflow to load real nearby pharmacy evidence.</p><button class="btn secondary" type="button" onclick="closeCommercialIntelligenceReview();continueWorkflow()">Generate Competitor Analysis</button>')+ciEvidenceFoot(ca.evidence||dashboard.sectionEvidence?.competitorAnalysis)+'</div>';
+    compRows.map(c=>'<tr><td>'+esc(c.name||'')+'</td><td>'+esc(c.rating||'Not Available')+'</td><td>'+esc(c.reviews||'Not Available')+'</td><td>'+esc(c.distance||'Not Available')+'</td><td>'+esc(c.address||'Not Available')+'</td><td>'+esc(c.categories||'Not Available')+'</td><td>'+esc(c.phone||'Not Available')+'</td><td>'+esc(c.website||'Not Available')+'</td><td>'+esc(c.maps||'Not Available')+'</td><td>'+esc(c.placeId||'Not Available')+'</td><td>'+esc(c.evidence||'Not Available')+'</td><td>'+esc(c.confidence||'Not Available')+'</td></tr>').join('')+'</tbody></table>':'<p class="ci-narrative">Google/local competitor analysis generated but no competitors returned.</p>'):
+    '<p class="ci-narrative"><strong>Google/local competitor analysis not yet generated</strong></p><p class="ci-narrative">Action: Generate Competitor Analysis to load real nearby pharmacy evidence.</p>'+generateBtn)+ciEvidenceFoot(ca.evidence||dashboard.sectionEvidence?.competitorAnalysis)+'</div>';
+  const organicHtml='<div class="ci-section"><h4>DataForSEO organic-search competitors</h4>'+
+    '<p class="ci-narrative"><strong>Analysis status:</strong> '+esc(organic.statusLabel||(organic.generated?'completed':'not generated'))+(organic.capturedAt?' · '+fmt(organic.capturedAt):'')+' · '+esc(organic.provider||'dataforseo-google-organic-live')+(organic.locationName?' · '+esc(organic.locationName):'')+(organic.languageCode?' · '+esc(organic.languageCode):'')+'</p>'+
+    (organic.error?'<p class="ci-narrative" style="color:#fca5a5">'+esc(organic.error)+'</p>':'')+
+    (organic.generated?(organicRows.length?'<table class="audit-table"><thead><tr><th>Domain</th><th>URL</th><th>Position</th><th>Matched query</th><th>Title</th><th>Description</th><th>Evidence</th><th>Source</th><th>Captured</th></tr></thead><tbody>'+
+    organicRows.map(c=>'<tr><td>'+esc(c.domain||c.host||'')+'</td><td>'+esc(c.url||'')+'</td><td>'+esc(c.position==null?'':String(c.position))+'</td><td>'+esc(c.matchedQuery||'')+'</td><td>'+esc(c.title||c.name||'')+'</td><td>'+esc(c.description||'')+'</td><td>'+esc(c.evidence||'')+'</td><td>'+esc(c.source||'')+'</td><td>'+esc(c.capturedAt?fmt(c.capturedAt):'')+'</td></tr>').join('')+'</tbody></table>':'<p class="ci-narrative">DataForSEO organic-search analysis completed but no reliable competitors were returned.</p>'):
+    '<p class="ci-narrative"><strong>DataForSEO organic-search competitors not yet generated</strong></p><p class="ci-narrative">Organic-search domains are not treated as nearby physical pharmacies unless Google Places separately verifies that relationship.</p>'+(ca.generated||canGenerate?generateBtn:''))+'</div>';
+  const compHtml=providerHtml+googleHtml+organicHtml;
   const traffic=dashboard.trafficOpportunity||{};
   const trafficHtml='<div class="ci-section"><h4>Traffic Opportunity</h4><p class="ci-narrative">'+esc(traffic.summary||'Search demand not yet available.')+'</p>'+
     ((traffic.keywords||[]).length?'<ul>'+traffic.keywords.map(k=>'<li><strong>'+esc(k.keyword)+'</strong> — '+esc(k.searchDemand)+' · Provenance: '+esc(k.provenance)+'</li>').join('')+'</ul>':'')+
@@ -3487,7 +3511,10 @@ function renderCommercialIntelligenceDashboard(dashboard){
 }
 function toggleCiTechnicalLog(){const el=document.getElementById('cirTechnicalLog');if(el)el.classList.toggle('open')}
 async function openCommercialIntelligenceReview(){
-  if(!activeCustomer)return;
+  if(!activeCustomer){
+    toast('Select a customer to open Competitor Analysis.',true);
+    throw new Error('Select a customer to open Competitor Analysis.');
+  }
   const p=new URLSearchParams(location.search);
   p.set('customer',activeCustomer.slug);
   p.set('panel','commercial-intelligence');
@@ -3508,6 +3535,34 @@ async function openCommercialIntelligenceReview(){
     document.getElementById('cirLoading').style.display='none';
     document.getElementById('cirError').style.display='block';
     document.getElementById('cirErrorDetail').textContent=e.message||String(e);
+  }
+}
+let competitorAnalysisGenerateInFlight=false;
+async function generateCompetitorAnalysisFromCir(){
+  if(!activeCustomer){
+    toast('Select a customer to generate Competitor Analysis.',true);
+    return;
+  }
+  if(competitorAnalysisGenerateInFlight)return;
+  competitorAnalysisGenerateInFlight=true;
+  document.querySelectorAll('[data-generate-competitor-analysis]').forEach(function(btn){btn.disabled=true});
+  try{
+    const data=await api('/api/master-admin-platform/customers/'+encodeURIComponent(activeCustomer.slug)+'/commercial-intelligence-dashboard/generate-competitor-analysis',{method:'POST',body:'{}'});
+    if(data.customer)activeCustomer=data.customer;
+    toast(data.evidence||(data.idempotent?'Competitor Analysis already in progress':'Competitor Analysis queued'));
+    if(data.async&&data.jobId)startJobPolling();
+    if(data.dashboard)renderCommercialIntelligenceDashboard(data.dashboard);
+    else await openCommercialIntelligenceReview();
+  }catch(e){
+    const msg=e&&e.message?e.message:String(e);
+    toast(msg,true);
+    const errEl=document.getElementById('cirError');
+    const detail=document.getElementById('cirErrorDetail');
+    if(errEl)errEl.style.display='block';
+    if(detail)detail.textContent=msg;
+    document.querySelectorAll('[data-generate-competitor-analysis]').forEach(function(btn){btn.disabled=false});
+  }finally{
+    competitorAnalysisGenerateInFlight=false;
   }
 }
 function closeCommercialIntelligenceReview(){
@@ -6925,7 +6980,7 @@ document.querySelectorAll('.modal-backdrop').forEach(el=>{el.addEventListener('c
 initSpgGenerateControls();
 initSpeGenerateControls();
 bindIerBranchSelectionControls();
-loadDashboard().then(()=>{const p=new URLSearchParams(location.search);const slug=p.get('customer');const campaignId=p.get('campaignId');if(p.get('panel')==='platform-infrastructure')openPlatformInfrastructure();else if(slug)openCustomer(slug,{campaignId:campaignId||''}).then(()=>{if(p.get('panel')==='business-profile-review'&&customerAtBusinessProfileReview(activeCustomer))openBusinessProfileReview();else if(p.get('panel')==='business-profile-review')clearBprPanelUrlParam();else if(p.get('panel')==='commercial-intelligence'&&customerAtCommercialIntelligence(activeCustomer))openCommercialIntelligenceReview();else if(p.get('panel')==='quality-review'&&customerAtQualityReview(activeCustomer))openCommercialQualityReview();else if(p.get('panel')==='generate-ecosystem'&&activeCustomer&&(customerAtGenerateEcosystem(activeCustomer)||(activeCustomer.commercialIntelligence&&activeCustomer.commercialIntelligence.canGenerateEcosystem)))openCommercialEcosystemGeneration();else if(p.get('panel')==='imported-evidence-review'&&activeCustomer)openImportedEvidenceReview();else if(p.get('panel')==='service-page-evidence-review'&&activeCustomer)openServicePageEvidenceReview();else if(p.get('panel')==='service-page-generation'&&activeCustomer)openServicePageGeneration();else if(p.get('panel')==='service-page-review'&&activeCustomer)openServicePageReview();else if(p.get('panel')==='cluster-page-review'&&activeCustomer)openClusterPageReview();else if(p.get('panel')==='indexing-review')openCommercialIndexingReview(true);else if(p.get('panel')==='performance-dashboard'||p.get('panel')==='growth-dashboard')openCommercialPerformanceDashboard(true);else if(p.get('panel')==='managed-publishing'&&activeCustomer&&customerAtManagedPublishing(activeCustomer))openManagedPublishing();else if(p.get('panel')==='legacy-deployment-configuration'&&activeCustomer)openCommercialDeploymentConfiguration();else if(p.get('panel')==='publish-review'&&customerAtPublishReview(activeCustomer))openCommercialPublishReview();else if(p.get('panel')==='local-coverage'||p.get('panel')==='generation-setup'){const el=document.getElementById('detailLocalCoverageCollapse');if(el)el.open=true}})});
+loadDashboard().then(()=>{const p=new URLSearchParams(location.search);const slug=p.get('customer');const campaignId=p.get('campaignId');if(p.get('panel')==='platform-infrastructure')openPlatformInfrastructure();else if(slug)openCustomer(slug,{campaignId:campaignId||''}).then(()=>{if(p.get('panel')==='business-profile-review'&&customerAtBusinessProfileReview(activeCustomer))openBusinessProfileReview();else if(p.get('panel')==='business-profile-review')clearBprPanelUrlParam();else if(p.get('panel')==='commercial-intelligence')openCommercialIntelligenceReview();else if(p.get('panel')==='quality-review'&&customerAtQualityReview(activeCustomer))openCommercialQualityReview();else if(p.get('panel')==='generate-ecosystem'&&activeCustomer&&(customerAtGenerateEcosystem(activeCustomer)||(activeCustomer.commercialIntelligence&&activeCustomer.commercialIntelligence.canGenerateEcosystem)))openCommercialEcosystemGeneration();else if(p.get('panel')==='imported-evidence-review'&&activeCustomer)openImportedEvidenceReview();else if(p.get('panel')==='service-page-evidence-review'&&activeCustomer)openServicePageEvidenceReview();else if(p.get('panel')==='service-page-generation'&&activeCustomer)openServicePageGeneration();else if(p.get('panel')==='service-page-review'&&activeCustomer)openServicePageReview();else if(p.get('panel')==='cluster-page-review'&&activeCustomer)openClusterPageReview();else if(p.get('panel')==='indexing-review')openCommercialIndexingReview(true);else if(p.get('panel')==='performance-dashboard'||p.get('panel')==='growth-dashboard')openCommercialPerformanceDashboard(true);else if(p.get('panel')==='managed-publishing'&&activeCustomer&&customerAtManagedPublishing(activeCustomer))openManagedPublishing();else if(p.get('panel')==='legacy-deployment-configuration'&&activeCustomer)openCommercialDeploymentConfiguration();else if(p.get('panel')==='publish-review'&&customerAtPublishReview(activeCustomer))openCommercialPublishReview();else if(p.get('panel')==='local-coverage'||p.get('panel')==='generation-setup'){const el=document.getElementById('detailLocalCoverageCollapse');if(el)el.open=true}})});
 
 async function loadVerifiedNationalCompetitorIntelligence(){
   const root=document.getElementById(

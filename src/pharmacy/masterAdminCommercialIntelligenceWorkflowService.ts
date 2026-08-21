@@ -2,7 +2,7 @@ import { isNationalGrowthPlatform } from "./growthPlatformResolverService.ts";
 /**
  * Master Admin — commercial intelligence workflow orchestration (wiring only).
  */
-import { runCompetitorIntelligencePipeline } from "./pharmacyCompetitorIntelligenceService.ts";
+import { runCompetitorIntelligencePipeline, isCombinedCompetitorAnalysisStored } from "./pharmacyCompetitorIntelligenceService.ts";
 import { loadCompetitorIntelligence } from "./pharmacyCompetitorIntelligence.ts";
 import {
   discoverLocalMarketCompetitors,
@@ -141,7 +141,7 @@ export function findActiveCommercialIntelligenceJob(
 ): MasterAdminJob | null {
   return (
     listMasterAdminJobs({ slug, limit: 20 }).find(
-      (j) => actions.has(j.action) && (j.status === "queued" || j.status === "running"),
+      (j) => actions.has(j.action) && (j.status === "queued" || j.status === "claimed" || j.status === "running"),
     ) || null
   );
 }
@@ -170,28 +170,34 @@ export async function runCompetitorAnalysisWorkflowAction(
       activeJobId: active.id,
     };
   }
-  if (isCompetitorAnalysisGenerated(slug)) {
-    const intel = loadCompetitorIntelligence(slug)!;
+  if (isCombinedCompetitorAnalysisStored(slug)) {
+    const intel = loadCompetitorIntelligence(slug);
     return {
       ok: true,
-      evidence: `Competitor Analysis already complete — ${intel.competitors.length} competitors`,
+      evidence: `Competitor Analysis already complete — ${intel?.competitors.length || 0} Google/local competitors`,
       errors: [],
       idempotent: true,
     };
   }
   try {
     const result = await runCompetitorIntelligencePipeline(slug);
+    const organicCount = result.dataForSeoOrganic.competitorCount;
+    const googleCount = result.googleLocal.competitorCount;
+    const errors = [result.googleLocal.error, result.dataForSeoOrganic.error].filter(Boolean) as string[];
+    const partial = result.combinedStatus === "partial";
+    const failed = result.combinedStatus === "failed";
     recordMasterAdminAudit({
       user: operator,
       slug,
       action: "orchestrate_competitor_analysis",
-      status: "success",
-      evidence: `Competitor Analysis generated — ${result.discovery.competitorCount} competitors`,
+      status: failed ? "error" : "success",
+      evidence: `Competitor Analysis ${result.combinedStatus} — Google/local ${googleCount}, DataForSEO organic ${organicCount}${errors.length ? ` — ${errors.join(" | ")}` : ""}`,
+      errors: failed || partial ? errors : [],
     });
     return {
-      ok: true,
-      evidence: `Competitor Analysis generated — ${result.discovery.competitorCount} competitors`,
-      errors: [],
+      ok: !failed,
+      evidence: `Competitor Analysis ${result.combinedStatus} — Google/local ${googleCount}, DataForSEO organic ${organicCount}${errors.length ? ` — ${errors.join(" | ")}` : ""}`,
+      errors,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -16,6 +16,9 @@ import { listMasterAdminJobs } from "./masterAdminJobService.ts";
 import { getWorkflowHistory, getWorkflowExecutions } from "./masterAdminWorkflowHistoryService.ts";
 import { listMasterAdminAudit } from "./masterAdminAuditService.ts";
 import type { MasterAdminJob } from "./masterAdminJobService.ts";
+import { isCompetitorAnalysisGenerated } from "./masterAdminCommercialIntelligenceWorkflowService.ts";
+import { isCoreProductRecoveryMode } from "./masterAdminCoreProductRecoveryService.ts";
+import { isBusinessProfileReviewApproved } from "./masterAdminBusinessProfileReviewService.ts";
 
 export interface PersistedPanelSummary {
   status: string;
@@ -267,14 +270,48 @@ function readIndexingSummary(slug: string): PersistedPanelSummary {
 
 function readCommercialIntelligenceSummary(slug: string): PersistedPanelSummary {
   const approval = readCommercialIntelligenceApproval(slug);
-  if (!approval) return unavailableSummary();
+  const generated = isCompetitorAnalysisGenerated(slug);
+  const historySaysComplete = getWorkflowHistory(slug).some(
+    (h) => h.fromStage === "commercial_intelligence" || h.fromStage === "competitor_analysis",
+  );
+  const stageMarkedComplete =
+    Boolean(approval) ||
+    historySaysComplete ||
+    (isCoreProductRecoveryMode(slug) && isBusinessProfileReviewApproved(slug));
+
+  if (generated && approval) {
+    return {
+      status: "approved",
+      capturedAt: approval.approvedAt,
+      refreshAvailable: true,
+      approvalStatus: "approved",
+      approvedBy: approval.approvedBy,
+      approvedVersion: approval.approvedVersion,
+    };
+  }
+  if (stageMarkedComplete && !generated) {
+    return {
+      status: "stale",
+      capturedAt: approval?.approvedAt || null,
+      refreshAvailable: true,
+      approvalStatus: "stale",
+      detail:
+        "Workflow marked Commercial Intelligence complete, but Competitor Analysis artifact is missing.",
+    };
+  }
+  if (generated) {
+    return {
+      status: "generated",
+      capturedAt: null,
+      refreshAvailable: true,
+      approvalStatus: "generated",
+    };
+  }
   return {
-    status: "approved",
-    capturedAt: approval.approvedAt,
+    status: "not_generated",
+    capturedAt: null,
     refreshAvailable: true,
-    approvalStatus: "approved",
-    approvedBy: approval.approvedBy,
-    approvedVersion: approval.approvedVersion,
+    approvalStatus: "not generated",
   };
 }
 

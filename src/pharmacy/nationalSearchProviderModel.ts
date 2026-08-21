@@ -28,10 +28,12 @@ export interface NationalSearchResponse {
   provider: string;
   query: string;
   marketCountry: string;
+  languageCode?: string;
   capturedAt: string;
   cost: number | null;
   organicResultCount: number;
   results: NationalSearchEvidence[];
+  taskId?: string | null;
 }
 
 export interface NationalSearchProvider {

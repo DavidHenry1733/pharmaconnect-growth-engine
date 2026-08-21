@@ -88,6 +88,51 @@ export interface NationalCompetitorDiscoveryResult {
     | "failed";
 
   errors: string[];
+
+  /** Optional local competitor-analysis organic-search run. Existing national artifacts omit this. */
+  organicSearch?: OrganicSearchCompetitorRun;
+}
+
+export type CompetitorAnalysisProviderStatus =
+  | "configured"
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "not_configured"
+  | "no_reliable_results";
+
+export interface OrganicSearchCompetitorEvidence {
+  domain: string;
+  host: string;
+  url: string;
+  position: number | null;
+  matchedQuery: string;
+  title: string;
+  description: string;
+  overlapEvidence: string;
+  capturedAt: string;
+  provider: string;
+  locationName: string;
+  languageCode: string;
+  taskId: string | null;
+  provenance: string;
+  freshness: string;
+}
+
+export interface OrganicSearchCompetitorRun {
+  provider: "dataforseo-google-organic-live";
+  status: CompetitorAnalysisProviderStatus;
+  configured: boolean;
+  generated: boolean;
+  error: string | null;
+  queryLimitation: string | null;
+  locationName: string;
+  languageCode: string;
+  taskIds: string[];
+  queries: string[];
+  competitors: OrganicSearchCompetitorEvidence[];
+  capturedAt: string | null;
 }
 
 export function emptyNationalCompetitorDiscoveryResult(
