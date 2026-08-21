@@ -3223,14 +3223,54 @@ function ciEvidenceFoot(evidence){
 function ciMetricTable(metrics){
   const rows=(metrics||[]);
   if(!rows.length)return '<p class="ci-narrative">Google Profile Metrics not yet available.</p>';
-  return '<table class="ci-metric-table"><thead><tr><th>Metric</th><th>Your Pharmacy</th><th>Local Average</th><th>Highest Competitor</th><th>Gap</th><th>Recommended Target</th></tr></thead><tbody>'+
-    rows.map(m=>'<tr><td>'+esc(m.label)+'</td><td>'+esc(m.yourPharmacy)+'</td><td>'+esc(m.localAverage)+'</td><td>'+esc(m.highestCompetitor)+'</td><td>'+esc(m.gap)+'</td><td>'+esc(m.recommendedTarget)+'</td></tr>').join('')+
+  return '<table class="ci-metric-table"><thead><tr><th>Metric</th><th>Your Pharmacy</th><th>Local Average</th><th>Highest Competitor</th><th>Gap</th><th>Recommended Target</th><th>Sample Size</th></tr></thead><tbody>'+
+    rows.map(m=>'<tr><td>'+esc(m.label)+'</td><td>'+esc(m.yourPharmacy)+'</td><td>'+esc(m.localAverage)+'</td><td>'+esc(m.highestCompetitor)+'</td><td>'+esc(m.gap)+'</td><td>'+esc(m.recommendedTarget)+'</td><td>'+esc(m.sampleSizeLabel||(m.sampleSize!=null?('n='+m.sampleSize):'Not Available'))+'</td></tr>').join('')+
     '</tbody></table>';
 }
 function ciCompSummaryHtml(summary){
   const lines=(summary||[]);
   if(!lines.length)return '';
   return '<div style="margin-bottom:10px">'+lines.map(l=>'<p class="ci-narrative"><strong>'+esc(l.label)+':</strong> '+esc(l.statement)+'</p>').join('')+'</div>';
+}
+function ciOrganicRows(rows){
+  if(!rows||!rows.length)return '';
+  return '<table class="audit-table"><thead><tr><th>Domain</th><th>URL</th><th>Position</th><th>Query</th><th>Title</th><th>Description</th><th>Evidence</th><th>Source</th><th>Captured</th><th>Why classified</th><th>Verified Google business</th></tr></thead><tbody>'+
+    rows.map(function(c){
+      return '<tr><td>'+esc(c.domain||c.host||'')+'</td><td>'+esc(c.url||'')+'</td><td>'+esc(c.position==null?'':String(c.position))+'</td><td>'+esc(c.matchedQuery||'')+'</td><td>'+esc(c.title||'')+'</td><td>'+esc(c.description||'')+'</td><td>'+esc(c.evidence||'')+'</td><td>'+esc(c.source||'')+'</td><td>'+esc(c.capturedAt?fmt(c.capturedAt):'')+'</td><td>'+esc(c.classificationReason||'')+'</td><td>'+esc(c.matchedGoogleCompetitorName||'')+'</td></tr>';
+    }).join('')+'</tbody></table>';
+}
+function ciOrganicBucket(title,bucket){
+  const rows=(bucket&&bucket.rows)||[];
+  return '<h5 style="font-size:.78rem;color:#cbd5e1;margin:12px 0 4px">'+esc(title)+'</h5>'+
+    (bucket&&bucket.label?'<p class="ci-narrative" style="font-size:.72rem;color:#94a3b8">'+esc(bucket.label)+'</p>':'')+
+    (rows.length?ciOrganicRows(rows):'<p class="ci-narrative">'+esc((bucket&&bucket.emptyState)||'No stored organic-search results in this category.')+'</p>');
+}
+function ciOrganicProviderLabel(provider){
+  const label=provider&&provider.label?String(provider.label):'';
+  const id=provider&&provider.id?String(provider.id):'';
+  if(/dataforseo/i.test(id) || /organic-search competitors/i.test(label) || provider&&provider.family==='dataforseo_organic'){
+    return 'Organic Search Evidence — DataForSEO';
+  }
+  return label;
+}
+function ciProvidersHtml(dashboard){
+  const providers=dashboard.analysisProviders||[];
+  if(!providers.length)return '';
+  return '<div class="ci-section"><h4>Analysis providers</h4>'+
+    (dashboard.combinedCompetitorAnalysisStatus?'<p class="ci-narrative"><strong>Combined status:</strong> '+esc(dashboard.combinedCompetitorAnalysisStatus)+'</p>':'')+
+    providers.map(function(p){
+      return '<p class="ci-narrative"><strong>'+esc(ciOrganicProviderLabel(p))+':</strong> '+esc(p.statusLabel||'')+(p.capturedAt?' · '+fmt(p.capturedAt):'')+' · '+esc(p.source||'')+(p.error?'<br><span style="color:#fca5a5">'+esc(p.error)+'</span>':'')+'</p>';
+    }).join('')+
+    '</div>';
+}
+function ciOrganicEvidenceHtml(section,evidence){
+  const organic=section||{};
+  return '<div class="ci-section"><h4>'+esc(organic.title||'Organic Search Evidence — DataForSEO')+'</h4>'+
+    '<p class="ci-narrative">'+esc(organic.explanation||'Organic search results show who appears for relevant searches. Only businesses independently verified through Google Places are treated as nearby local competitors.')+'</p>'+
+    ciOrganicBucket('Your Pharmacy',organic.yourPharmacy)+
+    ciOrganicBucket('Verified Local Competitor Matches',organic.verifiedLocalMatches)+
+    ciOrganicBucket('Wider Organic Landscape',organic.widerLandscape)+
+    ciEvidenceFoot(evidence)+'</div>';
 }
 function ciSection(title,narrative,items,evidence){
   const lis=(items||[]).filter(Boolean);
@@ -3447,7 +3487,7 @@ function renderCommercialIntelligenceDashboard(dashboard){
   const metricsHtml='<div class="ci-section"><h4>Google Profile Metrics</h4><p class="ci-narrative">Evidence-backed Google Business Profile comparison — your pharmacy vs local average vs highest nearby competitor.</p>'+
     ciMetricTable(metrics)+ciEvidenceFoot(dashboard.sectionEvidence?.googleProfileMetrics)+'</div>';
   const gapHtml='<div class="ci-section"><h4>Gap Analysis</h4><p class="ci-narrative">Commercial gaps measured against local benchmarks with recommended targets and PharmaConnect improvement actions.</p>'+
-    (metrics.length?'<ul>'+metrics.map(m=>'<li><strong>'+esc(m.label)+'</strong> — Current: '+esc(m.yourPharmacy)+' · Average: '+esc(m.localAverage)+' · Gap: '+esc(m.gap)+' · Target: '+esc(m.recommendedTarget)+'<br><span style="color:#94a3b8">'+esc(m.opportunity)+'</span></li>').join('')+'</ul>':'<p class="ci-narrative">Gap analysis pending local market evidence.</p>')+
+    (metrics.length?'<ul>'+metrics.map(m=>'<li><strong>'+esc(m.label)+'</strong> — Current: '+esc(m.yourPharmacy)+' · Average: '+esc(m.localAverage)+' · Gap: '+esc(m.gap)+' · Target: '+esc(m.recommendedTarget)+' · Sample: '+esc(m.sampleSizeLabel||(m.sampleSize!=null?('n='+m.sampleSize):'Not Available'))+'<br><span style="color:#94a3b8">'+esc(m.opportunity)+'</span></li>').join('')+'</ul>':'<p class="ci-narrative">Gap analysis pending local market evidence.</p>')+
     ciEvidenceFoot(dashboard.sectionEvidence?.googleProfileMetrics)+'</div>';
   const ca=dashboard.competitorAnalysis||{};
   const compRows=(ca.competitors||[]);
@@ -3458,6 +3498,8 @@ function renderCommercialIntelligenceDashboard(dashboard){
     (ca.generated?(compRows.length?'<table class="audit-table"><thead><tr><th>Competitor</th><th>Rating</th><th>Reviews</th><th>Distance</th><th>Address</th><th>Categories</th><th>Phone</th><th>Website</th><th>Maps</th><th>Place ID</th><th>Evidence</th><th>Confidence</th></tr></thead><tbody>'+
     compRows.map(c=>'<tr><td>'+esc(c.name||'')+'</td><td>'+esc(c.rating||'Not Available')+'</td><td>'+esc(c.reviews||'Not Available')+'</td><td>'+esc(c.distance||'Not Available')+'</td><td>'+esc(c.address||'Not Available')+'</td><td>'+esc(c.categories||'Not Available')+'</td><td>'+esc(c.phone||'Not Available')+'</td><td>'+esc(c.website||'Not Available')+'</td><td>'+esc(c.maps||'Not Available')+'</td><td>'+esc(c.placeId||'Not Available')+'</td><td>'+esc(c.evidence||'Not Available')+'</td><td>'+esc(c.confidence||'Not Available')+'</td></tr>').join('')+'</tbody></table>':'<p class="ci-narrative">Competitor Analysis generated but no competitors returned.</p>'):
     '<p class="ci-narrative"><strong>Competitor Analysis not yet generated</strong></p><p class="ci-narrative">Action: Generate Competitor Analysis from the workflow to load real nearby pharmacy evidence.</p><button class="btn secondary" type="button" onclick="closeCommercialIntelligenceReview();continueWorkflow()">Generate Competitor Analysis</button>')+ciEvidenceFoot(ca.evidence||dashboard.sectionEvidence?.competitorAnalysis)+'</div>';
+  const providerHtml=ciProvidersHtml(dashboard);
+  const organicHtml=ciOrganicEvidenceHtml(dashboard.organicSearchEvidence,dashboard.sectionEvidence?.organicSearchEvidence);
   const traffic=dashboard.trafficOpportunity||{};
   const trafficHtml='<div class="ci-section"><h4>Traffic Opportunity</h4><p class="ci-narrative">'+esc(traffic.summary||'Search demand not yet available.')+'</p>'+
     ((traffic.keywords||[]).length?'<ul>'+traffic.keywords.map(k=>'<li><strong>'+esc(k.keyword)+'</strong> — '+esc(k.searchDemand)+' · Provenance: '+esc(k.provenance)+'</li>').join('')+'</ul>':'')+
@@ -3471,7 +3513,7 @@ function renderCommercialIntelligenceDashboard(dashboard){
   mainEl.innerHTML=
     '<div class="ci-hero"><h3>Commercial Intelligence Dashboard</h3><p>Where you are now, what PharmaConnect discovered, why it matters, and what should happen next — one commercial decision before ecosystem generation.</p><span class="ci-status">'+esc(dashboard.statusLabel||'')+'</span></div>'+
     (dashboard.legacyAutoAdvance&&dashboard.legacyLabel?'<div class="guidance-box">'+esc(dashboard.legacyLabel)+'</div>':'')+
-    execHtml+metricsHtml+gapHtml+compHtml+trafficHtml+'<div class="ci-section"><h4>Local Market Intelligence</h4>'+lm+ciEvidenceFoot(dashboard.sectionEvidence?.localMarketIntelligence)+'</div>'+'<div class="ci-section"><h4>Growth Intelligence</h4>'+gi+ciEvidenceFoot(dashboard.sectionEvidence?.growthIntelligence)+'</div>'+prevHtml+issuesHtml+
+    execHtml+metricsHtml+gapHtml+providerHtml+compHtml+organicHtml+trafficHtml+'<div class="ci-section"><h4>Local Market Intelligence</h4>'+lm+ciEvidenceFoot(dashboard.sectionEvidence?.localMarketIntelligence)+'</div>'+'<div class="ci-section"><h4>Growth Intelligence</h4>'+gi+ciEvidenceFoot(dashboard.sectionEvidence?.growthIntelligence)+'</div>'+prevHtml+issuesHtml+
     '<button class="btn secondary" type="button" style="margin-top:8px;font-size:.72rem" onclick="toggleCiTechnicalLog()">View Technical Log</button>'+
     '<div class="ci-tech-log" id="cirTechnicalLog">'+(dashboard.technicalLog||[]).map(l=>'<div style="margin:4px 0">'+fmt(l.timestamp)+' · '+esc(l.label)+' · '+esc(l.detail)+'</div>').join('')+'</div>'+
     '<div style="margin-top:12px"><button class="btn secondary" type="button" onclick="closeCommercialIntelligenceReview()">Close Dashboard</button></div>';

@@ -26,6 +26,15 @@ import {
   isLocalMarketIntelligenceGenerated,
   isGrowthIntelligenceGenerated,
 } from "./masterAdminCommercialIntelligenceWorkflowService.ts";
+import {
+  buildGoogleLocalProfileMetrics,
+  googleLocalArtifactConfidence,
+  loadCanonicalGoogleLocalCompetitorArtifact,
+} from "./googleLocalCompetitorMetricsService.ts";
+import {
+  buildOrganicSearchEvidenceSection,
+  type OrganicSearchEvidenceSection,
+} from "./organicSearchEvidenceClassificationService.ts";
 import { readCommercialIntelligenceApproval } from "./masterAdminWorkflowAckService.ts";
 import {
   isAuthorisedEcosystemQualityReviewReady,
@@ -61,6 +70,8 @@ export interface CommercialGoogleMetric {
   gap: string;
   recommendedTarget: string;
   opportunity: string;
+  sampleSize: number;
+  sampleSizeLabel: string;
 }
 
 export interface CommercialCompetitorSummaryLine {
@@ -141,6 +152,8 @@ export interface CommercialIntelligenceDashboard {
     confidence: string;
   };
   competitorAnalysis: CommercialDashboardCompetitorAnalysis;
+  /** Classified DataForSEO evidence. Not a second local-competitor list. */
+  organicSearchEvidence: OrganicSearchEvidenceSection;
   locality: TenantLocalityResolution;
   localMarketIntelligence: {
     sections: CommercialDashboardSection[];
@@ -178,6 +191,7 @@ export interface CommercialIntelligenceDashboard {
     executiveSummary: SectionEvidence;
     googleProfileMetrics: SectionEvidence;
     competitorAnalysis: SectionEvidence;
+    organicSearchEvidence: SectionEvidence;
     localMarketIntelligence: SectionEvidence;
     growthIntelligence: SectionEvidence;
     trafficOpportunity: SectionEvidence;
@@ -254,18 +268,6 @@ function notAvailable(): string {
   return "Not Available";
 }
 
-function parseMetricNumber(value: string): number | null {
-  const n = Number(String(value).replace(/[^\d.-]/g, ""));
-  return Number.isFinite(n) ? n : null;
-}
-
-function formatGap(current: number | null, target: number | null, decimals = 0): string {
-  if (current == null || target == null) return "Unknown";
-  const gap = target - current;
-  if (decimals > 0) return gap.toFixed(decimals);
-  return String(Math.round(gap));
-}
-
 function dataFreshnessLabel(iso: string | null | undefined): string {
   if (!iso) return "Unknown";
   const ageMs = Date.now() - new Date(iso).getTime();
@@ -332,97 +334,6 @@ function loadCompetitorPool(slug: string): { rows: CompetitorPoolRow[]; source: 
     };
   }
   return { rows: [], source: "Unknown", capturedAt: null };
-}
-
-function resolveYourGoogleMetricValues(
-  profile: ReturnType<typeof readSetupProfile>,
-  snap: ReturnType<typeof loadCompetitorSnapshot>,
-): {
-  reviews: string;
-  rating: string;
-  photos: string;
-  categories: string;
-} {
-  const state = resolveGoogleProfileOnboardingState(profile);
-  const yours = snap?.yourPharmacy;
-  const complete = Boolean(snap?.analysis?.yourPharmacyComplete && yours?.placeId);
-
-  if (state === "no_profile") {
-    return { reviews: "0", rating: "0.0", photos: "0", categories: "0" };
-  }
-
-  if (complete && yours) {
-    return {
-      reviews: String(yours.reviewCount ?? 0),
-      rating: yours.rating != null ? yours.rating.toFixed(1) : notAvailable(),
-      photos: String(yours.photoCount ?? 0),
-      categories: String(1 + (yours.secondaryCategories || []).length),
-    };
-  }
-
-  if (state === "deferred" || state === "configured" || state === "selected") {
-    return {
-      reviews: notAvailable(),
-      rating: notAvailable(),
-      photos: notAvailable(),
-      categories: notAvailable(),
-    };
-  }
-
-  return { reviews: "0", rating: "0.0", photos: "0", categories: "0" };
-}
-
-function metricOpportunity(metricId: string, gap: string): string {
-  const gapNum = parseMetricNumber(gap);
-  if (gapNum == null || gapNum <= 0) {
-    return "You are at or above the local benchmark for this metric — PharmaConnect will help you maintain visibility and trust.";
-  }
-  const actions: Record<string, string> = {
-    reviews:
-      "Review count influences patient trust and map click-through. PharmaConnect will improve Google Business Profile completeness and support structured review growth.",
-    rating:
-      "Rating gaps affect comparison shopping in local search. PharmaConnect will strengthen service delivery signals and reputation visibility on Google.",
-    photos:
-      "Photo-rich profiles earn more engagement on Google Maps. PharmaConnect will guide profile media completion and on-brand pharmacy imagery.",
-    categories:
-      "Category coverage helps Google match patient intent to your services. PharmaConnect will align your Google categories with your enabled pharmacy services.",
-  };
-  return actions[metricId] || "Closing this gap will improve local competitiveness. PharmaConnect will address it through profile and content improvements.";
-}
-
-function buildGoogleProfileMetrics(
-  slug: string,
-  profile: ReturnType<typeof readSetupProfile>,
-  snap: ReturnType<typeof loadCompetitorSnapshot>,
-): CommercialGoogleMetric[] {
-  const yours = resolveYourGoogleMetricValues(profile, snap);
-  const comparisons = snap?.analysis?.comparisons || [];
-
-  const defs = [
-    { id: "reviews", label: "Google Reviews", key: "reviews" as const, yours: yours.reviews, decimals: 0 },
-    { id: "rating", label: "Average Rating", key: "rating" as const, yours: yours.rating, decimals: 1 },
-    { id: "photos", label: "Photos", key: "photos" as const, yours: yours.photos, decimals: 0 },
-    { id: "categories", label: "Categories", key: "categories" as const, yours: yours.categories, decimals: 0 },
-  ];
-
-  return defs.map((def) => {
-    const row = comparisons.find((c) => c.id === def.id);
-    const localAverage = row?.competitorAverage || notAvailable();
-    const highest = row?.highestCompetitor || notAvailable();
-    const currentNum = parseMetricNumber(def.yours);
-    const targetNum = parseMetricNumber(highest) ?? parseMetricNumber(localAverage);
-    const gap = formatGap(currentNum, targetNum, def.decimals);
-    return {
-      id: def.id,
-      label: def.label,
-      yourPharmacy: def.yours,
-      localAverage,
-      highestCompetitor: highest,
-      gap,
-      recommendedTarget: highest !== notAvailable() ? highest : localAverage,
-      opportunity: metricOpportunity(def.id, gap),
-    };
-  });
 }
 
 function buildMeasuredCompetitorSummary(slug: string): CommercialCompetitorSummaryLine[] {
@@ -598,8 +509,9 @@ function buildCompetitorAnalysis(
     evidence: buildSectionEvidence({ evidenceSource: "Unknown", capturedAt: null, confidence: "Unknown" }),
   };
 
-  const intel = loadCompetitorIntelligence(slug);
-  if (intel?.competitors.length) {
+  const artifact = loadCanonicalGoogleLocalCompetitorArtifact(slug);
+  if (artifact?.kind === "intelligence") {
+    const intel = artifact.intel;
     const rows = intel.competitors.slice(0, 12).map((c) => mapIntelCompetitor(c, intel));
     const top = [...intel.competitors].sort((a, b) => (b.gbpReviewCount || 0) - (a.gbpReviewCount || 0))[0];
     const ratings = intel.competitors.map((c) => c.gbpRating).filter((r): r is number => r != null);
@@ -632,8 +544,8 @@ function buildCompetitorAnalysis(
     };
   }
 
-  const snap = loadCompetitorSnapshot(slug);
-  if (snap?.competitors.length && snap.source === "google-places-live") {
+  if (artifact?.kind === "snapshot") {
+    const snap = artifact.snap;
     const rows = snap.competitors.slice(0, 12).map((c) => mapSnapshotCompetitor(c, snap));
     const top = snap.competitors[0];
     const ratings = snap.competitors.map((c) => c.rating).filter((r): r is number => r != null);
@@ -698,6 +610,12 @@ function buildLocalMarketSections(
     string | { areaName?: string }
   >;
   const town = locality.available ? locality.value || localityUnavailableLabel() : localityUnavailableLabel();
+  const googleLocalArtifact = loadCanonicalGoogleLocalCompetitorArtifact(slug);
+  const googleMetricsEvidence = buildSectionEvidence({
+    evidenceSource: googleLocalArtifact?.source || "Unknown",
+    capturedAt: googleLocalArtifact?.capturedAt || null,
+    confidence: googleLocalArtifactConfidence(googleLocalArtifact),
+  });
   const lmEvidence = buildSectionEvidence({
     evidenceSource: snap?.source || "Unknown",
     capturedAt: snap?.generatedAt || null,
@@ -706,9 +624,11 @@ function buildLocalMarketSections(
 
   const googleMetricItems = googleMetrics.map(
     (m) =>
-      `${m.label} — Your Pharmacy: ${m.yourPharmacy} · Local Average: ${m.localAverage} · Highest Competitor: ${m.highestCompetitor} · Gap: ${m.gap} · Target: ${m.recommendedTarget}`,
+      `${m.label} — Your Pharmacy: ${m.yourPharmacy} · Local Average: ${m.localAverage} · Highest Competitor: ${m.highestCompetitor} · Gap: ${m.gap} · Target: ${m.recommendedTarget} · Sample: ${m.sampleSizeLabel || "Not Available"}`,
   );
-  const gapItems = googleMetrics.map((m) => `${m.label} — ${m.opportunity}`);
+  const gapItems = googleMetrics.map(
+    (m) => `${m.label} — ${m.opportunity} (sample ${m.sampleSizeLabel || "Not Available"})`,
+  );
 
   const coverageItems =
     analysis?.comparisons?.map((c) =>
@@ -731,13 +651,13 @@ function buildLocalMarketSections(
           ? "No Google Business Profile is connected — your pharmacy metrics are recorded as zero. Competitor benchmarks are from live Google Places evidence."
           : "Google Business Profile metrics compared with nearby pharmacy benchmarks from live Google Places evidence.",
       items: googleMetricItems,
-      evidence: lmEvidence,
+      evidence: googleMetricsEvidence,
     },
     {
       title: "Gap Analysis",
       narrative: "Commercial gaps measured against local competitor averages and highest nearby performers.",
       items: gapItems,
-      evidence: lmEvidence,
+      evidence: googleMetricsEvidence,
     },
     buildLocalMarketComparisonSection(snap),
     {
@@ -1027,9 +947,11 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
   const assets = pkg?.assets || [];
   const visibility = readPharmacyVisibilityReport(slug);
   const snap = loadCompetitorSnapshot(slug);
+  const googleLocalArtifact = loadCanonicalGoogleLocalCompetitorArtifact(slug);
   const competitor = buildCompetitorAnalysis(slug, locality);
-  const googleProfileMetrics = buildGoogleProfileMetrics(slug, profile, snap);
+  const googleProfileMetrics = buildGoogleLocalProfileMetrics(profile, snap, googleLocalArtifact);
   const trafficOpportunity = buildTrafficOpportunitySection(slug, locality, visibility);
+  const organicSearchEvidence = buildOrganicSearchEvidenceSection(slug, profile);
   const competitorSummary = competitor.summary;
   const sectionEvidence = {
     executiveSummary: buildSectionEvidence({
@@ -1038,11 +960,16 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
       confidence: competitor.generated ? competitor.confidence : "Unknown",
     }),
     googleProfileMetrics: buildSectionEvidence({
-      evidenceSource: snap?.source || "Google Places Local Market",
-      capturedAt: snap?.generatedAt || null,
-      confidence: snap?.source === "google-places-live" ? "High" : "Unknown",
+      evidenceSource: googleLocalArtifact?.source || "Unknown",
+      capturedAt: googleLocalArtifact?.capturedAt || null,
+      confidence: googleLocalArtifactConfidence(googleLocalArtifact),
     }),
     competitorAnalysis: competitor.evidence,
+    organicSearchEvidence: buildSectionEvidence({
+      evidenceSource: organicSearchEvidence.provider || "dataforseo-google-organic-live",
+      capturedAt: organicSearchEvidence.capturedAt,
+      confidence: organicSearchEvidence.generated ? "Medium" : "Unknown",
+    }),
     localMarketIntelligence: buildSectionEvidence({
       evidenceSource: snap?.source || "Local Market Intelligence",
       capturedAt: snap?.generatedAt || null,
@@ -1095,6 +1022,7 @@ export function buildCommercialIntelligenceDashboard(slug: string): CommercialIn
     locality,
     executiveSummary: buildExecutiveSummary(slug, profile, report, competitor, locality, trafficOpportunity),
     competitorAnalysis: competitor,
+    organicSearchEvidence,
     competitorSummary,
     googleProfileMetrics,
     trafficOpportunity,
