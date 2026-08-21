@@ -13,6 +13,8 @@ import {
 } from "./masterAdminLocalCoverageRecommendationService.ts";
 import { DISTANCE_UNAVAILABLE_LABEL } from "./masterAdminLocalCoverageGeoService.ts";
 import type { PharmacyProfileData, ProfileAreaEntry } from "./pharmacyProfileSchema.ts";
+import { slugifyArea } from "./pharmacyAreaNarrativeProfiles.ts";
+import { projectCanonicalSelectionOntoCampaign } from "./masterAdminSavedLocalitySelectionService.ts";
 import { getPharmacyProfilePath, safePharmacySlug, WORKSPACE_ROOT } from "./pharmacyWorkspacePaths.ts";
 import {
   ensureComponentDnaPersisted,
@@ -259,8 +261,16 @@ export function saveGenerationSetupLocalAreas(
     .filter((a) => text(a.areaName))
     .map((a, idx) => {
       const known = byName.get(a.areaName.toLowerCase());
+      const areaName = a.areaName.trim();
+      const knownRec = known as (typeof known & {
+        latitude?: number | null;
+        longitude?: number | null;
+        distanceMethod?: string;
+        distanceProvenance?: Record<string, unknown>;
+      }) | undefined;
       return {
-        areaName: a.areaName.trim(),
+        areaName,
+        areaId: slugifyArea(areaName),
         areaType: known?.areaType || "neighbourhood",
         priority: idx + 1,
         order: idx + 1,
@@ -270,7 +280,10 @@ export function saveGenerationSetupLocalAreas(
         tier: known?.branchLocality ? "priority" : "secondary",
         distanceKm: known?.distanceKm ?? null,
         distanceLabel: known?.distanceLabel || DISTANCE_UNAVAILABLE_LABEL,
-        distanceMethod: known?.distanceMethod || "none",
+        distanceMethod: knownRec?.distanceMethod || known?.distanceMethod || "none",
+        latitude: knownRec?.latitude ?? null,
+        longitude: knownRec?.longitude ?? null,
+        distanceProvenance: knownRec?.distanceProvenance,
       } satisfies ProfileAreaEntry;
     });
 
@@ -287,6 +300,7 @@ export function saveGenerationSetupLocalAreas(
   });
 
   writeSetupProfile(safe, synced as PharmacyProfileData);
+  projectCanonicalSelectionOntoCampaign(safe);
   return buildGenerationSetupState(safe);
 }
 

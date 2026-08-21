@@ -152,14 +152,29 @@ function collectCandidates(input: {
   };
 
   const frozen = loadFrozenCampaignSelectedAreas(slug, serviceId);
+  const frozenSelected = (frozen || []).filter((a) => a.selected !== false);
+  const profileSelected = (profile.selectedAreas || []).filter((a) => a.selected !== false);
   let selectedSource = "profile.selectedAreas";
-  if (frozen?.length) {
+  const hasExplicitSavedSelection = profileSelected.length > 0 || frozenSelected.length > 0;
+
+  if (profileSelected.length) {
+    selectedSource = "profile.selectedAreas";
+    for (const entry of profileSelected) {
+      add({
+        name: entry.areaName,
+        slug: entry.areaId || slugifyArea(entry.areaName),
+        source: "operator-confirmed:profile.selectedAreas",
+        evidence: entryEvidence(entry, discovery),
+        priority: entry.priority ?? 50,
+        order: entry.order ?? 99,
+        areaType: entry.areaType || "neighbourhood",
+        approved: true,
+        distanceLabel: entry.distanceLabel,
+      });
+    }
+  } else if (frozenSelected.length) {
     selectedSource = `frozen-campaign:${serviceId}`;
-    for (const a of frozen) {
-      if (a.selected === false) {
-        rejected.push({ name: a.areaName, reason: "frozen campaign deselected" });
-        continue;
-      }
+    for (const a of frozenSelected) {
       add({
         name: a.areaName,
         slug: a.areaSlug,
@@ -171,64 +186,50 @@ function collectCandidates(input: {
         approved: true,
       });
     }
-  } else {
-    for (const entry of profile.selectedAreas || []) {
-      if (entry.selected === false) {
-        rejected.push({ name: entry.areaName, reason: "operator deselected in profile" });
-        continue;
-      }
+  }
+
+  if (!hasExplicitSavedSelection) {
+    for (const name of profile.coverageAreas || []) {
       add({
-        name: entry.areaName,
-        source: "operator-confirmed:profile.selectedAreas",
-        evidence: entryEvidence(entry, discovery),
-        priority: entry.priority ?? 50,
-        order: entry.order ?? 99,
-        areaType: entry.areaType || "neighbourhood",
+        name: String(name),
+        source: "business-profile:coverageAreas",
+        evidence: ["business-profile coverageAreas"],
+        priority: 40,
+        order: 100,
+        areaType: "coverage",
         approved: true,
       });
     }
-  }
 
-  for (const name of profile.coverageAreas || []) {
-    add({
-      name: String(name),
-      source: "business-profile:coverageAreas",
-      evidence: ["business-profile coverageAreas"],
-      priority: 40,
-      order: 100,
-      areaType: "coverage",
-      approved: true,
-    });
-  }
-
-  for (const name of profile.rankingAreas || []) {
-    add({
-      name: String(name),
-      source: "business-profile:rankingAreas",
-      evidence: ["business-profile rankingAreas"],
-      priority: 35,
-      order: 110,
-      areaType: "ranking",
-      approved: true,
-    });
-  }
-
-  if (discovery?.areas.length) {
-    for (const row of discovery.areas) {
-      if (row.selected === false) {
-        rejected.push({ name: row.areaName, reason: "area discovery not selected for generation" });
-        continue;
-      }
+    for (const name of profile.rankingAreas || []) {
       add({
-        name: row.areaName,
-        source: "local-intelligence:area-discovery",
-        evidence: [`discovery:${row.reason}`, ...row.evidence.slice(0, 3)],
-        priority: row.rank != null ? 100 - row.rank : 30,
-        order: row.rank ?? 120,
-        areaType: row.tier || row.priorityLabel || "discovery",
+        name: String(name),
+        source: "business-profile:rankingAreas",
+        evidence: ["business-profile rankingAreas"],
+        priority: 35,
+        order: 110,
+        areaType: "ranking",
         approved: true,
-        distanceLabel: row.distanceLabel,
       });
+    }
+
+    if (discovery?.areas.length) {
+      for (const row of discovery.areas) {
+        if (row.selected === false) {
+          rejected.push({ name: row.areaName, reason: "area discovery not selected for generation" });
+          continue;
+        }
+        add({
+          name: row.areaName,
+          source: "local-intelligence:area-discovery",
+          evidence: [`discovery:${row.reason}`, ...row.evidence.slice(0, 3)],
+          priority: row.rank != null ? 100 - row.rank : 30,
+          order: row.rank ?? 120,
+          areaType: row.tier || row.priorityLabel || "discovery",
+          approved: true,
+          distanceLabel: row.distanceLabel,
+        });
+      }
     }
   }
 

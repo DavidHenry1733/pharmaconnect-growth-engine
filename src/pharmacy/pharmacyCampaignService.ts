@@ -40,6 +40,14 @@ export interface CampaignAreaEntry {
   selected: boolean;
   source: string;
   priority: number;
+  areaId?: string;
+  areaSlug?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  distanceKm?: number | null;
+  distanceLabel?: string;
+  distanceMethod?: string;
+  distanceProvenance?: Record<string, unknown>;
 }
 
 export type CampaignGoal =

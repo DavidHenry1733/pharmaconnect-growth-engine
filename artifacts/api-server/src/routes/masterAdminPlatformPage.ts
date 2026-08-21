@@ -3853,7 +3853,6 @@ async function generateCampaignLocalityPages(){
   const camp=selectedCampaignRef();
   if(!camp)return;
   if(!window.confirm('Generate locality pages for '+camp.serviceName+' using this campaign’s selected locality areas? This creates one job and does not publish.'))return;
-  await saveCampaignLocalitySelection();
   localityJobInFlight=true;
   const statusEl=document.getElementById('campaignLocalityMsg');
   const genBtn=document.getElementById('campaignLocalityGenerateBtn');
