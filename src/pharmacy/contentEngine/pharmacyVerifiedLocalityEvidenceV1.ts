@@ -15,6 +15,7 @@ import type { ProfileLocalEntity } from "../pharmacyProfileLocalIntelligenceSele
 import { slugifyArea } from "../pharmacyAreaNarrativeProfiles.ts";
 import { PHARMACY_WORKSPACE_ROOT } from "../pharmacyWorkspacePaths.ts";
 import { resolveTenantProfileSlug } from "../pharmacyTenantSlug.ts";
+import type { ProfileAreaEntry } from "../pharmacyProfileSchema.ts";
 
 export type LocalityEvidenceKind =
   | "distance"
@@ -194,6 +195,22 @@ function pharmacyCoords(ctx: ContentGenerationContext): { lat: number | null; ln
   return { lat: null, lng: null, provenance: "" };
 }
 
+function selectedAreaEntry(ctx: ContentGenerationContext, areaName: string): ProfileAreaEntry | null {
+  const rows = ctx.rawProfile?.selectedAreas;
+  if (!Array.isArray(rows)) return null;
+  const needle = areaName.trim().toLowerCase();
+  return rows.find((row) => String(row.areaName || "").trim().toLowerCase() === needle) || null;
+}
+
+function savedDistanceIsUsable(entry: ProfileAreaEntry | null): boolean {
+  if (!entry) return false;
+  const method = String(entry.distanceMethod || "").trim().toLowerCase();
+  const label = String(entry.distanceLabel || "").trim();
+  if (!method || method === "none") return false;
+  if (!label || /^distance unavailable$/i.test(label)) return false;
+  return entry.distanceKm != null && Number.isFinite(Number(entry.distanceKm));
+}
+
 function parseSavedCoordsFromEvidence(lines: string[]): { lat: number; lng: number } | null {
   for (const line of lines) {
     const match = String(line || "").match(
@@ -321,6 +338,7 @@ function bindOne(
   const slug = ctx.resolvedSlug;
   const pack = loadSavedRelevancePack(slug, areaSlug);
   const discovery = areaDiscoveryForName(ctx.areaDiscovery, areaName);
+  const savedArea = selectedAreaEntry(ctx, areaName);
 
   const savedLandmarks = packEntities(pack, ["topLandmarks", "landmarks", "community"]).map((e) =>
     factFromSaved(e, "local-relevance-pack:google-or-saved"),
@@ -396,18 +414,24 @@ function bindOne(
   );
   const centroid = centroidFromEntities(located);
   const pharmacy = pharmacyCoords(ctx);
+  const savedLat = num(savedArea?.latitude);
+  const savedLng = num(savedArea?.longitude);
   const evidenceCoords = parseSavedCoordsFromEvidence([
     ...(discovery?.evidence || []),
     ...(localityRecord?.evidence || []),
+    savedLat != null && savedLng != null ? `saved-coords:${savedLat},${savedLng}` : "",
   ]);
 
-  let latitude = centroid?.lat ?? evidenceCoords?.lat ?? null;
-  let longitude = centroid?.lng ?? evidenceCoords?.lng ?? null;
-  let coordinateProvenance = centroid
-    ? "saved-google-entity-locations:centroid"
-    : evidenceCoords
-      ? "area-discovery:saved-coords"
-      : "";
+  let latitude = savedLat ?? centroid?.lat ?? evidenceCoords?.lat ?? null;
+  let longitude = savedLng ?? centroid?.lng ?? evidenceCoords?.lng ?? null;
+  let coordinateProvenance =
+    savedLat != null && savedLng != null
+      ? "profile.selectedAreas:google-coordinates"
+      : centroid
+        ? "saved-google-entity-locations:centroid"
+        : evidenceCoords
+          ? "area-discovery:saved-coords"
+          : "";
   let distanceKm: number | null = null;
   let distanceLabel = "";
   let distanceProvenance = "";
@@ -420,6 +444,15 @@ function bindOne(
     distanceProvenance = `haversine:${pharmacy.provenance}->${coordinateProvenance}`;
     cardinalDirection = cardinalFromBearing(bearingDegrees(pharmacy.lat, pharmacy.lng, latitude, longitude));
     directionProvenance = distanceProvenance;
+  }
+  if (savedDistanceIsUsable(savedArea) && savedArea) {
+    distanceKm = Number(savedArea.distanceKm);
+    distanceLabel = String(savedArea.distanceLabel || "").trim();
+    const source =
+      savedArea.distanceProvenance && typeof savedArea.distanceProvenance.distanceSource === "string"
+        ? String(savedArea.distanceProvenance.distanceSource)
+        : "google-coordinates";
+    distanceProvenance = `profile.selectedAreas:${savedArea.distanceMethod}:${source}`;
   }
 
   const discoveryReason = String(discovery?.reason || localityRecord?.relationship || "").trim();

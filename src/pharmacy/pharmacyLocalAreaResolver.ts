@@ -98,6 +98,15 @@ function entryEvidence(entry: ProfileAreaEntry, discovery: AreaDiscoverySnapshot
   if (entry.areaType) out.push(`profile.areaType:${entry.areaType}`);
   if (entry.confidence != null) out.push(`profile.confidence:${entry.confidence}`);
   if (entry.tier) out.push(`profile.tier:${entry.tier}`);
+  if (entry.latitude != null && entry.longitude != null) {
+    out.push(`saved-coords:${entry.latitude},${entry.longitude}`);
+  }
+  if (entry.distanceMethod && entry.distanceMethod !== "none") {
+    out.push(`distance-method:${entry.distanceMethod}`);
+  }
+  if (entry.distanceLabel && !/^distance unavailable$/i.test(entry.distanceLabel)) {
+    out.push(`distance:${entry.distanceLabel}`);
+  }
   const disc = areaDiscoveryForName(discovery, entry.areaName);
   if (disc) {
     out.push(`area-discovery:${disc.reason || "candidate"}`);

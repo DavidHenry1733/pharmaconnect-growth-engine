@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { resolveLocalityIntelligencePack } from "./pharmacyLocalityIntelligencePackV1.ts";
 import { bindVerifiedLocalityEvidenceV1 } from "./pharmacyVerifiedLocalityEvidenceV1.ts";
 import { composeCommercialClusterNarrativeV1 } from "../pharmacyLocalClusterContentEngine.ts";
@@ -126,6 +127,10 @@ function mockCtx(): ContentGenerationContext {
         order: i + 1,
         priority: i + 1,
         source: "operator-confirmed",
+        latitude: a.lat,
+        longitude: a.lng,
+        distanceMethod: "haversine",
+        distanceProvenance: { calculationMethod: "haversine", distanceSource: "google-coordinates" },
       })),
     },
     localMarket: {
@@ -250,6 +255,33 @@ async function main() {
     }
   }
 
+  const livePages = AREAS.map((area) => {
+    const file = path.join(liveRoot, area.slug, "index.html");
+    return fs.existsSync(file) ? { areaSlug: area.slug, areaName: area.name, html: fs.readFileSync(file, "utf8") } : null;
+  }).filter(Boolean) as Array<{ areaSlug: string; areaName: string; html: string }>;
+  const livePairs: Array<{ a: string; b: string; exactAfterNameStrip: boolean; score: number }> = [];
+  for (let i = 0; i < livePages.length; i++) {
+    for (let j = i + 1; j < livePages.length; j++) {
+      const a = livePages[i]!;
+      const b = livePages[j]!;
+      const na = normalizeCopyForSimilarity(a.html, AREAS.map((x) => x.name), "Yorkshire Pharmacy & Health Clinic");
+      const nb = normalizeCopyForSimilarity(b.html, AREAS.map((x) => x.name), "Yorkshire Pharmacy & Health Clinic");
+      livePairs.push({
+        a: a.areaName,
+        b: b.areaName,
+        exactAfterNameStrip: na === nb,
+        score: Number(copySimilarityScore(na, nb).toFixed(3)),
+      });
+    }
+  }
+  const liveDarfieldGrimethorpe = livePairs.find((p) => p.a === "Darfield" && p.b === "Grimethorpe");
+  record(
+    "before-fix:live-html-darfield-grimethorpe",
+    Boolean(liveDarfieldGrimethorpe?.exactAfterNameStrip || (liveDarfieldGrimethorpe && liveDarfieldGrimethorpe.score >= 0.95)),
+    JSON.stringify(liveDarfieldGrimethorpe || { missing: true, compared: livePages.length }),
+  );
+  fs.writeFileSync(path.join(OUT, "before-fix-live-html-pairs.json"), JSON.stringify(livePairs, null, 2));
+
   // 1. Before-fix reconstruction
   const beforePairs: Array<{ a: string; b: string; sections: Record<string, { exact: boolean; score: number }> }> = [];
   const beforeByArea = Object.fromEntries(AREAS.map((a) => [a.name, inventedBeforePack(a.name)]));
@@ -285,6 +317,8 @@ async function main() {
   );
   const headingley = resolveLocalityIntelligencePack({ areaName: "Headingley" });
   record("compat:headingley-pack-retained", headingley.landmarks.some((l) => /stadium/i.test(l)), headingley.landmarks.join(", "));
+  const srcPack = fs.readFileSync(path.join(ROOT, "src/pharmacy/contentEngine/pharmacyLocalityIntelligencePackV1.ts"), "utf8");
+  record("pack:synthesizePack-removed", !/\bfunction synthesizePack\b|\bsynthesizePack\(/.test(srcPack), "no synthesizePack fallback");
 
   const packDir = writePacks();
   const ctx = mockCtx();
@@ -449,6 +483,20 @@ async function main() {
 
   const previewPattern = `/api/pharmacy-content-ecosystem-preview/${SERVICE}/local/cudworth/?slug=`;
   record("preview:tenant-aware-pattern", previewPattern.includes("?slug="), previewPattern);
+  const required = [
+    "aa3b85c100e3fb77ddc5af2fb690eef4e7667b8f",
+    "f8f5801916bb87df6bc0b3a15626ca85c441b87e",
+    "c66e63f88e1687d673881eff970c1d46813258da",
+  ];
+  const ancestors = required.filter((sha) => {
+    try {
+      execFileSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: ROOT, stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  record("required-earlier-fixes-present", ancestors.length === 3, ancestors.join(",") || "none");
 
   const srcFiles: string[] = [];
   const walk = (dir: string) => {
