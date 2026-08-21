@@ -1364,7 +1364,8 @@ export async function executeMasterAdminAction(
           const { runCompetitorAnalysisWorkflowAction } = await import(
             "./masterAdminCommercialIntelligenceWorkflowService.ts"
           );
-          const out = await runCompetitorAnalysisWorkflowAction(safe, user);
+          const executingJobId = typeof body.masterAdminJobId === "string" ? body.masterAdminJobId : null;
+          const out = await runCompetitorAnalysisWorkflowAction(safe, user, executingJobId);
           result = out;
           if (!out.ok) {
             status = "error";

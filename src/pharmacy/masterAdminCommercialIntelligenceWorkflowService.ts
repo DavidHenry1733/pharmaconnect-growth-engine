@@ -138,10 +138,15 @@ function intelligenceRevisionBundle(slug: string) {
 export function findActiveCommercialIntelligenceJob(
   slug: string,
   actions: Set<string>,
+  excludeJobId?: string | null,
 ): MasterAdminJob | null {
+  const exclude = String(excludeJobId || "").trim();
   return (
     listMasterAdminJobs({ slug, limit: 20 }).find(
-      (j) => actions.has(j.action) && (j.status === "queued" || j.status === "claimed" || j.status === "running"),
+      (j) =>
+        actions.has(j.action) &&
+        (j.status === "queued" || j.status === "claimed" || j.status === "running") &&
+        (!exclude || j.id !== exclude),
     ) || null
   );
 }
@@ -149,6 +154,7 @@ export function findActiveCommercialIntelligenceJob(
 export async function runCompetitorAnalysisWorkflowAction(
   slug: string,
   operator: string,
+  executingJobId?: string | null,
 ): Promise<CommercialIntelligenceWorkflowResult> {
   if (isNationalGrowthPlatform(slug)) {
     return {
@@ -160,8 +166,9 @@ export async function runCompetitorAnalysisWorkflowAction(
       ],
     };
   }
-  const active = findActiveCommercialIntelligenceJob(slug, COMPETITOR_JOB_ACTIONS);
-  if (active) {
+  const selfId = String(executingJobId || "").trim();
+  const active = findActiveCommercialIntelligenceJob(slug, COMPETITOR_JOB_ACTIONS, selfId || null);
+  if (active && active.id !== selfId) {
     return {
       ok: true,
       evidence: `Competitor Analysis job already ${active.status}`,
