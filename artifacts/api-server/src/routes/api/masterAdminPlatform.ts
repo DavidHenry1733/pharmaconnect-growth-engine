@@ -116,6 +116,7 @@ import {
   prepareGenerationSetup,
   saveGenerationSetupLocalAreas,
 } from "../../../../../src/pharmacy/masterAdminGenerationSetupService.ts";
+import { hydrateLocalCoverageGoogleLocalities } from "../../../../../src/pharmacy/masterAdminLocalCoverageRecommendationService.ts";
 import { persistComponentDnaFromBrandEvidence } from "../../../../../src/pharmacy/masterAdminComponentDnaPersistenceService.ts";
 import { buildBusinessProfileReview, acceptAllSafeRecommendations, saveBusinessProfileReviewField } from "../../../../../src/pharmacy/masterAdminBusinessProfileReviewService.ts";
 import { runMasterAdminCapabilityAudit } from "../../../../../src/pharmacy/masterAdminCapabilityAuditService.ts";
@@ -309,10 +310,15 @@ router.get("/master-admin-platform/generation-setup", (req, res) => {
   res.json({ ok: true, setup });
 });
 
-router.get("/master-admin-platform/generation-setup/local-areas", (req, res) => {
+router.get("/master-admin-platform/generation-setup/local-areas", async (req, res) => {
   const slug = req.query.slug ? safeAdminSlug(String(req.query.slug)) : "banner-cross-pharmacy";
-  const recommendations = buildLocalAreaRecommendations(slug);
-  res.json({ ok: true, ...recommendations });
+  try {
+    await hydrateLocalCoverageGoogleLocalities(slug);
+    const recommendations = buildLocalAreaRecommendations(slug);
+    res.json({ ok: true, ...recommendations });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 router.post("/master-admin-platform/generation-setup/component-dna/persist", (req, res) => {
@@ -337,9 +343,10 @@ router.post("/master-admin-platform/generation-setup/local-areas/save", (req, re
   }
 });
 
-router.post("/master-admin-platform/generation-setup/local-areas/accept-recommended", (req, res) => {
+router.post("/master-admin-platform/generation-setup/local-areas/accept-recommended", async (req, res) => {
   const slug = safeAdminSlug(String(req.body.slug || "banner-cross-pharmacy"));
   try {
+    await hydrateLocalCoverageGoogleLocalities(slug);
     const setup = acceptRecommendedLocalAreas(slug);
     const validation = runPreGenerationValidation(slug);
     res.json({ ok: true, setup, validation });
@@ -360,10 +367,15 @@ router.get("/master-admin-platform/local-coverage", (req, res) => {
   res.json({ ok: true, localCoverage: setup });
 });
 
-router.get("/master-admin-platform/local-coverage/areas", (req, res) => {
+router.get("/master-admin-platform/local-coverage/areas", async (req, res) => {
   const slug = req.query.slug ? safeAdminSlug(String(req.query.slug)) : "banner-cross-pharmacy";
-  const recommendations = buildLocalAreaRecommendations(slug);
-  res.json({ ok: true, ...recommendations });
+  try {
+    await hydrateLocalCoverageGoogleLocalities(slug);
+    const recommendations = buildLocalAreaRecommendations(slug);
+    res.json({ ok: true, ...recommendations });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 router.post("/master-admin-platform/local-coverage/save", (req, res) => {
@@ -381,9 +393,10 @@ router.post("/master-admin-platform/local-coverage/save", (req, res) => {
   }
 });
 
-router.post("/master-admin-platform/local-coverage/accept-recommended", (req, res) => {
+router.post("/master-admin-platform/local-coverage/accept-recommended", async (req, res) => {
   const slug = safeAdminSlug(String(req.body.slug || "banner-cross-pharmacy"));
   try {
+    await hydrateLocalCoverageGoogleLocalities(slug);
     const setup = acceptRecommendedLocalAreas(slug);
     const validation = runPreGenerationValidation(slug);
     res.json({ ok: true, setup, validation });

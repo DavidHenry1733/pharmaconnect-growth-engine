@@ -2,23 +2,21 @@
  * Master Admin onboarding — automatic local area discovery (Local SEO Engine reuse).
  */
 import { createHash } from "node:crypto";
-import { loadCityAreaData } from "../area/loadCityAreaData.ts";
 import { readSetupProfile, writeSetupProfile } from "./growthEngineCustomerSetupImportSplitService.ts";
 import {
   LOCAL_AREA_MINIMUM_FOR_LOCAL_PAGES,
   saveGenerationSetupLocalAreas,
 } from "./masterAdminGenerationSetupService.ts";
-import { discoverPharmacyAreas } from "./pharmacyAreaDiscoveryService.ts";
 import {
-  evaluateAreaNameForDiscovery,
-  RECOMMENDED_SELECTED_AREAS,
-} from "./pharmacyAreaSelectionService.ts";
+  buildLocalCoverageRecommendations,
+  distanceForLocalCoverageArea,
+} from "./masterAdminLocalCoverageRecommendationService.ts";
+import { DISTANCE_UNAVAILABLE_LABEL } from "./masterAdminLocalCoverageGeoService.ts";
 import type { PharmacyProfileData, ProfileAreaEntry } from "./pharmacyProfileSchema.ts";
 import { safeAdminSlug } from "./pharmacyMasterAdminService.ts";
 import { isNationalMarketScope, resolvePrimaryMarket } from "./masterAdminMarketScopeService.ts";
 
 export const ONBOARDING_AREA_DISCOVERY_SOURCE = "onboarding-area-discovery-v1";
-export const MAX_ONBOARDING_DISCOVERY_DISTANCE_KM = 12;
 
 export interface OnboardingDiscoveredArea {
   areaId: string;
@@ -72,28 +70,13 @@ function discoveryInputRevision(input: {
   return createHash("sha1").update(raw).digest("hex").slice(0, 12);
 }
 
-function mapAreaType(entry: ProfileAreaEntry): OnboardingDiscoveredArea["type"] {
-  if (entry.source === "manual" || entry.source === "operator") return "service area";
-  const label = text(entry.areaType).toLowerCase();
+function mapCoverageType(areaType: string, source: string): OnboardingDiscoveredArea["type"] {
+  if (source === "manual" || source === "operator") return "service area";
+  const label = text(areaType).toLowerCase();
+  if (label.includes("primary")) return "primary locality";
   if (label.includes("priority") || label.includes("district")) return "district";
   if (label.includes("neighbourhood") || label.includes("secondary")) return "neighbourhood";
   return "nearby locality";
-}
-
-function distanceMeta(town: string, areaName: string): { km: number | null; label: string } {
-  try {
-    const cityData = loadCityAreaData(town);
-    const profile = cityData.areas.find((a) => a.name.toLowerCase() === areaName.toLowerCase());
-    if (profile?.distanceKm != null) {
-      return {
-        km: profile.distanceKm,
-        label: `Approx. ${profile.distanceKm} km from ${town}`,
-      };
-    }
-  } catch {
-    /* ignore */
-  }
-  return { km: null, label: "Distance unavailable" };
 }
 
 function readinessLabel(selectedCount: number): { label: string; warning: string | null } {
@@ -155,18 +138,13 @@ export function discoverOnboardingAreasForProfile(
 
   const preserved = preservedSelectionMap(profile);
   const hasConfirmedSelection = [...preserved.values()].some((a) => a.selected !== false);
-
-  const discovery = discoverPharmacyAreas({
-    town: primaryTown,
-    limit: 15,
-    preserveSelection: profile.selectedAreas || [],
-  });
+  const coverage = buildLocalCoverageRecommendations(safe, { limit: 15 });
 
   const rejected: Array<{ name: string; reason: string }> = [];
   const seen = new Set<string>();
   const areas: OnboardingDiscoveredArea[] = [];
 
-  for (const [index, entry] of discovery.areas.entries()) {
+  for (const entry of coverage.areas) {
     const name = text(entry.areaName);
     if (!name) continue;
     const key = areaSlug(name);
@@ -175,33 +153,22 @@ export function discoverOnboardingAreasForProfile(
       continue;
     }
 
-    const distance = distanceMeta(primaryTown, name);
-    const filter = evaluateAreaNameForDiscovery(name, primaryTown);
-    if (!filter.accept) {
-      rejected.push({ name, reason: filter.reason || "Filtered" });
-      continue;
-    }
-    if (distance.km != null && distance.km > MAX_ONBOARDING_DISCOVERY_DISTANCE_KM) {
-      rejected.push({ name, reason: "Excessively distant" });
-      continue;
-    }
-
     seen.add(key);
     const saved = preserved.get(name.toLowerCase());
-    const recommended = index < RECOMMENDED_SELECTED_AREAS;
-    const selected = saved ? saved.selected !== false : hasConfirmedSelection ? false : recommended;
+    const recommended = Boolean(entry.recommended && entry.distanceKm != null);
+    const selected = saved ? saved.selected !== false : hasConfirmedSelection ? false : false;
 
     areas.push({
       areaId: key,
       areaName: name,
       slug: key,
-      type: mapAreaType(entry),
-      parentTown: primaryTown,
-      source: entry.source || discovery.source,
-      evidence: `Discovered from ${primaryTown} local market data`,
-      distanceKm: distance.km,
-      distanceLabel: distance.label,
-      confidence: entry.confidence ?? 70,
+      type: mapCoverageType(entry.areaType, entry.evidenceSource),
+      parentTown: coverage.branchLocality || primaryTown,
+      source: entry.evidenceSource || coverage.discoverySource,
+      evidence: entry.evidenceLimitation || `Google location evidence · ${entry.distanceMethod}`,
+      distanceKm: entry.distanceKm,
+      distanceLabel: entry.distanceLabel || DISTANCE_UNAVAILABLE_LABEL,
+      confidence: entry.confidence,
       recommended,
       selected,
       generationEligible: selected,
@@ -243,6 +210,9 @@ export function discoverOnboardingAreasForProfile(
     source: a.source,
     confidence: a.confidence,
     tier: a.recommended ? "priority" : "secondary",
+    distanceKm: a.distanceKm,
+    distanceLabel: a.distanceLabel,
+    distanceMethod: a.distanceKm != null ? "haversine" : "none",
   }));
 
   writeSetupProfile(safe, {
@@ -277,24 +247,29 @@ function buildStateFromProfile(
   primaryTown: string,
   revision: string,
 ): OnboardingAreaDiscoveryState {
-  const preserved = preservedSelectionMap(profile);
-  const areas: OnboardingDiscoveredArea[] = (profile.selectedAreas || []).map((entry, index) => {
+  const coverageByName = new Map(
+    buildLocalCoverageRecommendations(slug).areas.map((area) => [area.areaName.toLowerCase(), area]),
+  );
+  const areas: OnboardingDiscoveredArea[] = (profile.selectedAreas || []).map((entry) => {
     const name = text(entry.areaName);
-    const distance = distanceMeta(primaryTown, name);
-    const recommended = index < RECOMMENDED_SELECTED_AREAS;
+    const coverage = coverageByName.get(name.toLowerCase());
+    const distance = coverage
+      ? { km: coverage.distanceKm, label: coverage.distanceLabel }
+      : distanceForLocalCoverageArea(slug, name);
+    const recommended = Boolean(coverage?.recommended && coverage.distanceKm != null);
     return {
       areaId: areaSlug(name),
       areaName: name,
       slug: areaSlug(name),
-      type: mapAreaType(entry),
+      type: mapCoverageType(coverage?.areaType || entry.areaType || "", entry.source),
       parentTown: primaryTown,
       source: entry.source || ONBOARDING_AREA_DISCOVERY_SOURCE,
       evidence: entry.source === "manual" || entry.source === "operator"
         ? "Operator custom area"
-        : `Discovered from ${primaryTown} local market data`,
+        : coverage?.evidenceLimitation || `Google location evidence · ${coverage?.distanceMethod || "none"}`,
       distanceKm: distance.km,
-      distanceLabel: distance.label,
-      confidence: entry.confidence ?? 70,
+      distanceLabel: distance.label || DISTANCE_UNAVAILABLE_LABEL,
+      confidence: coverage?.confidence ?? entry.confidence ?? 70,
       recommended,
       selected: entry.selected !== false,
       generationEligible: entry.selected !== false,
