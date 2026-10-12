@@ -2,36 +2,35 @@
 /**
  * Apply the controlled delivery-engine pilot indexing cohort:
  * hub + 5 local pages index,follow; remaining suburb pages noindex,follow;
- * sitemap-pilot.xml contains strictly those 6 URLs.
+ * sitemap-pilot.xml contains strictly those 6 URLs. Generates Whiston from the
+ * Kimberworth territory template when the live page is missing.
  */
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyRobotsMeta,
-  buildPilotSitemapXml,
   listDeliveryPilotPages,
   listPilotSitemapPages,
   loadDeliveryPilotCohort,
   localHtmlRelativePath,
-  minimalIndexableHtml,
   NOINDEX_FOLLOW,
   type DeliveryPilotPage,
 } from "../src/pharmacy/deliveryEnginePilotIndexing.ts";
+import {
+  deliveryOutputRoot,
+  ensureWhistonOnHub,
+  generateWhistonHtmlFromKimberworth,
+  materializeDeliveryPageFiles,
+  rootDeliveryHtaccess,
+  writePilotSitemaps,
+  writeUtf8,
+} from "../src/pharmacy/deliveryEnginePublicService.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 if (!process.env.WORKSPACE_ROOT) process.env.WORKSPACE_ROOT = ROOT;
 
-const OUTPUT_ROOT = path.join(ROOT, "output/delivery-engine");
-const TRACKED_SITEMAP = path.join(ROOT, "delivery/sitemap-pilot.xml");
-
-function writeFile(filePath: string, contents: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, contents, "utf8");
-}
-
 async function fetchLiveHtml(page: DeliveryPilotPage): Promise<string | null> {
-  const candidates = page.kind === "hub" ? [page.url, `${page.url}/`] : [page.url, `${page.url}/`];
+  const candidates = [page.url, `${page.url}/`];
   for (const url of candidates) {
     try {
       const res = await fetch(url, { redirect: "follow" });
@@ -54,26 +53,52 @@ async function main(): Promise<void> {
     throw new Error(`Pilot sitemap must contain 6 URLs, found ${sitemapPages.length}`);
   }
 
-  fs.mkdirSync(OUTPUT_ROOT, { recursive: true });
-  const results: Array<{ url: string; robots: string; source: "live" | "stub"; path: string }> = [];
-
+  const fetched = new Map<string, string>();
   for (const page of pages) {
     const live = await fetchLiveHtml(page);
-    const source = live ? "live" : "stub";
-    if (!live && page.robots === NOINDEX_FOLLOW) {
-      throw new Error(`Missing live HTML for noindex suburb ${page.url}`);
-    }
-    const html = applyRobotsMeta(live ?? minimalIndexableHtml(page), page.robots);
-    const rel = localHtmlRelativePath(page);
-    const outPath = path.join(OUTPUT_ROOT, rel);
-    writeFile(outPath, html);
-    results.push({ url: page.url, robots: page.robots, source, path: rel });
+    if (live) fetched.set(page.id, live);
   }
 
-  const sitemapXml = buildPilotSitemapXml(sitemapPages);
-  writeFile(path.join(OUTPUT_ROOT, "sitemap-pilot.xml"), sitemapXml);
-  writeFile(path.join(OUTPUT_ROOT, "sitemap.xml"), sitemapXml);
-  writeFile(TRACKED_SITEMAP, sitemapXml);
+  const kimberworth = pages.find((page) => page.slug === "kimberworth");
+  const kimberworthHtml = kimberworth ? fetched.get(kimberworth.id) : null;
+  if (!kimberworthHtml) {
+    throw new Error("Kimberworth live HTML is required to generate the Whiston territory page");
+  }
+
+  const results: Array<{ url: string; robots: string; source: "live" | "generated"; path: string }> = [];
+
+  for (const page of pages) {
+    let html = fetched.get(page.id) || null;
+    let source: "live" | "generated" = html ? "live" : "generated";
+    if (page.slug === "whiston") {
+      html = generateWhistonHtmlFromKimberworth(kimberworthHtml);
+      source = "generated";
+    } else if (page.kind === "hub" && html) {
+      html = ensureWhistonOnHub(html);
+    } else if (!html && page.robots === NOINDEX_FOLLOW) {
+      throw new Error(`Missing live HTML for noindex suburb ${page.url}`);
+    }
+    if (!html) {
+      throw new Error(`Missing HTML for ${page.url}`);
+    }
+    html = applyRobotsMeta(html, page.robots);
+    materializeDeliveryPageFiles(page, html);
+    results.push({ url: page.url, robots: page.robots, source, path: localHtmlRelativePath(page) });
+  }
+
+  const sitemapXml = writePilotSitemaps();
+  writeUtf8(path.join(deliveryOutputRoot(), "sitemap.xml"), sitemapXml);
+
+  const indexableSlugs = cohort.indexLocalPages.map((page) => page.slug);
+  const parentHtaccess = rootDeliveryHtaccess(indexableSlugs);
+  writeUtf8(
+    path.join(deliveryOutputRoot(), "delivery/reliable-direct-pharmacy-sheffield/.htaccess"),
+    parentHtaccess,
+  );
+  writeUtf8(
+    path.join(ROOT, "public/delivery/reliable-direct-pharmacy-sheffield/.htaccess"),
+    parentHtaccess,
+  );
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -83,11 +108,10 @@ async function main(): Promise<void> {
     sitemapUrls: sitemapPages.map((page) => page.url),
     pages: results,
   };
-  writeFile(path.join(OUTPUT_ROOT, "pilot-indexing-report.json"), JSON.stringify(report, null, 2));
+  writeUtf8(path.join(deliveryOutputRoot(), "pilot-indexing-report.json"), JSON.stringify(report, null, 2));
 
   console.log(JSON.stringify(report, null, 2));
-  console.log(`Wrote ${TRACKED_SITEMAP}`);
-  console.log(`Wrote ${pages.length} HTML pages under ${OUTPUT_ROOT}`);
+  console.log("Wrote delivery/sitemap-pilot.xml and public/sitemap-pilot.xml");
 }
 
 main().catch((err) => {

@@ -123,19 +123,47 @@ export function listPilotSitemapPages(cohort: DeliveryPilotCohort = loadDelivery
   return [hub, ...locals];
 }
 
+export function normalizeDeliveryPath(urlPath: string): string {
+  const raw = String(urlPath || "").split("?")[0] || "/";
+  const normalised = raw.replace(/\/+$/, "") || "/";
+  return normalised;
+}
+
+export function isDeliveryEnginePath(urlPath: string): boolean {
+  const normalised = normalizeDeliveryPath(urlPath);
+  return (
+    normalised === "/sitemap-pilot.xml" ||
+    normalised === "/delivery" ||
+    normalised.startsWith("/delivery/")
+  );
+}
+
+export function isPilotCohortPath(
+  urlPath: string,
+  cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
+): boolean {
+  const normalised = normalizeDeliveryPath(urlPath);
+  const hubPath = cohort.hub.path.replace(/\/+$/, "");
+  if (normalised === hubPath) return true;
+  const prefix = cohort.suburbPathPrefix;
+  if (!normalised.startsWith(prefix)) return false;
+  return indexLocalSlugSet(cohort).has(normalised.slice(prefix.length));
+}
+
 export function robotsDirectiveForPath(
   urlPath: string,
   cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
 ): typeof INDEX_FOLLOW | typeof NOINDEX_FOLLOW {
-  const normalised = String(urlPath || "").replace(/\/+$/, "") || "/";
-  const hubPath = cohort.hub.path.replace(/\/+$/, "");
-  if (normalised === hubPath) return INDEX_FOLLOW;
-  const prefix = cohort.suburbPathPrefix;
-  if (normalised.startsWith(prefix)) {
-    const slug = normalised.slice(prefix.length);
-    return indexLocalSlugSet(cohort).has(slug) ? INDEX_FOLLOW : NOINDEX_FOLLOW;
-  }
-  return NOINDEX_FOLLOW;
+  return isPilotCohortPath(urlPath, cohort) ? INDEX_FOLLOW : NOINDEX_FOLLOW;
+}
+
+export function xRobotsTagForDeliveryPath(
+  urlPath: string,
+  cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
+): typeof INDEX_FOLLOW | typeof NOINDEX_FOLLOW | null {
+  if (!isDeliveryEnginePath(urlPath)) return null;
+  if (normalizeDeliveryPath(urlPath) === "/sitemap-pilot.xml") return INDEX_FOLLOW;
+  return robotsDirectiveForPath(urlPath, cohort);
 }
 
 const ROBOTS_META_RE = /<meta\s+name=["']robots["']\s+content=["'][^"']*["']\s*\/?>/i;

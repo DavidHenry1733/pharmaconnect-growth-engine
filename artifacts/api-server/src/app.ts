@@ -19,6 +19,10 @@ import authRouter from "./routes/auth";
 import { logger } from "./lib/logger";
 import { ensureAdminExists } from "./lib/users";
 import { requireAuth, requireAdmin, hasValidInternalToken } from "./middlewares/requireAuth";
+import {
+  deliveryEnginePublicRouter,
+  deliveryEngineRobotsHeaderMiddleware,
+} from "./routes/deliveryEnginePublic";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -285,6 +289,9 @@ export function sanitiseSlug(raw: string): string | null {
   const clean = path.basename(raw);
   return /^[a-z0-9][a-z0-9_-]*$/.test(clean) ? clean : null;
 }
+
+app.use(deliveryEngineRobotsHeaderMiddleware);
+app.use(deliveryEnginePublicRouter);
 
 // ── Root-level sitemap + robots.txt serving (public) ─────────────────────────
 const PROJECTS_DIR = path.join(WORKSPACE_ROOT, "config", "projects");

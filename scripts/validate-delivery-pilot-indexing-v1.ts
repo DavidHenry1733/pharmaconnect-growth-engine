@@ -10,13 +10,19 @@ import {
   buildPilotSitemapXml,
   extractRobotsMeta,
   INDEX_FOLLOW,
+  isPilotCohortPath,
   listDeliveryPilotPages,
   listPilotSitemapPages,
   loadDeliveryPilotCohort,
   NOINDEX_FOLLOW,
   parseSitemapLocs,
   robotsDirectiveForPath,
+  xRobotsTagForDeliveryPath,
 } from "../src/pharmacy/deliveryEnginePilotIndexing.ts";
+import {
+  ensureWhistonOnHub,
+  generateWhistonHtmlFromKimberworth,
+} from "../src/pharmacy/deliveryEnginePublicService.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 if (!process.env.WORKSPACE_ROOT) process.env.WORKSPACE_ROOT = ROOT;
@@ -89,6 +95,42 @@ function main() {
     robotsDirectiveForPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-clifton") ===
       NOINDEX_FOLLOW,
     "Clifton",
+  );
+  record(
+    "header-richmond-index",
+    xRobotsTagForDeliveryPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-richmond") ===
+      INDEX_FOLLOW &&
+      isPilotCohortPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-richmond"),
+    "Richmond X-Robots-Tag index, follow",
+  );
+  record(
+    "header-ecclesall-noindex",
+    xRobotsTagForDeliveryPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-ecclesall") ===
+      NOINDEX_FOLLOW &&
+      !isPilotCohortPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-ecclesall"),
+    "Ecclesall X-Robots-Tag noindex, follow",
+  );
+  record(
+    "whiston-generated-from-kimberworth",
+    (() => {
+      const sample =
+        '<title>Prescription delivery for Kimberworth &amp; Greasbrough, Rotherham</title><link rel="canonical" href="https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-kimberworth" />';
+      const generated = generateWhistonHtmlFromKimberworth(sample);
+      return (
+        generated.includes("Whiston") &&
+        generated.includes("free-nhs-prescription-delivery-whiston") &&
+        !generated.includes("kimberworth") &&
+        extractRobotsMeta(generated) === INDEX_FOLLOW
+      );
+    })(),
+    "Whiston page generated with index, follow",
+  );
+  record(
+    "hub-lists-whiston",
+    ensureWhistonOnHub(
+      '<li><a href="/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-kimberworth">Kimberworth &amp; Greasbrough</a> <span>(S61)</span></li>',
+    ).includes("free-nhs-prescription-delivery-whiston"),
+    "Hub Rotherham list includes Whiston",
   );
 
   const tracked = path.join(ROOT, "delivery/sitemap-pilot.xml");
