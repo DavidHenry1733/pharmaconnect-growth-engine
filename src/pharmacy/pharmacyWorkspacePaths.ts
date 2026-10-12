@@ -287,3 +287,23 @@ export function resolveContentEcosystemIndexPath(
 export function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
 }
+
+export function getPharmacyLocalityHeroEvidencePath(slug: string, areaSlug?: string): string {
+  const s = safePharmacySlug(slug);
+  const area = String(areaSlug || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return area
+    ? path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-locality-hero-evidence", s, `${area}.json`)
+    : path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-locality-hero-evidence", `${s}.json`);
+}
+
+export function getPharmacyOpportunityCachePath(slug: string): string {
+  return path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-opportunity-cache", `${safePharmacySlug(slug)}.json`);
+}
+
+export function getPharmacyCompetitorCachePath(slug: string): string {
+  return path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-competitor-cache", `${safePharmacySlug(slug)}.json`);
+}

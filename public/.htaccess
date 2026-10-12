@@ -1,0 +1,7 @@
+# Stop the vhost-level X-Robots-Tag: index, follow from applying to
+# delivery-engine pages. Per-directory .htaccess files set the cohort value.
+<IfModule mod_headers.c>
+  <If "%{REQUEST_URI} =~ m#^/(delivery/|sitemap-pilot\.xml)#">
+    Header always unset X-Robots-Tag
+  </If>
+</IfModule>

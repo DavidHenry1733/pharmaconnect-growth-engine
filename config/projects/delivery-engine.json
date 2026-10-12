@@ -1,0 +1,7 @@
+{
+  "clientSlug": "delivery-engine",
+  "businessName": "PharmaConnect NHS Prescription Delivery",
+  "domain": "https://content.pharmaconnect.uk",
+  "primaryLocation": "Sheffield",
+  "services": ["prescription-delivery"]
+}

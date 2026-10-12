@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "name": "Reliable Direct Pharmacy NHS prescription delivery — controlled pilot indexing cohort",
+  "baseUrl": "https://content.pharmaconnect.uk",
+  "hub": {
+    "id": "primary-delivery-hub",
+    "label": "Primary Delivery Hub (Rotherham / Sheffield)",
+    "path": "/delivery/reliable-direct-pharmacy-sheffield",
+    "robots": "index, follow"
+  },
+  "indexLocalPages": [
+    {
+      "id": "rotherham-central",
+      "label": "Rotherham Central",
+      "city": "Rotherham",
+      "slug": "rotherham-central"
+    },
+    {
+      "id": "kimberworth",
+      "label": "Kimberworth",
+      "city": "Rotherham",
+      "slug": "kimberworth"
+    },
+    {
+      "id": "whiston",
+      "label": "Whiston",
+      "city": "Rotherham",
+      "slug": "whiston"
+    },
+    {
+      "id": "richmond",
+      "label": "Richmond",
+      "city": "Sheffield",
+      "slug": "richmond"
+    },
+    {
+      "id": "norton",
+      "label": "Norton",
+      "city": "Sheffield",
+      "slug": "norton"
+    }
+  ],
+  "suburbPathPrefix": "/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-",
+  "indexRobots": "index, follow",
+  "noindexRobots": "noindex, follow",
+  "suburbSlugs": [
+    "city-centre",
+    "broomhall",
+    "kelham-island",
+    "highfield",
+    "norfolk-park",
+    "park-hill",
+    "arbourthorne",
+    "hillsborough",
+    "walkley",
+    "stannington",
+    "wisewood",
+    "loxley",
+    "nether-edge",
+    "millhouses",
+    "carter-knowle",
+    "abbeydale",
+    "woodseats",
+    "heeley",
+    "meersbrook",
+    "norton",
+    "batemoor",
+    "broomhill",
+    "crookes",
+    "fulwood",
+    "ranmoor",
+    "crosspool",
+    "ecclesall",
+    "sharrow-vale",
+    "endcliffe",
+    "bents-green",
+    "intake",
+    "birley",
+    "frecheville",
+    "charnock",
+    "hackenthorpe",
+    "handsworth",
+    "richmond",
+    "woodhouse",
+    "mosborough",
+    "crystal-peaks",
+    "westfield",
+    "waterthorpe",
+    "rotherham-central",
+    "kimberworth",
+    "whiston",
+    "clifton",
+    "wickersley"
+  ]
+}
