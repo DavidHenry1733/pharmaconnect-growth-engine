@@ -31,6 +31,11 @@ export function resolveClusterPageSlug(input: string): string {
   return normalizeClusterAreaSlug(input);
 }
 
+/** Sitemap / catchment slug: "Ecclesall" | "cluster-ecclesall" → "ecclesall". */
+export function sitemapLocalitySlug(name: string, fallbackSlug = ""): string {
+  return resolveClusterPageSlug(name) || resolveClusterPageSlug(fallbackSlug);
+}
+
 export function resolveClusterPageUrlPath(input: string): string {
   const pageSlug = resolveClusterPageSlug(input);
   return pageSlug ? `/local/${pageSlug}/` : "";

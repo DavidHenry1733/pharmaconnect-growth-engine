@@ -1,0 +1,127 @@
+diff --git a/src/pharmacy/contentEngine/pharmacyAiLocalPageCandidatePaths.ts b/src/pharmacy/contentEngine/pharmacyAiLocalPageCandidatePaths.ts
+index 01a104f..42ad2a5 100644
+--- a/src/pharmacy/contentEngine/pharmacyAiLocalPageCandidatePaths.ts
++++ b/src/pharmacy/contentEngine/pharmacyAiLocalPageCandidatePaths.ts
+@@ -170,6 +170,7 @@ export const BROOK_DERBY_DEMO_SLUG = "brook-pharmacy-demo-derby";
+ export const BROOK_DERBY_FIRST_LOCAL_AREA_SLUG = "allestree";
+ export const BROOK_DERBY_FIRST_LOCAL_AREA_NAME = "Allestree";
+ export const AI_LOCAL_PILOT_CONTRACT_VERSION_V3 = "v3";
++export const AI_LOCAL_FULL_PAGE_UNIQUENESS_VERSION = "full-page-uniqueness-v1";
+ 
+ function parsePilotVersionNumber(folder: string): number | null {
+   const match = /^v(\d+)$/.exec(String(folder || ""));
+diff --git a/src/pharmacy/dashboardCustomerStore.ts b/src/pharmacy/dashboardCustomerStore.ts
+index ef30f53..8ea5f3b 100644
+--- a/src/pharmacy/dashboardCustomerStore.ts
++++ b/src/pharmacy/dashboardCustomerStore.ts
+@@ -565,3 +565,40 @@ export function buildGenerationHierarchy(customer: PharmacyCustomerRecord, servi
+ export function mapsEmbedBaseUrl(): string {
+   return "https://maps.google.com/maps?hl=en&z=15&output=embed";
+ }
++
++export function persistCustomerOpportunityData(slug: string, data: unknown): void {
++  const key = str(slug).toLowerCase();
++  if (!key) return;
++  const file = path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-opportunity-cache", `${key}.json`);
++  fs.mkdirSync(path.dirname(file), { recursive: true });
++  fs.writeFileSync(file, JSON.stringify(data, null, 2));
++}
++
++export function persistCustomerCompetitorData(slug: string, data: unknown): void {
++  const key = str(slug).toLowerCase();
++  if (!key) return;
++  const file = path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-competitor-cache", `${key}.json`);
++  fs.mkdirSync(path.dirname(file), { recursive: true });
++  fs.writeFileSync(file, JSON.stringify(data, null, 2));
++}
++
++export function upsertPharmacyCustomer(customer: PharmacyCustomerRecord): PharmacyCustomerRecord {
++  const slug = str(customer.slug).toLowerCase();
++  if (!slug || isRejectedSandboxSlug(slug)) {
++    throw new Error("Refusing to upsert a rejected or empty pharmacy customer slug");
++  }
++  const filePath = customerFileCandidates().find((candidate) => fs.existsSync(candidate)) || customerFileCandidates()[0];
++  let parsed: { pharmacies?: unknown[]; [key: string]: unknown } = { version: 1, pharmacies: [] };
++  if (fs.existsSync(filePath)) {
++    parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as { pharmacies?: unknown[] };
++  }
++  const pharmacies = Array.isArray(parsed.pharmacies) ? [...parsed.pharmacies] : [];
++  const idx = pharmacies.findIndex((row) => str((row as { slug?: unknown } | null)?.slug).toLowerCase() === slug);
++  const record = { ...customer, slug };
++  if (idx >= 0) pharmacies[idx] = { ...(pharmacies[idx] as object), ...record };
++  else pharmacies.push(record);
++  fs.mkdirSync(path.dirname(filePath), { recursive: true });
++  fs.writeFileSync(filePath, JSON.stringify({ ...parsed, pharmacies }, null, 2));
++  catalogCache = null;
++  return findPharmacyCustomer(slug) || record;
++}
+diff --git a/src/pharmacy/pharmacyAcceptedPageRouteResolverV1.ts b/src/pharmacy/pharmacyAcceptedPageRouteResolverV1.ts
+index 36d5caf..e66259f 100644
+--- a/src/pharmacy/pharmacyAcceptedPageRouteResolverV1.ts
++++ b/src/pharmacy/pharmacyAcceptedPageRouteResolverV1.ts
+@@ -175,3 +175,21 @@ export function applyAcceptedPharmacyFirstPreviewLinks(
+   }
+   return out;
+ }
++
++export function isPublicBrookSalesDemoHubVisualExperienceGet(input: {
++  method: string;
++  path?: string;
++  originalUrl?: string;
++  url?: string;
++  query?: Record<string, unknown>;
++}): boolean {
++  const method = String(input.method || "").toUpperCase();
++  if (method !== "GET" && method !== "HEAD") return false;
++  const blob = [input.originalUrl, input.path, input.url, JSON.stringify(input.query || {})]
++    .join("\n")
++    .toLowerCase();
++  return (
++    blob.includes("/pharmacy-visual-experience/pharmacy-first") ||
++    blob.includes("pharmacy-visual-experience/pharmacy-first")
++  );
++}
+diff --git a/src/pharmacy/pharmacyClusterPageUrlResolver.ts b/src/pharmacy/pharmacyClusterPageUrlResolver.ts
+index 60acffb..d20c683 100644
+--- a/src/pharmacy/pharmacyClusterPageUrlResolver.ts
++++ b/src/pharmacy/pharmacyClusterPageUrlResolver.ts
+@@ -31,6 +31,11 @@ export function resolveClusterPageSlug(input: string): string {
+   return normalizeClusterAreaSlug(input);
+ }
+ 
++/** Sitemap / catchment slug: "Ecclesall" | "cluster-ecclesall" → "ecclesall". */
++export function sitemapLocalitySlug(name: string, fallbackSlug = ""): string {
++  return resolveClusterPageSlug(name) || resolveClusterPageSlug(fallbackSlug);
++}
++
+ export function resolveClusterPageUrlPath(input: string): string {
+   const pageSlug = resolveClusterPageSlug(input);
+   return pageSlug ? `/local/${pageSlug}/` : "";
+diff --git a/src/pharmacy/pharmacyWorkspacePaths.ts b/src/pharmacy/pharmacyWorkspacePaths.ts
+index 033b8e4..eb3315f 100644
+--- a/src/pharmacy/pharmacyWorkspacePaths.ts
++++ b/src/pharmacy/pharmacyWorkspacePaths.ts
+@@ -305,3 +305,23 @@ export function resolveContentEcosystemIndexPath(
+ export function ensureDir(dir: string): void {
+   fs.mkdirSync(dir, { recursive: true });
+ }
++
++export function getPharmacyLocalityHeroEvidencePath(slug: string, areaSlug?: string): string {
++  const s = safePharmacySlug(slug);
++  const area = String(areaSlug || "")
++    .toLowerCase()
++    .replace(/[^a-z0-9-]+/g, "-")
++    .replace(/-+/g, "-")
++    .replace(/^-|-$/g, "");
++  return area
++    ? path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-locality-hero-evidence", s, `${area}.json`)
++    : path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-locality-hero-evidence", `${s}.json`);
++}
++
++export function getPharmacyOpportunityCachePath(slug: string): string {
++  return path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-opportunity-cache", `${safePharmacySlug(slug)}.json`);
++}
++
++export function getPharmacyCompetitorCachePath(slug: string): string {
++  return path.join(PHARMACY_WORKSPACE_ROOT, "data/pharmacy-competitor-cache", `${safePharmacySlug(slug)}.json`);
++}
