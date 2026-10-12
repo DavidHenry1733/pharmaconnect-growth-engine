@@ -1,0 +1,1094 @@
+diff --git a/artifacts/api-server/src/app.ts b/artifacts/api-server/src/app.ts
+index 996769a..c6a12a8 100644
+--- a/artifacts/api-server/src/app.ts
++++ b/artifacts/api-server/src/app.ts
+@@ -12,6 +12,10 @@ import authRouter from "./routes/auth";
+ import { logger } from "./lib/logger";
+ import { ensureAdminExists } from "./lib/users";
+ import { requireAuth } from "./middlewares/requireAuth";
++import {
++  deliveryEnginePublicRouter,
++  deliveryEngineRobotsHeaderMiddleware,
++} from "./routes/deliveryEnginePublic";
+ 
+ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = path.dirname(__filename);
+@@ -229,6 +233,9 @@ export function sanitiseSlug(raw: string): string | null {
+   return /^[a-z0-9][a-z0-9_-]*$/.test(clean) ? clean : null;
+ }
+ 
++app.use(deliveryEngineRobotsHeaderMiddleware);
++app.use(deliveryEnginePublicRouter);
++
+ // ── Root-level sitemap + robots.txt serving (public) ─────────────────────────
+ const PROJECTS_DIR = path.join(WORKSPACE_ROOT, "config", "projects");
+ const OUTPUT_DIR   = path.join(WORKSPACE_ROOT, "output");
+diff --git a/artifacts/api-server/src/routes/deliveryEnginePublic.ts b/artifacts/api-server/src/routes/deliveryEnginePublic.ts
+new file mode 100644
+index 0000000..9e5cc46
+--- /dev/null
++++ b/artifacts/api-server/src/routes/deliveryEnginePublic.ts
+@@ -0,0 +1,65 @@
++/**
++ * Public delivery-engine routes for content.pharmaconnect.uk.
++ * Sets X-Robots-Tag to match the pilot cohort meta robots directive.
++ */
++import { Router, type NextFunction, type Request, type Response } from "express";
++import fs from "node:fs";
++import {
++  INDEX_FOLLOW,
++  xRobotsTagForDeliveryPath,
++} from "../../../../src/pharmacy/deliveryEnginePilotIndexing.ts";
++import {
++  resolveDeliveryHtmlFile,
++  resolvePilotSitemapFile,
++  writePilotSitemaps,
++} from "../../../../src/pharmacy/deliveryEnginePublicService.ts";
++
++export function deliveryEngineRobotsHeaderMiddleware(req: Request, res: Response, next: NextFunction): void {
++  const tag = xRobotsTagForDeliveryPath(req.path);
++  if (tag) res.setHeader("X-Robots-Tag", tag);
++  next();
++}
++
++function sendHtml(res: Response, filePath: string, robots: string): void {
++  const html = fs.readFileSync(filePath, "utf8");
++  res.status(200);
++  res.setHeader("Content-Type", "text/html; charset=utf-8");
++  res.setHeader("X-Robots-Tag", robots);
++  res.setHeader("Cache-Control", "public, max-age=300");
++  res.send(html);
++}
++
++export const deliveryEnginePublicRouter = Router();
++
++deliveryEnginePublicRouter.get("/sitemap-pilot.xml", (_req, res) => {
++  const file = resolvePilotSitemapFile() || (writePilotSitemaps(), resolvePilotSitemapFile());
++  if (!file) {
++    res.status(404).type("text/plain").send("sitemap-pilot.xml not found");
++    return;
++  }
++  res.status(200);
++  res.setHeader("Content-Type", "application/xml; charset=utf-8");
++  res.setHeader("X-Robots-Tag", INDEX_FOLLOW);
++  res.send(fs.readFileSync(file, "utf8"));
++});
++
++function handleDeliveryPage(req: Request, res: Response, next: NextFunction): void {
++  const file = resolveDeliveryHtmlFile(req.path);
++  const robots = xRobotsTagForDeliveryPath(req.path);
++  if (!file || !robots) {
++    next();
++    return;
++  }
++  sendHtml(res, file, robots);
++}
++
++deliveryEnginePublicRouter.get("/delivery/reliable-direct-pharmacy-sheffield", handleDeliveryPage);
++deliveryEnginePublicRouter.get("/delivery/reliable-direct-pharmacy-sheffield/", handleDeliveryPage);
++deliveryEnginePublicRouter.get(
++  "/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-:slug",
++  handleDeliveryPage,
++);
++deliveryEnginePublicRouter.get(
++  "/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-:slug/",
++  handleDeliveryPage,
++);
+diff --git a/config/delivery/pilot-indexing-cohort.json b/config/delivery/pilot-indexing-cohort.json
+new file mode 100644
+index 0000000..77d5950
+--- /dev/null
++++ b/config/delivery/pilot-indexing-cohort.json
+@@ -0,0 +1,95 @@
++{
++  "version": 1,
++  "name": "Reliable Direct Pharmacy NHS prescription delivery — controlled pilot indexing cohort",
++  "baseUrl": "https://content.pharmaconnect.uk",
++  "hub": {
++    "id": "primary-delivery-hub",
++    "label": "Primary Delivery Hub (Rotherham / Sheffield)",
++    "path": "/delivery/reliable-direct-pharmacy-sheffield",
++    "robots": "index, follow"
++  },
++  "indexLocalPages": [
++    {
++      "id": "rotherham-central",
++      "label": "Rotherham Central",
++      "city": "Rotherham",
++      "slug": "rotherham-central"
++    },
++    {
++      "id": "kimberworth",
++      "label": "Kimberworth",
++      "city": "Rotherham",
++      "slug": "kimberworth"
++    },
++    {
++      "id": "whiston",
++      "label": "Whiston",
++      "city": "Rotherham",
++      "slug": "whiston"
++    },
++    {
++      "id": "richmond",
++      "label": "Richmond",
++      "city": "Sheffield",
++      "slug": "richmond"
++    },
++    {
++      "id": "norton",
++      "label": "Norton",
++      "city": "Sheffield",
++      "slug": "norton"
++    }
++  ],
++  "suburbPathPrefix": "/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-",
++  "indexRobots": "index, follow",
++  "noindexRobots": "noindex, follow",
++  "suburbSlugs": [
++    "city-centre",
++    "broomhall",
++    "kelham-island",
++    "highfield",
++    "norfolk-park",
++    "park-hill",
++    "arbourthorne",
++    "hillsborough",
++    "walkley",
++    "stannington",
++    "wisewood",
++    "loxley",
++    "nether-edge",
++    "millhouses",
++    "carter-knowle",
++    "abbeydale",
++    "woodseats",
++    "heeley",
++    "meersbrook",
++    "norton",
++    "batemoor",
++    "broomhill",
++    "crookes",
++    "fulwood",
++    "ranmoor",
++    "crosspool",
++    "ecclesall",
++    "sharrow-vale",
++    "endcliffe",
++    "bents-green",
++    "intake",
++    "birley",
++    "frecheville",
++    "charnock",
++    "hackenthorpe",
++    "handsworth",
++    "richmond",
++    "woodhouse",
++    "mosborough",
++    "crystal-peaks",
++    "westfield",
++    "waterthorpe",
++    "rotherham-central",
++    "kimberworth",
++    "whiston",
++    "clifton",
++    "wickersley"
++  ]
++}
+diff --git a/config/projects/delivery-engine.json b/config/projects/delivery-engine.json
+new file mode 100644
+index 0000000..35f7499
+--- /dev/null
++++ b/config/projects/delivery-engine.json
+@@ -0,0 +1,7 @@
++{
++  "clientSlug": "delivery-engine",
++  "businessName": "PharmaConnect NHS Prescription Delivery",
++  "domain": "https://content.pharmaconnect.uk",
++  "primaryLocation": "Sheffield",
++  "services": ["prescription-delivery"]
++}
+diff --git a/delivery/sitemap-pilot.xml b/delivery/sitemap-pilot.xml
+new file mode 100644
+index 0000000..446861a
+--- /dev/null
++++ b/delivery/sitemap-pilot.xml
+@@ -0,0 +1,33 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-rotherham-central</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-kimberworth</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-whiston</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-richmond</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-norton</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++</urlset>
+diff --git a/public/.htaccess b/public/.htaccess
+new file mode 100644
+index 0000000..98bf899
+--- /dev/null
++++ b/public/.htaccess
+@@ -0,0 +1,7 @@
++# Stop the vhost-level X-Robots-Tag: index, follow from applying to
++# delivery-engine pages. Per-directory .htaccess files set the cohort value.
++<IfModule mod_headers.c>
++  <If "%{REQUEST_URI} =~ m#^/(delivery/|sitemap-pilot\.xml)#">
++    Header always unset X-Robots-Tag
++  </If>
++</IfModule>
+diff --git a/public/delivery/.gitignore b/public/delivery/.gitignore
+new file mode 100644
+index 0000000..d6b7ef3
+--- /dev/null
++++ b/public/delivery/.gitignore
+@@ -0,0 +1,2 @@
++*
++!.gitignore
+diff --git a/public/sitemap-pilot.xml b/public/sitemap-pilot.xml
+new file mode 100644
+index 0000000..446861a
+--- /dev/null
++++ b/public/sitemap-pilot.xml
+@@ -0,0 +1,33 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-rotherham-central</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-kimberworth</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-whiston</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-richmond</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++  <url>
++    <loc>https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-norton</loc>
++    <lastmod>2026-10-12</lastmod>
++    <changefreq>weekly</changefreq>
++  </url>
++</urlset>
+diff --git a/scripts/configure-delivery-pilot-indexing.ts b/scripts/configure-delivery-pilot-indexing.ts
+new file mode 100644
+index 0000000..2181cc2
+--- /dev/null
++++ b/scripts/configure-delivery-pilot-indexing.ts
+@@ -0,0 +1,120 @@
++#!/usr/bin/env npx tsx
++/**
++ * Apply the controlled delivery-engine pilot indexing cohort:
++ * hub + 5 local pages index,follow; remaining suburb pages noindex,follow;
++ * sitemap-pilot.xml contains strictly those 6 URLs. Generates Whiston from the
++ * Kimberworth territory template when the live page is missing.
++ */
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++import {
++  applyRobotsMeta,
++  listDeliveryPilotPages,
++  listPilotSitemapPages,
++  loadDeliveryPilotCohort,
++  localHtmlRelativePath,
++  NOINDEX_FOLLOW,
++  type DeliveryPilotPage,
++} from "../src/pharmacy/deliveryEnginePilotIndexing.ts";
++import {
++  deliveryOutputRoot,
++  ensureWhistonOnHub,
++  generateWhistonHtmlFromKimberworth,
++  materializeDeliveryPageFiles,
++  rootDeliveryHtaccess,
++  writePilotSitemaps,
++  writeUtf8,
++} from "../src/pharmacy/deliveryEnginePublicService.ts";
++
++const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++if (!process.env.WORKSPACE_ROOT) process.env.WORKSPACE_ROOT = ROOT;
++
++async function fetchLiveHtml(page: DeliveryPilotPage): Promise<string | null> {
++  const candidates = [page.url, `${page.url}/`];
++  for (const url of candidates) {
++    try {
++      const res = await fetch(url, { redirect: "follow" });
++      if (!res.ok) continue;
++      const html = await res.text();
++      if (!/<html/i.test(html)) continue;
++      return html;
++    } catch {
++      continue;
++    }
++  }
++  return null;
++}
++
++async function main(): Promise<void> {
++  const cohort = loadDeliveryPilotCohort();
++  const pages = listDeliveryPilotPages(cohort);
++  const sitemapPages = listPilotSitemapPages(cohort);
++  if (sitemapPages.length !== 6) {
++    throw new Error(`Pilot sitemap must contain 6 URLs, found ${sitemapPages.length}`);
++  }
++
++  const fetched = new Map<string, string>();
++  for (const page of pages) {
++    const live = await fetchLiveHtml(page);
++    if (live) fetched.set(page.id, live);
++  }
++
++  const kimberworth = pages.find((page) => page.slug === "kimberworth");
++  const kimberworthHtml = kimberworth ? fetched.get(kimberworth.id) : null;
++  if (!kimberworthHtml) {
++    throw new Error("Kimberworth live HTML is required to generate the Whiston territory page");
++  }
++
++  const results: Array<{ url: string; robots: string; source: "live" | "generated"; path: string }> = [];
++
++  for (const page of pages) {
++    let html = fetched.get(page.id) || null;
++    let source: "live" | "generated" = html ? "live" : "generated";
++    if (page.slug === "whiston") {
++      html = generateWhistonHtmlFromKimberworth(kimberworthHtml);
++      source = "generated";
++    } else if (page.kind === "hub" && html) {
++      html = ensureWhistonOnHub(html);
++    } else if (!html && page.robots === NOINDEX_FOLLOW) {
++      throw new Error(`Missing live HTML for noindex suburb ${page.url}`);
++    }
++    if (!html) {
++      throw new Error(`Missing HTML for ${page.url}`);
++    }
++    html = applyRobotsMeta(html, page.robots);
++    materializeDeliveryPageFiles(page, html);
++    results.push({ url: page.url, robots: page.robots, source, path: localHtmlRelativePath(page) });
++  }
++
++  const sitemapXml = writePilotSitemaps();
++  writeUtf8(path.join(deliveryOutputRoot(), "sitemap.xml"), sitemapXml);
++
++  const indexableSlugs = cohort.indexLocalPages.map((page) => page.slug);
++  const parentHtaccess = rootDeliveryHtaccess(indexableSlugs);
++  writeUtf8(
++    path.join(deliveryOutputRoot(), "delivery/reliable-direct-pharmacy-sheffield/.htaccess"),
++    parentHtaccess,
++  );
++  writeUtf8(
++    path.join(ROOT, "public/delivery/reliable-direct-pharmacy-sheffield/.htaccess"),
++    parentHtaccess,
++  );
++
++  const report = {
++    generatedAt: new Date().toISOString(),
++    hubIndexFollow: 1,
++    localIndexFollow: sitemapPages.filter((page) => page.kind === "suburb").length,
++    suburbNoindexFollow: pages.filter((page) => page.kind === "suburb" && page.robots === NOINDEX_FOLLOW).length,
++    sitemapUrls: sitemapPages.map((page) => page.url),
++    pages: results,
++  };
++  writeUtf8(path.join(deliveryOutputRoot(), "pilot-indexing-report.json"), JSON.stringify(report, null, 2));
++
++  console.log(JSON.stringify(report, null, 2));
++  console.log("Wrote delivery/sitemap-pilot.xml and public/sitemap-pilot.xml");
++}
++
++main().catch((err) => {
++  console.error(err instanceof Error ? err.stack || err.message : err);
++  process.exit(1);
++});
+diff --git a/scripts/serve-delivery-engine-public.ts b/scripts/serve-delivery-engine-public.ts
+new file mode 100644
+index 0000000..d160fdd
+--- /dev/null
++++ b/scripts/serve-delivery-engine-public.ts
+@@ -0,0 +1,51 @@
++#!/usr/bin/env npx tsx
++/**
++ * Local public delivery-engine server — same robots header contract as Express.
++ */
++import http from "node:http";
++import fs from "node:fs";
++import { fileURLToPath } from "node:url";
++import path from "node:path";
++import { xRobotsTagForDeliveryPath } from "../src/pharmacy/deliveryEnginePilotIndexing.ts";
++import {
++  resolveDeliveryHtmlFile,
++  resolvePilotSitemapFile,
++} from "../src/pharmacy/deliveryEnginePublicService.ts";
++
++const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++if (!process.env.WORKSPACE_ROOT) process.env.WORKSPACE_ROOT = ROOT;
++
++const PORT = Number(process.env.DELIVERY_ENGINE_PORT || 8766);
++
++const server = http.createServer((req, res) => {
++  const urlPath = req.url?.split("?")[0] || "/";
++  const tag = xRobotsTagForDeliveryPath(urlPath);
++  if (tag) res.setHeader("X-Robots-Tag", tag);
++
++  if (urlPath === "/sitemap-pilot.xml") {
++    const file = resolvePilotSitemapFile();
++    if (!file) {
++      res.statusCode = 404;
++      res.end("sitemap-pilot.xml not found");
++      return;
++    }
++    res.statusCode = 200;
++    res.setHeader("Content-Type", "application/xml; charset=utf-8");
++    res.end(fs.readFileSync(file));
++    return;
++  }
++
++  const file = resolveDeliveryHtmlFile(urlPath);
++  if (!file) {
++    res.statusCode = 404;
++    res.end(`Cannot GET ${urlPath}`);
++    return;
++  }
++  res.statusCode = 200;
++  res.setHeader("Content-Type", "text/html; charset=utf-8");
++  res.end(fs.readFileSync(file));
++});
++
++server.listen(PORT, "127.0.0.1", () => {
++  console.log(`delivery-engine public server http://127.0.0.1:${PORT}`);
++});
+diff --git a/scripts/validate-delivery-pilot-indexing-v1.ts b/scripts/validate-delivery-pilot-indexing-v1.ts
+new file mode 100644
+index 0000000..1b94f7f
+--- /dev/null
++++ b/scripts/validate-delivery-pilot-indexing-v1.ts
+@@ -0,0 +1,168 @@
++#!/usr/bin/env npx tsx
++/**
++ * Delivery engine controlled pilot indexing cohort — robots + 6-URL sitemap.
++ */
++import fs from "node:fs";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++import {
++  applyRobotsMeta,
++  buildPilotSitemapXml,
++  extractRobotsMeta,
++  INDEX_FOLLOW,
++  isPilotCohortPath,
++  listDeliveryPilotPages,
++  listPilotSitemapPages,
++  loadDeliveryPilotCohort,
++  NOINDEX_FOLLOW,
++  parseSitemapLocs,
++  robotsDirectiveForPath,
++  xRobotsTagForDeliveryPath,
++} from "../src/pharmacy/deliveryEnginePilotIndexing.ts";
++import {
++  ensureWhistonOnHub,
++  generateWhistonHtmlFromKimberworth,
++} from "../src/pharmacy/deliveryEnginePublicService.ts";
++
++const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
++if (!process.env.WORKSPACE_ROOT) process.env.WORKSPACE_ROOT = ROOT;
++
++interface Check {
++  id: string;
++  pass: boolean;
++  detail: string;
++}
++
++const checks: Check[] = [];
++
++function record(id: string, pass: boolean, detail: string) {
++  checks.push({ id, pass, detail });
++  console.log(`${pass ? "PASS" : "FAIL"}  ${id} — ${detail}`);
++}
++
++function main() {
++  console.log("\n=== Delivery Engine Pilot Indexing Cohort V1 ===\n");
++  const cohort = loadDeliveryPilotCohort();
++  const pages = listDeliveryPilotPages(cohort);
++  const sitemapPages = listPilotSitemapPages(cohort);
++  const indexLocals = pages.filter((page) => page.kind === "suburb" && page.robots === INDEX_FOLLOW);
++  const noindexLocals = pages.filter((page) => page.kind === "suburb" && page.robots === NOINDEX_FOLLOW);
++
++  record("hub-index-follow", pages[0]?.kind === "hub" && pages[0].robots === INDEX_FOLLOW, pages[0]?.url || "missing hub");
++  record("five-local-index", indexLocals.length === 5, `${indexLocals.length} indexable local pages`);
++  record(
++    "index-local-names",
++    ["rotherham-central", "kimberworth", "whiston", "richmond", "norton"].every((slug) =>
++      indexLocals.some((page) => page.slug === slug),
++    ),
++    indexLocals.map((page) => page.slug).join(", "),
++  );
++  record(
++    "remaining-suburbs-noindex-follow",
++    noindexLocals.length >= 41 && noindexLocals.every((page) => page.robots === NOINDEX_FOLLOW),
++    `${noindexLocals.length} suburb pages noindex, follow`,
++  );
++  record("sitemap-six-urls", sitemapPages.length === 6, `${sitemapPages.length} sitemap URLs`);
++
++  const xml = buildPilotSitemapXml(sitemapPages);
++  const locs = parseSitemapLocs(xml);
++  record("sitemap-locs-match", locs.length === 6 && locs.every((loc, i) => loc === sitemapPages[i]?.url), locs.join(" | "));
++  record(
++    "sitemap-excludes-noindex",
++    noindexLocals.every((page) => !locs.includes(page.url)),
++    "noindex suburb URLs absent from sitemap-pilot.xml",
++  );
++
++  const sample = "<html><head><meta name=\"viewport\" content=\"width=device-width\" /></head></html>";
++  record(
++    "robots-inject-index",
++    extractRobotsMeta(applyRobotsMeta(sample, INDEX_FOLLOW)) === INDEX_FOLLOW,
++    INDEX_FOLLOW,
++  );
++  record(
++    "robots-inject-noindex",
++    extractRobotsMeta(applyRobotsMeta(sample, NOINDEX_FOLLOW)) === NOINDEX_FOLLOW,
++    NOINDEX_FOLLOW,
++  );
++  record(
++    "path-norton-index",
++    robotsDirectiveForPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-norton") ===
++      INDEX_FOLLOW,
++    "Norton",
++  );
++  record(
++    "path-clifton-noindex",
++    robotsDirectiveForPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-clifton") ===
++      NOINDEX_FOLLOW,
++    "Clifton",
++  );
++  record(
++    "header-richmond-index",
++    xRobotsTagForDeliveryPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-richmond") ===
++      INDEX_FOLLOW &&
++      isPilotCohortPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-richmond"),
++    "Richmond X-Robots-Tag index, follow",
++  );
++  record(
++    "header-ecclesall-noindex",
++    xRobotsTagForDeliveryPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-ecclesall") ===
++      NOINDEX_FOLLOW &&
++      !isPilotCohortPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-ecclesall"),
++    "Ecclesall X-Robots-Tag noindex, follow",
++  );
++  record(
++    "whiston-generated-from-kimberworth",
++    (() => {
++      const sample =
++        '<title>Prescription delivery for Kimberworth &amp; Greasbrough, Rotherham</title><link rel="canonical" href="https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-kimberworth" />';
++      const generated = generateWhistonHtmlFromKimberworth(sample);
++      return (
++        generated.includes("Whiston") &&
++        generated.includes("free-nhs-prescription-delivery-whiston") &&
++        !generated.includes("kimberworth") &&
++        extractRobotsMeta(generated) === INDEX_FOLLOW
++      );
++    })(),
++    "Whiston page generated with index, follow",
++  );
++  record(
++    "hub-lists-whiston",
++    ensureWhistonOnHub(
++      '<li><a href="/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-kimberworth">Kimberworth &amp; Greasbrough</a> <span>(S61)</span></li>',
++    ).includes("free-nhs-prescription-delivery-whiston"),
++    "Hub Rotherham list includes Whiston",
++  );
++
++  const tracked = path.join(ROOT, "delivery/sitemap-pilot.xml");
++  if (fs.existsSync(tracked)) {
++    const trackedLocs = parseSitemapLocs(fs.readFileSync(tracked, "utf8"));
++    record("tracked-sitemap-six", trackedLocs.length === 6, `${trackedLocs.length} loc in delivery/sitemap-pilot.xml`);
++    record(
++      "tracked-sitemap-urls",
++      sitemapPages.every((page) => trackedLocs.includes(page.url)) && trackedLocs.length === 6,
++      trackedLocs.join(" | "),
++    );
++  } else {
++    record("tracked-sitemap-six", false, "delivery/sitemap-pilot.xml missing — run configure-delivery-pilot-indexing.ts");
++  }
++
++  const outputRoot = path.join(ROOT, "output/delivery-engine");
++  if (fs.existsSync(outputRoot)) {
++    const hubHtml = fs.readFileSync(
++      path.join(outputRoot, "delivery/reliable-direct-pharmacy-sheffield/index.html"),
++      "utf8",
++    );
++    record("output-hub-robots", extractRobotsMeta(hubHtml) === INDEX_FOLLOW, extractRobotsMeta(hubHtml) || "missing");
++    const cliftonHtml = fs.readFileSync(
++      path.join(outputRoot, "delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-clifton/index.html"),
++      "utf8",
++    );
++    record("output-clifton-robots", extractRobotsMeta(cliftonHtml) === NOINDEX_FOLLOW, extractRobotsMeta(cliftonHtml) || "missing");
++  }
++
++  const failed = checks.filter((check) => !check.pass);
++  console.log(`\n${failed.length ? "FAIL" : "PASS"}  ${checks.length - failed.length}/${checks.length} checks`);
++  if (failed.length) process.exit(1);
++}
++
++main();
+diff --git a/src/pharmacy/deliveryEnginePilotIndexing.ts b/src/pharmacy/deliveryEnginePilotIndexing.ts
+new file mode 100644
+index 0000000..19d4c78
+--- /dev/null
++++ b/src/pharmacy/deliveryEnginePilotIndexing.ts
+@@ -0,0 +1,233 @@
++/**
++ * Controlled pilot indexing for the NHS prescription delivery engine.
++ * Hub + 5 local pages are indexable; every other suburb page is noindex, follow.
++ */
++import fs from "node:fs";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++
++const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
++
++export const INDEX_FOLLOW = "index, follow";
++export const NOINDEX_FOLLOW = "noindex, follow";
++
++export interface DeliveryPilotLocalPage {
++  id: string;
++  label: string;
++  city: string;
++  slug: string;
++}
++
++export interface DeliveryPilotCohort {
++  version: 1;
++  name: string;
++  baseUrl: string;
++  hub: {
++    id: string;
++    label: string;
++    path: string;
++    robots: string;
++  };
++  indexLocalPages: DeliveryPilotLocalPage[];
++  suburbPathPrefix: string;
++  indexRobots: string;
++  noindexRobots: string;
++  suburbSlugs: string[];
++}
++
++export interface DeliveryPilotPage {
++  id: string;
++  label: string;
++  kind: "hub" | "suburb";
++  slug: string | null;
++  path: string;
++  url: string;
++  robots: typeof INDEX_FOLLOW | typeof NOINDEX_FOLLOW;
++  inSitemap: boolean;
++}
++
++function resolveConfigPath(): string {
++  const candidates = [
++    process.env.WORKSPACE_ROOT
++      ? path.join(process.env.WORKSPACE_ROOT, "config/delivery/pilot-indexing-cohort.json")
++      : "",
++    path.resolve(MODULE_DIR, "../../config/delivery/pilot-indexing-cohort.json"),
++    path.resolve(process.cwd(), "config/delivery/pilot-indexing-cohort.json"),
++  ].filter(Boolean);
++  for (const file of candidates) {
++    if (fs.existsSync(file)) return file;
++  }
++  throw new Error("Delivery pilot indexing cohort config not found");
++}
++
++export function loadDeliveryPilotCohort(): DeliveryPilotCohort {
++  return JSON.parse(fs.readFileSync(resolveConfigPath(), "utf8")) as DeliveryPilotCohort;
++}
++
++function joinUrl(baseUrl: string, urlPath: string): string {
++  return `${baseUrl.replace(/\/+$/, "")}${urlPath.startsWith("/") ? urlPath : `/${urlPath}`}`;
++}
++
++export function suburbPathForSlug(cohort: DeliveryPilotCohort, slug: string): string {
++  return `${cohort.suburbPathPrefix}${slug}`;
++}
++
++export function indexLocalSlugSet(cohort: DeliveryPilotCohort): Set<string> {
++  return new Set(cohort.indexLocalPages.map((page) => page.slug));
++}
++
++export function listDeliveryPilotPages(cohort: DeliveryPilotCohort = loadDeliveryPilotCohort()): DeliveryPilotPage[] {
++  const indexSlugs = indexLocalSlugSet(cohort);
++  const hub: DeliveryPilotPage = {
++    id: cohort.hub.id,
++    label: cohort.hub.label,
++    kind: "hub",
++    slug: null,
++    path: cohort.hub.path,
++    url: joinUrl(cohort.baseUrl, cohort.hub.path),
++    robots: INDEX_FOLLOW,
++    inSitemap: true,
++  };
++  const seen = new Set<string>();
++  const suburbs: DeliveryPilotPage[] = [];
++  const slugs = [...cohort.suburbSlugs, ...cohort.indexLocalPages.map((page) => page.slug)];
++  for (const slug of slugs) {
++    if (seen.has(slug)) continue;
++    seen.add(slug);
++    const indexable = indexSlugs.has(slug);
++    const local = cohort.indexLocalPages.find((page) => page.slug === slug);
++    const urlPath = suburbPathForSlug(cohort, slug);
++    suburbs.push({
++      id: slug,
++      label: local?.label || slug,
++      kind: "suburb",
++      slug,
++      path: urlPath,
++      url: joinUrl(cohort.baseUrl, urlPath),
++      robots: indexable ? INDEX_FOLLOW : NOINDEX_FOLLOW,
++      inSitemap: indexable,
++    });
++  }
++  return [hub, ...suburbs];
++}
++
++export function listPilotSitemapPages(cohort: DeliveryPilotCohort = loadDeliveryPilotCohort()): DeliveryPilotPage[] {
++  const pages = listDeliveryPilotPages(cohort);
++  const hub = pages.find((page) => page.kind === "hub");
++  if (!hub) throw new Error("Delivery pilot hub page missing");
++  const locals = cohort.indexLocalPages.map((local) => {
++    const page = pages.find((candidate) => candidate.slug === local.slug);
++    if (!page) throw new Error(`Delivery pilot local page missing: ${local.slug}`);
++    return page;
++  });
++  return [hub, ...locals];
++}
++
++export function normalizeDeliveryPath(urlPath: string): string {
++  const raw = String(urlPath || "").split("?")[0] || "/";
++  const normalised = raw.replace(/\/+$/, "") || "/";
++  return normalised;
++}
++
++export function isDeliveryEnginePath(urlPath: string): boolean {
++  const normalised = normalizeDeliveryPath(urlPath);
++  return (
++    normalised === "/sitemap-pilot.xml" ||
++    normalised === "/delivery" ||
++    normalised.startsWith("/delivery/")
++  );
++}
++
++export function isPilotCohortPath(
++  urlPath: string,
++  cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
++): boolean {
++  const normalised = normalizeDeliveryPath(urlPath);
++  const hubPath = cohort.hub.path.replace(/\/+$/, "");
++  if (normalised === hubPath) return true;
++  const prefix = cohort.suburbPathPrefix;
++  if (!normalised.startsWith(prefix)) return false;
++  return indexLocalSlugSet(cohort).has(normalised.slice(prefix.length));
++}
++
++export function robotsDirectiveForPath(
++  urlPath: string,
++  cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
++): typeof INDEX_FOLLOW | typeof NOINDEX_FOLLOW {
++  return isPilotCohortPath(urlPath, cohort) ? INDEX_FOLLOW : NOINDEX_FOLLOW;
++}
++
++export function xRobotsTagForDeliveryPath(
++  urlPath: string,
++  cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
++): typeof INDEX_FOLLOW | typeof NOINDEX_FOLLOW | null {
++  if (!isDeliveryEnginePath(urlPath)) return null;
++  if (normalizeDeliveryPath(urlPath) === "/sitemap-pilot.xml") return INDEX_FOLLOW;
++  return robotsDirectiveForPath(urlPath, cohort);
++}
++
++const ROBOTS_META_RE = /<meta\s+name=["']robots["']\s+content=["'][^"']*["']\s*\/?>/i;
++
++export function robotsMetaTag(directive: string): string {
++  return `<meta name="robots" content="${directive}" />`;
++}
++
++export function applyRobotsMeta(html: string, directive: string): string {
++  const tag = robotsMetaTag(directive);
++  if (ROBOTS_META_RE.test(html)) {
++    return html.replace(ROBOTS_META_RE, tag);
++  }
++  if (/<meta\s+name=["']viewport["'][^>]*>/i.test(html)) {
++    return html.replace(/(<meta\s+name=["']viewport["'][^>]*>)/i, `$1\n${tag}`);
++  }
++  if (/<head[^>]*>/i.test(html)) {
++    return html.replace(/(<head[^>]*>)/i, `$1\n${tag}`);
++  }
++  return `${tag}\n${html}`;
++}
++
++export function extractRobotsMeta(html: string): string | null {
++  const match = html.match(/<meta\s+name=["']robots["']\s+content=["']([^"']*)["']/i);
++  return match?.[1] ?? null;
++}
++
++export function buildPilotSitemapXml(
++  pages: DeliveryPilotPage[] = listPilotSitemapPages(),
++  lastmod = new Date().toISOString().slice(0, 10),
++): string {
++  const body = pages
++    .map(
++      (page) =>
++        `  <url>\n    <loc>${page.url.replace(/&/g, "&amp;")}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n  </url>`,
++    )
++    .join("\n");
++  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`;
++}
++
++export function parseSitemapLocs(xml: string): string[] {
++  return [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]!.trim());
++}
++
++export function localHtmlRelativePath(page: DeliveryPilotPage): string {
++  const trimmed = page.path.replace(/^\/+/, "");
++  return `${trimmed}/index.html`;
++}
++
++export function minimalIndexableHtml(page: DeliveryPilotPage): string {
++  return `<!DOCTYPE html>
++<html lang="en-GB">
++<head>
++<meta charset="utf-8" />
++<meta name="viewport" content="width=device-width, initial-scale=1" />
++${robotsMetaTag(page.robots)}
++<title>${page.label}</title>
++<link rel="canonical" href="${page.url}" />
++</head>
++<body>
++<main>
++<h1>${page.label}</h1>
++</main>
++</body>
++</html>
++`;
++}
+diff --git a/src/pharmacy/deliveryEnginePublicService.ts b/src/pharmacy/deliveryEnginePublicService.ts
+new file mode 100644
+index 0000000..32a5b72
+--- /dev/null
++++ b/src/pharmacy/deliveryEnginePublicService.ts
+@@ -0,0 +1,183 @@
++/**
++ * Public NHS prescription delivery engine — HTML generation, Whiston territory,
++ * robots meta, and LiteSpeed/Express X-Robots-Tag alignment.
++ */
++import fs from "node:fs";
++import path from "node:path";
++import { fileURLToPath } from "node:url";
++import {
++  applyRobotsMeta,
++  buildPilotSitemapXml,
++  INDEX_FOLLOW,
++  listDeliveryPilotPages,
++  listPilotSitemapPages,
++  loadDeliveryPilotCohort,
++  localHtmlRelativePath,
++  type DeliveryPilotPage,
++} from "./deliveryEnginePilotIndexing.ts";
++
++const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
++
++export function deliveryWorkspaceRoot(): string {
++  const env = process.env.WORKSPACE_ROOT?.trim();
++  if (env && fs.existsSync(env)) return env;
++  return path.resolve(MODULE_DIR, "../..");
++}
++
++export function deliveryOutputRoot(): string {
++  return path.join(deliveryWorkspaceRoot(), "output/delivery-engine");
++}
++
++export function deliveryPublicRoot(): string {
++  return path.join(deliveryWorkspaceRoot(), "public");
++}
++
++export function trackedPilotSitemapPath(): string {
++  return path.join(deliveryWorkspaceRoot(), "delivery/sitemap-pilot.xml");
++}
++
++const WHISTON_HUB_LINK =
++  '<li><a href="/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-whiston">Whiston</a> <span>(S60)</span></li>';
++const KIMBERWORTH_HUB_LINK =
++  '<li><a href="/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-kimberworth">Kimberworth &amp; Greasbrough</a> <span>(S61)</span></li>';
++
++export function ensureWhistonOnHub(html: string): string {
++  if (html.includes("free-nhs-prescription-delivery-whiston")) return html;
++  if (html.includes(KIMBERWORTH_HUB_LINK)) {
++    return html.replace(KIMBERWORTH_HUB_LINK, `${KIMBERWORTH_HUB_LINK}${WHISTON_HUB_LINK}`);
++  }
++  return html.replace(
++    "</ul></section>",
++    `${WHISTON_HUB_LINK}</ul></section>`,
++  );
++}
++
++export function generateWhistonHtmlFromKimberworth(source: string): string {
++  let html = source;
++  const replacements: Array<[string, string]> = [
++    ["Kimberworth &amp; Greasbrough", "Whiston"],
++    ["Kimberworth & Greasbrough", "Whiston"],
++    ["Kimberworth Park Medical Centre", "Whiston Primary Care Centre"],
++    ["Langdon Road, Rotherham, S61 3EY, Kimberworth Park", "East Bawtry Road, Whiston, Rotherham, S60 4NY"],
++    ["Greasbrough Medical Centre", "Sitwell Surgery"],
++    ["Greasbrough, Rotherham, S61 4NP, Greasbrough", "Pleasley Road, Whiston, Rotherham, S60 4HQ"],
++    ["Kimberworth Park", "Whiston"],
++    ["Wortley Road and Church Street corridor", "East Bawtry Road and Pleasley Road"],
++    [
++      "Steep hillside gradients around Whiston and limited direct chemist parking.",
++      "Residential streets around Sitwell Vale and limited on-street parking near the primary care centre.",
++    ],
++    ["free-nhs-prescription-delivery-kimberworth", "free-nhs-prescription-delivery-whiston"],
++    ["S61", "S60"],
++    ["Kimberworth", "Whiston"],
++    ["Greasbrough", "Whiston"],
++    ["kimberworth", "whiston"],
++    ["greasbrough", "whiston"],
++  ];
++  for (const [from, to] of replacements) {
++    html = html.split(from).join(to);
++  }
++  return applyRobotsMeta(html, INDEX_FOLLOW);
++}
++
++export function writeUtf8(filePath: string, contents: string): void {
++  fs.mkdirSync(path.dirname(filePath), { recursive: true });
++  fs.writeFileSync(filePath, contents, "utf8");
++}
++
++export function htaccessForDirective(directive: string): string {
++  return `<IfModule mod_headers.c>
++  Header always unset X-Robots-Tag
++  Header always set X-Robots-Tag "${directive}"
++</IfModule>
++`;
++}
++
++export function rootDeliveryHtaccess(indexableSlugs: string[]): string {
++  const files = indexableSlugs
++    .map(
++      (slug) => `  <Files "free-nhs-prescription-delivery-${slug}">
++    Header always set X-Robots-Tag "${INDEX_FOLLOW}"
++  </Files>`,
++    )
++    .join("\n");
++  return `<IfModule mod_headers.c>
++  Header always unset X-Robots-Tag
++  Header always set X-Robots-Tag "noindex, follow"
++${files}
++  <Files "index.html">
++    Header always set X-Robots-Tag "${INDEX_FOLLOW}"
++  </Files>
++</IfModule>
++`;
++}
++
++export function materializeDeliveryPageFiles(page: DeliveryPilotPage, html: string): string[] {
++  const written: string[] = [];
++  const rel = localHtmlRelativePath(page);
++  const outputHtml = path.join(deliveryOutputRoot(), rel);
++  const publicHtml = path.join(deliveryPublicRoot(), rel);
++  writeUtf8(outputHtml, html);
++  writeUtf8(publicHtml, html);
++  written.push(outputHtml, publicHtml);
++
++  const htaccess = htaccessForDirective(page.robots);
++  writeUtf8(path.join(path.dirname(outputHtml), ".htaccess"), htaccess);
++  writeUtf8(path.join(path.dirname(publicHtml), ".htaccess"), htaccess);
++
++  if (page.kind === "suburb" && page.slug) {
++    const htmlName = path.join(
++      "delivery/reliable-direct-pharmacy-sheffield",
++      `free-nhs-prescription-delivery-${page.slug}.html`,
++    );
++    writeUtf8(path.join(deliveryOutputRoot(), htmlName), html);
++    writeUtf8(path.join(deliveryPublicRoot(), htmlName), html);
++  }
++  return written;
++}
++
++export function resolveDeliveryHtmlFile(urlPath: string): string | null {
++  const normalised = String(urlPath || "").split("?")[0]!.replace(/\/+$/, "") || "/";
++  const cohort = loadDeliveryPilotCohort();
++  const pages = listDeliveryPilotPages(cohort);
++  const page = pages.find((candidate) => candidate.path.replace(/\/+$/, "") === normalised);
++  if (!page) return null;
++  const rel = localHtmlRelativePath(page);
++  const htmlName =
++    page.kind === "suburb" && page.slug
++      ? path.join(
++          "delivery/reliable-direct-pharmacy-sheffield",
++          `free-nhs-prescription-delivery-${page.slug}.html`,
++        )
++      : "";
++  const candidates = [
++    path.join(deliveryOutputRoot(), rel),
++    path.join(deliveryPublicRoot(), rel),
++    htmlName ? path.join(deliveryOutputRoot(), htmlName) : "",
++    htmlName ? path.join(deliveryPublicRoot(), htmlName) : "",
++  ].filter(Boolean);
++  for (const file of candidates) {
++    if (fs.existsSync(file)) return file;
++  }
++  return null;
++}
++
++export function writePilotSitemaps(): string {
++  const xml = buildPilotSitemapXml(listPilotSitemapPages());
++  writeUtf8(trackedPilotSitemapPath(), xml);
++  writeUtf8(path.join(deliveryOutputRoot(), "sitemap-pilot.xml"), xml);
++  writeUtf8(path.join(deliveryPublicRoot(), "sitemap-pilot.xml"), xml);
++  return xml;
++}
++
++export function resolvePilotSitemapFile(): string | null {
++  const candidates = [
++    trackedPilotSitemapPath(),
++    path.join(deliveryPublicRoot(), "sitemap-pilot.xml"),
++    path.join(deliveryOutputRoot(), "sitemap-pilot.xml"),
++  ];
++  for (const file of candidates) {
++    if (fs.existsSync(file)) return file;
++  }
++  return null;
++}
