@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  applyCanonicalLink,
   applyRobotsMeta,
   buildPilotSitemapXml,
   INDEX_FOLLOW,
@@ -13,6 +14,7 @@ import {
   listPilotSitemapPages,
   loadDeliveryPilotCohort,
   localHtmlRelativePath,
+  prepareDeliveryPageHtml,
   type DeliveryPilotPage,
 } from "./deliveryEnginePilotIndexing.ts";
 
@@ -35,6 +37,9 @@ export function deliveryPublicRoot(): string {
 export function trackedPilotSitemapPath(): string {
   return path.join(deliveryWorkspaceRoot(), "delivery/sitemap-pilot.xml");
 }
+
+export const WHISTON_DELIVERY_URL =
+  "https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-whiston";
 
 const WHISTON_HUB_LINK =
   '<li><a href="/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-whiston">Whiston</a> <span>(S60)</span></li>';
@@ -77,7 +82,7 @@ export function generateWhistonHtmlFromKimberworth(source: string): string {
   for (const [from, to] of replacements) {
     html = html.split(from).join(to);
   }
-  return applyRobotsMeta(html, INDEX_FOLLOW);
+  return applyCanonicalLink(applyRobotsMeta(html, INDEX_FOLLOW), WHISTON_DELIVERY_URL);
 }
 
 export function writeUtf8(filePath: string, contents: string): void {
@@ -93,35 +98,21 @@ export function htaccessForDirective(directive: string): string {
 `;
 }
 
-export function rootDeliveryHtaccess(indexableSlugs: string[]): string {
-  const files = indexableSlugs
-    .map(
-      (slug) => `  <Files "free-nhs-prescription-delivery-${slug}">
-    Header always set X-Robots-Tag "${INDEX_FOLLOW}"
-  </Files>`,
-    )
-    .join("\n");
-  return `<IfModule mod_headers.c>
-  Header always unset X-Robots-Tag
-  Header always set X-Robots-Tag "noindex, follow"
-${files}
-  <Files "index.html">
-    Header always set X-Robots-Tag "${INDEX_FOLLOW}"
-  </Files>
-</IfModule>
-`;
+export function rootDeliveryHtaccess(_indexableSlugs: string[] = []): string {
+  return htaccessForDirective(INDEX_FOLLOW);
 }
 
 export function materializeDeliveryPageFiles(page: DeliveryPilotPage, html: string): string[] {
   const written: string[] = [];
+  const prepared = prepareDeliveryPageHtml(html, page.url);
   const rel = localHtmlRelativePath(page);
   const outputHtml = path.join(deliveryOutputRoot(), rel);
   const publicHtml = path.join(deliveryPublicRoot(), rel);
-  writeUtf8(outputHtml, html);
-  writeUtf8(publicHtml, html);
+  writeUtf8(outputHtml, prepared);
+  writeUtf8(publicHtml, prepared);
   written.push(outputHtml, publicHtml);
 
-  const htaccess = htaccessForDirective(page.robots);
+  const htaccess = htaccessForDirective(INDEX_FOLLOW);
   writeUtf8(path.join(path.dirname(outputHtml), ".htaccess"), htaccess);
   writeUtf8(path.join(path.dirname(publicHtml), ".htaccess"), htaccess);
 
@@ -130,8 +121,8 @@ export function materializeDeliveryPageFiles(page: DeliveryPilotPage, html: stri
       "delivery/reliable-direct-pharmacy-sheffield",
       `free-nhs-prescription-delivery-${page.slug}.html`,
     );
-    writeUtf8(path.join(deliveryOutputRoot(), htmlName), html);
-    writeUtf8(path.join(deliveryPublicRoot(), htmlName), html);
+    writeUtf8(path.join(deliveryOutputRoot(), htmlName), prepared);
+    writeUtf8(path.join(deliveryPublicRoot(), htmlName), prepared);
   }
   return written;
 }

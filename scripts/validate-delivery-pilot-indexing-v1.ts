@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Delivery engine controlled pilot indexing cohort — robots + 6-URL sitemap.
+ * Delivery engine indexing — indexable robots, self-canonicals, 6-URL sitemap.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -8,20 +8,23 @@ import { fileURLToPath } from "node:url";
 import {
   applyRobotsMeta,
   buildPilotSitemapXml,
+  deliveryCanonicalForHtmlFile,
+  extractCanonical,
   extractRobotsMeta,
   INDEX_FOLLOW,
   isPilotCohortPath,
   listDeliveryPilotPages,
   listPilotSitemapPages,
   loadDeliveryPilotCohort,
-  NOINDEX_FOLLOW,
   parseSitemapLocs,
+  prepareDeliveryPageHtml,
   robotsDirectiveForPath,
   xRobotsTagForDeliveryPath,
 } from "../src/pharmacy/deliveryEnginePilotIndexing.ts";
 import {
   ensureWhistonOnHub,
   generateWhistonHtmlFromKimberworth,
+  WHISTON_DELIVERY_URL,
 } from "../src/pharmacy/deliveryEnginePublicService.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -45,8 +48,8 @@ function main() {
   const cohort = loadDeliveryPilotCohort();
   const pages = listDeliveryPilotPages(cohort);
   const sitemapPages = listPilotSitemapPages(cohort);
-  const indexLocals = pages.filter((page) => page.kind === "suburb" && page.robots === INDEX_FOLLOW);
-  const noindexLocals = pages.filter((page) => page.kind === "suburb" && page.robots === NOINDEX_FOLLOW);
+  const indexLocals = pages.filter((page) => page.kind === "suburb" && page.inSitemap);
+  const otherLocals = pages.filter((page) => page.kind === "suburb" && !page.inSitemap);
 
   record("hub-index-follow", pages[0]?.kind === "hub" && pages[0].robots === INDEX_FOLLOW, pages[0]?.url || "missing hub");
   record("five-local-index", indexLocals.length === 5, `${indexLocals.length} indexable local pages`);
@@ -58,9 +61,9 @@ function main() {
     indexLocals.map((page) => page.slug).join(", "),
   );
   record(
-    "remaining-suburbs-noindex-follow",
-    noindexLocals.length >= 41 && noindexLocals.every((page) => page.robots === NOINDEX_FOLLOW),
-    `${noindexLocals.length} suburb pages noindex, follow`,
+    "remaining-suburbs-index-follow",
+    otherLocals.length >= 41 && pages.every((page) => page.robots === INDEX_FOLLOW),
+    `${pages.length} delivery pages use the indexable robots directive`,
   );
   record("sitemap-six-urls", sitemapPages.length === 6, `${sitemapPages.length} sitemap URLs`);
 
@@ -68,9 +71,9 @@ function main() {
   const locs = parseSitemapLocs(xml);
   record("sitemap-locs-match", locs.length === 6 && locs.every((loc, i) => loc === sitemapPages[i]?.url), locs.join(" | "));
   record(
-    "sitemap-excludes-noindex",
-    noindexLocals.every((page) => !locs.includes(page.url)),
-    "noindex suburb URLs absent from sitemap-pilot.xml",
+    "sitemap-excludes-non-cohort",
+    otherLocals.every((page) => !locs.includes(page.url)),
+    "non-cohort suburb URLs absent from sitemap-pilot.xml",
   );
 
   const sample = "<html><head><meta name=\"viewport\" content=\"width=device-width\" /></head></html>";
@@ -79,10 +82,17 @@ function main() {
     extractRobotsMeta(applyRobotsMeta(sample, INDEX_FOLLOW)) === INDEX_FOLLOW,
     INDEX_FOLLOW,
   );
+  const noindexFollow = `<html><head><meta name="robots" content="noindex, follow" /></head></html>`;
+  const bareNoindex = `<html><head><meta name="robots" content="noindex" /></head></html>`;
   record(
-    "robots-inject-noindex",
-    extractRobotsMeta(applyRobotsMeta(sample, NOINDEX_FOLLOW)) === NOINDEX_FOLLOW,
-    NOINDEX_FOLLOW,
+    "robots-replace-noindex-follow",
+    extractRobotsMeta(applyRobotsMeta(noindexFollow)) === INDEX_FOLLOW && !applyRobotsMeta(noindexFollow).includes("noindex"),
+    "noindex, follow replaced",
+  );
+  record(
+    "robots-replace-bare-noindex",
+    extractRobotsMeta(applyRobotsMeta(bareNoindex)) === INDEX_FOLLOW && !applyRobotsMeta(bareNoindex).includes("noindex"),
+    "bare noindex replaced",
   );
   record(
     "path-norton-index",
@@ -91,9 +101,9 @@ function main() {
     "Norton",
   );
   record(
-    "path-clifton-noindex",
+    "path-clifton-index",
     robotsDirectiveForPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-clifton") ===
-      NOINDEX_FOLLOW,
+      INDEX_FOLLOW,
     "Clifton",
   );
   record(
@@ -104,26 +114,48 @@ function main() {
     "Richmond X-Robots-Tag index, follow",
   );
   record(
-    "header-ecclesall-noindex",
+    "header-ecclesall-index",
     xRobotsTagForDeliveryPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-ecclesall") ===
-      NOINDEX_FOLLOW &&
+      INDEX_FOLLOW &&
       !isPilotCohortPath("/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-ecclesall"),
-    "Ecclesall X-Robots-Tag noindex, follow",
+    "Ecclesall X-Robots-Tag index, follow",
+  );
+  const spokeHtml = `<!DOCTYPE html>
+<html><head>
+<meta name="robots" content="noindex, follow" />
+<link rel="canonical" href="https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/whiston/" />
+</head><body></body></html>`;
+  const spokeFixed = prepareDeliveryPageHtml(spokeHtml, WHISTON_DELIVERY_URL);
+  record(
+    "spoke-canonical-self-referential",
+    extractRobotsMeta(spokeFixed) === INDEX_FOLLOW &&
+      extractCanonical(spokeFixed) === WHISTON_DELIVERY_URL &&
+      !spokeFixed.includes("/whiston/"),
+    extractCanonical(spokeFixed) || "missing canonical",
+  );
+  record(
+    "spoke-file-canonical",
+    deliveryCanonicalForHtmlFile(
+      "output/delivery-engine/delivery/reliable-direct-pharmacy-sheffield/whiston/index.html",
+      "https://content.pharmaconnect.uk",
+    ) === WHISTON_DELIVERY_URL,
+    "spoke folder file maps to the delivery URL",
   );
   record(
     "whiston-generated-from-kimberworth",
     (() => {
       const sample =
-        '<title>Prescription delivery for Kimberworth &amp; Greasbrough, Rotherham</title><link rel="canonical" href="https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-kimberworth" />';
+        '<title>Prescription delivery for Kimberworth &amp; Greasbrough, Rotherham</title><meta name="robots" content="noindex, follow" /><link rel="canonical" href="https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/kimberworth/" />';
       const generated = generateWhistonHtmlFromKimberworth(sample);
       return (
         generated.includes("Whiston") &&
         generated.includes("free-nhs-prescription-delivery-whiston") &&
         !generated.includes("kimberworth") &&
-        extractRobotsMeta(generated) === INDEX_FOLLOW
+        extractRobotsMeta(generated) === INDEX_FOLLOW &&
+        extractCanonical(generated) === WHISTON_DELIVERY_URL
       );
     })(),
-    "Whiston page generated with index, follow",
+    "Whiston page generated with index, follow and its own canonical",
   );
   record(
     "hub-lists-whiston",
@@ -157,7 +189,13 @@ function main() {
       path.join(outputRoot, "delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-clifton/index.html"),
       "utf8",
     );
-    record("output-clifton-robots", extractRobotsMeta(cliftonHtml) === NOINDEX_FOLLOW, extractRobotsMeta(cliftonHtml) || "missing");
+    record("output-clifton-robots", extractRobotsMeta(cliftonHtml) === INDEX_FOLLOW, extractRobotsMeta(cliftonHtml) || "missing");
+    record(
+      "output-clifton-canonical",
+      extractCanonical(cliftonHtml) ===
+        "https://content.pharmaconnect.uk/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-clifton",
+      extractCanonical(cliftonHtml) || "missing",
+    );
   }
 
   const failed = checks.filter((check) => !check.pass);

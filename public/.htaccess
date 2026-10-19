@@ -1,7 +1,7 @@
-# Stop the vhost-level X-Robots-Tag: index, follow from applying to
-# delivery-engine pages. Per-directory .htaccess files set the cohort value.
+# Delivery pages are indexable. Replace any vhost or inherited robots header.
 <IfModule mod_headers.c>
   <If "%{REQUEST_URI} =~ m#^/(delivery/|sitemap-pilot\.xml)#">
     Header always unset X-Robots-Tag
+    Header always set X-Robots-Tag "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
   </If>
 </IfModule>
