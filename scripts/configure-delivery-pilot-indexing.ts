@@ -1,19 +1,19 @@
 #!/usr/bin/env npx tsx
 /**
- * Apply the controlled delivery-engine pilot indexing cohort:
- * hub + 5 local pages index,follow; remaining suburb pages noindex,follow;
- * sitemap-pilot.xml contains strictly those 6 URLs. Generates Whiston from the
- * Kimberworth territory template when the live page is missing.
+ * Apply delivery-engine indexing:
+ * every published page is index,follow with a self-referential canonical;
+ * sitemap-pilot.xml still contains the hub plus five local URLs.
+ * Generates Whiston from the Kimberworth territory template when the live page is missing.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  applyRobotsMeta,
   listDeliveryPilotPages,
   listPilotSitemapPages,
   loadDeliveryPilotCohort,
   localHtmlRelativePath,
-  NOINDEX_FOLLOW,
+  minimalIndexableHtml,
+  prepareDeliveryPageHtml,
   type DeliveryPilotPage,
 } from "../src/pharmacy/deliveryEnginePilotIndexing.ts";
 import {
@@ -61,27 +61,26 @@ async function main(): Promise<void> {
 
   const kimberworth = pages.find((page) => page.slug === "kimberworth");
   const kimberworthHtml = kimberworth ? fetched.get(kimberworth.id) : null;
-  if (!kimberworthHtml) {
-    throw new Error("Kimberworth live HTML is required to generate the Whiston territory page");
-  }
 
   const results: Array<{ url: string; robots: string; source: "live" | "generated"; path: string }> = [];
 
   for (const page of pages) {
     let html = fetched.get(page.id) || null;
     let source: "live" | "generated" = html ? "live" : "generated";
-    if (page.slug === "whiston") {
+    if (!html && page.slug === "whiston") {
+      if (!kimberworthHtml) {
+        throw new Error("Kimberworth live HTML is required to generate the Whiston territory page");
+      }
       html = generateWhistonHtmlFromKimberworth(kimberworthHtml);
       source = "generated";
     } else if (page.kind === "hub" && html) {
       html = ensureWhistonOnHub(html);
-    } else if (!html && page.robots === NOINDEX_FOLLOW) {
-      throw new Error(`Missing live HTML for noindex suburb ${page.url}`);
     }
     if (!html) {
-      throw new Error(`Missing HTML for ${page.url}`);
+      html = minimalIndexableHtml(page);
+      source = "generated";
     }
-    html = applyRobotsMeta(html, page.robots);
+    html = prepareDeliveryPageHtml(html, page.url);
     materializeDeliveryPageFiles(page, html);
     results.push({ url: page.url, robots: page.robots, source, path: localHtmlRelativePath(page) });
   }
@@ -104,7 +103,7 @@ async function main(): Promise<void> {
     generatedAt: new Date().toISOString(),
     hubIndexFollow: 1,
     localIndexFollow: sitemapPages.filter((page) => page.kind === "suburb").length,
-    suburbNoindexFollow: pages.filter((page) => page.kind === "suburb" && page.robots === NOINDEX_FOLLOW).length,
+    pagesIndexFollow: pages.length,
     sitemapUrls: sitemapPages.map((page) => page.url),
     pages: results,
   };

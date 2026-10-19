@@ -6,7 +6,7 @@
     "id": "primary-delivery-hub",
     "label": "Primary Delivery Hub (Rotherham / Sheffield)",
     "path": "/delivery/reliable-direct-pharmacy-sheffield",
-    "robots": "index, follow"
+    "robots": "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
   },
   "indexLocalPages": [
     {
@@ -41,8 +41,7 @@
     }
   ],
   "suburbPathPrefix": "/delivery/reliable-direct-pharmacy-sheffield/free-nhs-prescription-delivery-",
-  "indexRobots": "index, follow",
-  "noindexRobots": "noindex, follow",
+  "indexRobots": "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1",
   "suburbSlugs": [
     "city-centre",
     "broomhall",

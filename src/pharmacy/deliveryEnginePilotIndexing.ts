@@ -1,6 +1,7 @@
 /**
  * Controlled pilot indexing for the NHS prescription delivery engine.
- * Hub + 5 local pages are indexable; every other suburb page is noindex, follow.
+ * Published delivery HTML is indexable. sitemap-pilot.xml still lists the
+ * hub plus five local pages; child pages canonicalise to their own delivery URL.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -8,8 +9,8 @@ import { fileURLToPath } from "node:url";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-export const INDEX_FOLLOW = "index, follow";
-export const NOINDEX_FOLLOW = "noindex, follow";
+export const INDEX_FOLLOW =
+  "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1";
 
 export interface DeliveryPilotLocalPage {
   id: string;
@@ -31,7 +32,6 @@ export interface DeliveryPilotCohort {
   indexLocalPages: DeliveryPilotLocalPage[];
   suburbPathPrefix: string;
   indexRobots: string;
-  noindexRobots: string;
   suburbSlugs: string[];
 }
 
@@ -42,7 +42,7 @@ export interface DeliveryPilotPage {
   slug: string | null;
   path: string;
   url: string;
-  robots: typeof INDEX_FOLLOW | typeof NOINDEX_FOLLOW;
+  robots: typeof INDEX_FOLLOW;
   inSitemap: boolean;
 }
 
@@ -104,7 +104,7 @@ export function listDeliveryPilotPages(cohort: DeliveryPilotCohort = loadDeliver
       slug,
       path: urlPath,
       url: joinUrl(cohort.baseUrl, urlPath),
-      robots: indexable ? INDEX_FOLLOW : NOINDEX_FOLLOW,
+      robots: INDEX_FOLLOW,
       inSitemap: indexable,
     });
   }
@@ -151,31 +151,39 @@ export function isPilotCohortPath(
 }
 
 export function robotsDirectiveForPath(
-  urlPath: string,
-  cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
-): typeof INDEX_FOLLOW | typeof NOINDEX_FOLLOW {
-  return isPilotCohortPath(urlPath, cohort) ? INDEX_FOLLOW : NOINDEX_FOLLOW;
+  _urlPath: string,
+  _cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
+): typeof INDEX_FOLLOW {
+  return INDEX_FOLLOW;
 }
 
 export function xRobotsTagForDeliveryPath(
   urlPath: string,
   cohort: DeliveryPilotCohort = loadDeliveryPilotCohort(),
-): typeof INDEX_FOLLOW | typeof NOINDEX_FOLLOW | null {
+): typeof INDEX_FOLLOW | null {
   if (!isDeliveryEnginePath(urlPath)) return null;
   if (normalizeDeliveryPath(urlPath) === "/sitemap-pilot.xml") return INDEX_FOLLOW;
   return robotsDirectiveForPath(urlPath, cohort);
 }
 
-const ROBOTS_META_RE = /<meta\s+name=["']robots["']\s+content=["'][^"']*["']\s*\/?>/i;
+const ROBOTS_META_RE = /<meta\b[^>]*\bname=["']robots["'][^>]*>/gi;
+const CANONICAL_LINK_RE = /<link\b[^>]*\brel=["']canonical["'][^>]*>/gi;
 
-export function robotsMetaTag(directive: string): string {
+export function robotsMetaTag(directive: string = INDEX_FOLLOW): string {
   return `<meta name="robots" content="${directive}" />`;
 }
 
-export function applyRobotsMeta(html: string, directive: string): string {
+export function canonicalLinkTag(url: string): string {
+  const href = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return `<link rel="canonical" href="${href}" />`;
+}
+
+export function applyRobotsMeta(html: string, directive: string = INDEX_FOLLOW): string {
   const tag = robotsMetaTag(directive);
-  if (ROBOTS_META_RE.test(html)) {
-    return html.replace(ROBOTS_META_RE, tag);
+  const re = new RegExp(ROBOTS_META_RE.source, "gi");
+  if (re.test(html)) {
+    re.lastIndex = 0;
+    return html.replace(re, tag);
   }
   if (/<meta\s+name=["']viewport["'][^>]*>/i.test(html)) {
     return html.replace(/(<meta\s+name=["']viewport["'][^>]*>)/i, `$1\n${tag}`);
@@ -186,9 +194,68 @@ export function applyRobotsMeta(html: string, directive: string): string {
   return `${tag}\n${html}`;
 }
 
+export function applyCanonicalLink(html: string, url: string): string {
+  const tag = canonicalLinkTag(url);
+  const re = new RegExp(CANONICAL_LINK_RE.source, "gi");
+  if (re.test(html)) {
+    re.lastIndex = 0;
+    return html.replace(re, tag);
+  }
+  const robots = /<meta\b[^>]*\bname=["']robots["'][^>]*>/i;
+  if (robots.test(html)) {
+    return html.replace(robots, (match) => `${match}\n${tag}`);
+  }
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/(<head[^>]*>)/i, `$1\n${tag}`);
+  }
+  return `${tag}\n${html}`;
+}
+
+/** Indexable robots meta plus a self-referential canonical for the published URL. */
+export function prepareDeliveryPageHtml(html: string, canonicalUrl: string): string {
+  return applyCanonicalLink(applyRobotsMeta(html, INDEX_FOLLOW), canonicalUrl);
+}
+
 export function extractRobotsMeta(html: string): string | null {
-  const match = html.match(/<meta\s+name=["']robots["']\s+content=["']([^"']*)["']/i);
+  const match = html.match(/<meta\b[^>]*\bname=["']robots["'][^>]*\bcontent=["']([^"']*)["']/i)
+    ?? html.match(/<meta\b[^>]*\bcontent=["']([^"']*)["'][^>]*\bname=["']robots["']/i);
   return match?.[1] ?? null;
+}
+
+export function extractCanonical(html: string): string | null {
+  const match = html.match(/<link\b[^>]*\brel=["']canonical["'][^>]*\bhref=["']([^"']+)["']/i)
+    ?? html.match(/<link\b[^>]*\bhref=["']([^"']+)["'][^>]*\brel=["']canonical["']/i);
+  return match?.[1]?.replace(/&amp;/g, "&") ?? null;
+}
+
+/**
+ * Canonical for a generated delivery file. Spoke folders such as `whiston/`
+ * publish at `free-nhs-prescription-delivery-whiston`, not the parent folder.
+ */
+export function deliveryCanonicalForHtmlFile(filePath: string, baseUrl: string): string | null {
+  const normalized = filePath.replace(/\\/g, "/");
+  let rel = "";
+  for (const marker of ["/output/delivery-engine/", "/public/"]) {
+    const idx = normalized.indexOf(marker);
+    if (idx >= 0) {
+      rel = normalized.slice(idx + marker.length);
+      break;
+    }
+  }
+  if (!rel) {
+    const deliveryIdx = normalized.lastIndexOf("delivery/");
+    if (deliveryIdx >= 0) rel = normalized.slice(deliveryIdx);
+  }
+  if (!rel.endsWith(".html")) return null;
+  let route = rel.replace(/\/index\.html$/, "").replace(/\.html$/, "");
+  const hub = "delivery/reliable-direct-pharmacy-sheffield";
+  if (route === hub || route.startsWith(`${hub}/`)) {
+    const rest = route.slice(hub.length).replace(/^\//, "");
+    if (rest && !rest.startsWith("free-nhs-prescription-delivery-") && !rest.includes("/")) {
+      route = `${hub}/free-nhs-prescription-delivery-${rest}`;
+    }
+  }
+  return `${baseUrl.replace(/\/+$/, "")}/${route}`;
 }
 
 export function buildPilotSitemapXml(
@@ -219,9 +286,9 @@ export function minimalIndexableHtml(page: DeliveryPilotPage): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-${robotsMetaTag(page.robots)}
+${robotsMetaTag(INDEX_FOLLOW)}
 <title>${page.label}</title>
-<link rel="canonical" href="${page.url}" />
+${canonicalLinkTag(page.url)}
 </head>
 <body>
 <main>
